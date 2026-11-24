@@ -222,6 +222,7 @@ export interface ProviderLoad {
   providerHold?: ProviderHold;
   chats?: ChatLoad[];
   plan?: string;
+  ownerSlots?: Record<string, number>;
 }
 
 export interface LimitsReport {
@@ -260,14 +261,26 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
         ? [undefined, ...Object.keys(config.hosts)].filter(host => !host || config.hosts[host]?.providers.includes(agent)).flatMap(host => chatLoads(config, agent, live, host))
         : chatLoads(config, agent, live);
       const plan = plans?.[agent];
+      const ownerSlots: Record<string, number> = Object.create(null);
+      for (const slot of facts.slots) if (slot.owner && (slot.kind === undefined || slot.kind === 'starting')) ownerSlots[slot.owner] = (ownerSlots[slot.owner] ?? 0) + 1;
       const queuedTasks = queue.filter(e => e.agent === agent).map(e => e.task);
       const slotTasks = facts.slots.filter(w => w.kind === undefined || w.kind === 'starting').map(w => rows?.find(r => r.windowName === w.window)?.task ?? w.window.toUpperCase());
       const reportWindows = facts.reports.filter(r => facts.slots.some(w => w.window === r.windowName && !w.kind)).map(r => r.task);
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, slotTasks, queuedTasks,
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, slotTasks, queuedTasks, ownerSlots,
         ...(rows ? { active: facts.active.map(r => r.task), reportWindows } : {}), ...(chats.length ? { chats } : {}), ...(plan ? {plan: planLine(plan, now)} : {}), ...(holds[agent] ? {providerHold: holds[agent]} : {}),
         free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queuedTasks.length, queueHold: config.usage.queueHold[agent] ?? null };
     }),
   };
+}
+
+export function chatUsageLine(report: LimitsReport, owner: string): string {
+  const usage = report.providers.map(provider => {
+    const chat = provider.chats?.find(load => load.chat === owner && (!load.host || load.host === 'local'));
+    const used = chat?.used ?? provider.ownerSlots?.[owner] ?? 0;
+    const ceiling = provider.limit === 'off' ? 0 : chat?.share ?? '∞';
+    return `${provider.agent} ${used}/${ceiling}`;
+  });
+  return `${owner.slice('chat:'.length)}: ${usage.join(', ')} (globalnie wolne ${report.providers.map(provider => provider.free ?? '∞').join('/')})`;
 }
 
 export function renderLimits(report: LimitsReport): string[] {

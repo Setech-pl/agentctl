@@ -7,7 +7,7 @@ import { loadGlobalConfig } from '../src/core/config.ts';
 import { ConfigStore } from '../src/core/config-store.ts';
 import { Context } from '../src/core/context.ts';
 import { collectLimits } from '../src/core/limits.ts';
-import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { MCP_TOOLS, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { providerHolds } from '../src/core/provider-hold.ts';
 import { OWNER_IDENTITY, channelMessages, messageWithBody } from '../src/core/wall.ts';
 import { reloadConfig } from '../src/core/watch.ts';
@@ -28,6 +28,24 @@ function fixture(name: string, yaml: string) {
   const post = (kind: string) => channelMessages(config, 'agentctl').filter(m => m.kind === kind);
   return { config, ctx, runner, load, cli, deps, notifications, post };
 }
+
+test('FIELD0256-CHAT-USAGE: snapshots and direct reads expose the effective chat quota', async () => {
+  const f = fixture('chat-usage', `providers: [claude, codex, kimi]
+limits: {claude: 3, codex: 9, kimi: 3}
+quotas:
+  overprovision: 1
+  chats: {vs65: {share: 20}}
+`);
+  const as = 'chat:vs65';
+  const line = 'vs65: claude 0/1, codex 0/2, kimi 0/1 (globalnie wolne 3/9/3)';
+  for (const name of ['capacity', 'limits', 'status']) assert.ok((await tool(name).run(f.deps, {as})).text.endsWith(line), name);
+  await publishMcpSnapshot(f.ctx);
+  for (const name of ['capacity', 'limits', 'status']) {
+    const result = await tool(name).run(f.deps, {as, format: 'json'});
+    assert.equal(JSON.parse(result.text).chat_usage, line, name);
+  }
+  assert.doesNotMatch((await tool('status').run(f.deps, {})).text, /globalnie wolne/);
+});
 
 test('LIMITS0255-OWNER: an MCP confirm queues one request; only an owner decision applies it', async () => {
   const f = fixture('approve', `limits: {claude: 7, codex: 10}

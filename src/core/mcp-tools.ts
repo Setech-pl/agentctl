@@ -101,7 +101,7 @@ import { collectUsage } from './usage-report.ts';
 import { planResume, resumeTasks } from './resume.ts';
 import { planGc, renderGc, gcResultLine, gcView } from './gc.ts';
 import { chatEventScope, collectEvents, renderEvents } from './chat-events.ts';
-import { QUOTA_DECISION_HINT, applySetLimits, collectLimits, compactLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
+import { QUOTA_DECISION_HINT, applySetLimits, chatUsageLine, collectLimits, compactLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
 import { requestLimitChange } from './limit-requests.ts';
 import { planLine } from './usage-report.ts';
@@ -2579,19 +2579,47 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     return ok(`${note}\n${text}`);
   } catch { return undefined; }
 }
+
+const chatUsageTools = new Set(['status', 'capacity', 'limits']);
+function chatUsageOwner(ctx: Context, as: unknown): string | undefined {
+  if (typeof as !== 'string' || !as.startsWith('chat:')) return undefined;
+  const owner = chatOwner(as);
+  if (!owner) return undefined;
+  const name = owner.slice(5);
+  return Object.hasOwn(ctx.config.wall.chats, name) || Object.hasOwn(ctx.config.quotas?.chats ?? {}, name) ? owner : undefined;
+}
+
 const snapshotTools = new Set(['status', 'queue_list', 'capacity', 'limits', 'config_show', 'doctor']);
 for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
   const run = tool.run;
   tool.run = async (deps, args) => {
     const ctx = deps.context(() => {});
     const cached = await snapshotRead(deps, ctx, tool.name, args);
-    if (cached) return cached;
+    const owner = chatUsageTools.has(tool.name) ? chatUsageOwner(ctx, args.as) : undefined;
+    let footer: string | undefined;
+    if (owner) {
+      let limits: ReturnType<typeof collectLimits> | undefined;
+      const at = watchSnapshotTime(ctx.config);
+      if (cached && at !== undefined && !watchSnapshotWarning(at, ctx.runner.now())) {
+        try { limits = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8')).limits; } catch { /* snapshot replaced */ }
+      }
+      limits ??= collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
+      footer = chatUsageLine(limits, owner);
+    }
+    const withFooter = (result: ToolResult): ToolResult => {
+      if (!footer || result.isError) return result;
+      if (args.format === 'json' || args.detail === true) {
+        try { return { ...result, text: JSON.stringify({ ...JSON.parse(result.text), chat_usage: footer }, null, 2) }; } catch { /* bounded text fallback */ }
+      }
+      return { ...result, text: `${result.text}\n${footer}` };
+    };
+    if (cached) return withFooter(cached);
     const result = await run(deps, args);
     const at = watchSnapshotTime(ctx.config);
     const note = ['Watch snapshot unavailable/stale; bounded fallback path. / Snapshot watch niedostępny lub stary; odczyt ograniczony budżetem.',
       at === undefined ? '' : `Watch snapshot age: ${Math.max(0, (ctx.runner.now() - at) / 1000).toFixed(1)} s.`,
       at === undefined ? '' : watchSnapshotWarning(at, ctx.runner.now())].filter(Boolean).join(' ');
-    try { const data = JSON.parse(result.text); return { ...result, text: JSON.stringify(Array.isArray(data) ? data.map((item, index) => index === 0 ? {...item, snapshot_note: note} : item) : { ...data, snapshot_note: note }, null, 2) }; } catch { return { ...result, text: `${result.text}\n${note}` }; }
+    try { const data = JSON.parse(result.text); return withFooter({ ...result, text: JSON.stringify(Array.isArray(data) ? data.map((item, index) => index === 0 ? {...item, snapshot_note: note} : item) : { ...data, snapshot_note: note }, null, 2) }); } catch { return withFooter({ ...result, text: `${result.text}\n${note}` }); }
   };
 }
 
@@ -2679,7 +2707,7 @@ for (const tool of MCP_TOOLS) {
 /** Identity is accepted uniformly. Tools that do not consume it keep it out of confirmation hashes. */
 for (const tool of MCP_TOOLS) {
   tool.input = {as: z.string().max(81).optional().describe('Caller identity for WALL/events; accepted and ignored elsewhere.'), ...tool.input};
-  if (tool.name.startsWith('wall_') || ['events_since', 'new', 'queue', 'set_limits'].includes(tool.name)) continue;
+  if (tool.name.startsWith('wall_') || chatUsageTools.has(tool.name) || ['events_since', 'new', 'queue', 'set_limits'].includes(tool.name)) continue;
   const run = tool.run;
   tool.run = (deps, args) => {const {as: _as, ...input} = args; return run(deps, input);};
 }
