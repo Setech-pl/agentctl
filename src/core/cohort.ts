@@ -255,10 +255,11 @@ export async function setCohortOf(ctx: Context, inputs: string[], cohort: Cohort
   for (const input of inputs) {
     const wanted = input.trim().toLowerCase();
     const exact = known.filter((t) => t.toLowerCase() === wanted);
-    const hits = exact.length > 0 ? exact : known.filter((t) => wanted !== '' && t.toLowerCase().startsWith(wanted));
+    const archived = exact.length === 0 && listArchivedRecords(config).some((r) => r.task.toLowerCase() === wanted);
+    const hits = exact.length > 0 || archived ? exact : known.filter((t) => wanted !== '' && t.toLowerCase().startsWith(wanted));
     if (hits.length === 1) found.push(hits[0] as string);
     else if (hits.length > 1) problems.push(`"${input}" fits more than one task: ${hits.join(', ')}`);
-    else if (listArchivedRecords(config).some((r) => r.task.toLowerCase() === wanted)) problems.push(`${input} is archived: its state is out of reach of agentctl`);
+    else if (archived) problems.push(`${input} is archived: its state is out of reach of agentctl`);
     else problems.push(`no task "${input}"`);
   }
   if (problems.length > 0) throw new AgentctlError(`Cannot change the cohort:\n${problems.map((p) => `  - ${p}`).join('\n')}`, 'See "agentctl status --all" and "agentctl queue list".');

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
-import { describeTargets, matchTask } from './resolve.ts';
+import { describeTargets, matchKnownTask } from './resolve.ts';
 import type { TaskTarget } from './resolve.ts';
 import { archiveDir, listArchivedRecords, listTaskRecords, setHeaderField, taskFile } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
@@ -27,7 +27,7 @@ export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolea
   const targets: TaskTarget[] = records.map((r) => ({ task: r.task, window: r.window, alive: live.has(r.window) }));
   const chosen: typeof records = [];
   for (const arg of taskArgs) {
-    const match = matchTask(arg, targets);
+    const match = matchKnownTask(ctx.config, arg, targets);
     if (match.kind === 'many') throw new AgentctlError(`"${arg}" fits more than one task:\n${describeTargets(match.matches).join('\n')}`, 'Type more of the task ID.');
     if (match.kind === 'none') throw new AgentctlError(`no task "${arg}" with a state file`, 'See "agentctl status --all". A window without a state file (orphan) cannot be hidden: restore it with "agentctl adopt".');
     const record = records.find((r) => r.window === match.target.window);
@@ -46,7 +46,7 @@ export async function setHidden(ctx: Context, taskArgs: string[], hidden: boolea
 export async function setPinned(ctx: Context, inputs: string[], pin: boolean, preview = false) {
   const current = listTaskRecords(ctx.config), records = [...current, ...listArchivedRecords(ctx.config).filter(r => !current.some(c => c.window === r.window))];
   const chosen = inputs.map(input => {
-    const match = matchTask(input, records.map(r => ({task: r.task, window: r.window, alive: false})));
+    const match = matchKnownTask(ctx.config, input, records.map(r => ({task: r.task, window: r.window, alive: false})));
     if (match.kind !== 'one') throw new AgentctlError(`pin: ${input}: ${match.kind === 'many' ? 'ambiguous task ID' : 'no task state'}`);
     return records.find(r => r.window === match.target.window)!;
   });

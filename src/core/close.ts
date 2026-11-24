@@ -14,7 +14,7 @@ import { readTaskRecord, readTaskRecordById, setHeaderFields, taskFile } from '.
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, Problems, windowName } from './util.ts';
 import { cleanupClosedWorktrees } from './close-cleanup.ts';
-import { listTargets, matchTask } from './resolve.ts';
+import { listTargets, matchKnownTask } from './resolve.ts';
 import { assertCheckoutNotBorrowed } from './readonly-review.ts';
 
 export interface CloseOptions {
@@ -165,7 +165,7 @@ export async function resolveCloseTasks(ctx: Context, inputs: string[]): Promise
   return inputs.map(input => {
     const exact = readTaskRecordById(ctx.config, input.trim());
     if (exact) return exact.task;
-    const match = matchTask(input, targets);
+    const match = matchKnownTask(ctx.config, input, targets);
     if (match.kind === 'one') return match.target.task;
     if (match.kind === 'many') throw new AgentctlError(`"${input}" fits more than one task: ${match.matches.map(m => m.task).join(', ')}`);
     throw new AgentctlError(`no task "${input}"`, 'See "agentctl status --all".');

@@ -18,7 +18,7 @@ import type { Context } from './context.ts';
 import { planEventWiring } from './events.ts';
 import type { SelfArgv } from './events.ts';
 import { liveWindows } from './plan.ts';
-import { matchTask } from './resolve.ts';
+import { matchKnownTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
@@ -85,7 +85,7 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   if (typed.length > 0) {
     const targets = candidates.map((c) => ({ task: c.task, window: c.window, alive: false }));
     chosen = typed.map((input) => {
-      const m = matchTask(input, targets);
+      const m = matchKnownTask(config, input, targets);
       if (m.kind === 'one') return candidates.find((c) => c.window === m.target.window) as ResumeCandidate;
       if (m.kind === 'many') throw new AgentctlError(`"${input}" fits more than one task: ${m.matches.map((x) => x.task).join(', ')}`, 'Use the full task ID.');
       throw new AgentctlError(`${input} cannot be resumed`, candidates.length > 0 ? `Resumable: ${candidates.map((c) => c.task).join(', ')}.` : 'No active task has a worktree and no window. "agentctl status" shows the tasks.');

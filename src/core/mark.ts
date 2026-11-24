@@ -3,7 +3,7 @@ import { allRecords } from './usage.ts';
 import { findCohort } from './cohort.ts';
 import { markTask } from './history.ts';
 import type { Result } from './history.ts';
-import { matchTask } from './resolve.ts';
+import { matchKnownTask } from './resolve.ts';
 import { AgentctlError, cohortKey } from './util.ts';
 
 export interface MarkSelection { task?: string; tasks?: string[]; cohort?: string }
@@ -19,7 +19,7 @@ export function planMark(ctx: Context, selection: MarkSelection): string[] {
     return [...new Set(ids)];
   }
   return [...new Set((tasks ?? [task!]).map(id => {
-    const match = matchTask(id, records.map(r => ({ task: r.task, window: r.window, alive: false })));
+    const match = matchKnownTask(ctx.config, id, records.map(r => ({ task: r.task, window: r.window, alive: false })));
     if (match.kind !== 'one') throw new AgentctlError(match.kind === 'none' ? `no task "${id}" with a state file` : `ambiguous task "${id}"`);
     return match.target.task;
   }))];

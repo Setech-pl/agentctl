@@ -1,5 +1,7 @@
 import type { Context } from './context.ts';
-import { listTaskRecords } from './taskstore.ts';
+import type { GlobalConfig } from './config.ts';
+import { readQueue } from './queue.ts';
+import { listTaskRecords, readTaskRecordById } from './taskstore.ts';
 import { AgentctlError } from './util.ts';
 import { WATCH_WINDOW } from './watch.ts';
 import { BOARD_WINDOW, MANAGER_WINDOW } from './windows.ts';
@@ -18,12 +20,20 @@ export type TaskMatch = { kind: 'one'; target: TaskTarget } | { kind: 'many'; ma
 export function matchTask(input: string, targets: TaskTarget[]): TaskMatch {
   const wanted = input.trim().toLowerCase();
   if (wanted === '') return { kind: 'none' };
-  const exact = targets.find((t) => t.task.toLowerCase() === wanted || t.window.toLowerCase() === wanted);
+  const exact = targets.find((t) => t.task.toLowerCase() === wanted) ?? targets.find((t) => t.window.toLowerCase() === wanted);
   if (exact) return { kind: 'one', target: exact };
   const prefixed = targets.filter((t) => t.task.toLowerCase().startsWith(wanted) || t.window.toLowerCase().startsWith(wanted));
   if (prefixed.length === 1) return { kind: 'one', target: prefixed[0] as TaskTarget };
   if (prefixed.length > 1) return { kind: 'many', matches: prefixed };
   return { kind: 'none' };
+}
+
+/** An exact ID outside the operation's eligible set must block all prefix matches. */
+export function matchKnownTask(config: GlobalConfig, input: string, targets: TaskTarget[]): TaskMatch {
+  const wanted = input.trim().toLowerCase();
+  if (targets.some(t => t.task.toLowerCase() === wanted)) return matchTask(input, targets);
+  if (readTaskRecordById(config, wanted) || readQueue(config).some(e => e.task.toLowerCase() === wanted)) return { kind: 'none' };
+  return matchTask(input, targets);
 }
 
 /** Tasks with a state file plus the windows of the session that have none (orphans); windows "watch", "board" and "manager" are not tasks. */
@@ -54,12 +64,12 @@ export function describeTargets(targets: TaskTarget[]): string[] {
  */
 export async function resolveRunningTask(ctx: Context, input: string, windows?: string[]): Promise<TaskTarget> {
   const targets = await listTargets(ctx, windows);
-  const running = matchTask(input, targets.filter((t) => t.alive));
+  const running = matchKnownTask(ctx.config, input, targets.filter((t) => t.alive));
   if (running.kind === 'one') return running.target;
   if (running.kind === 'many') {
     throw new AgentctlError(`"${input}" fits more than one task:\n${describeTargets(running.matches).join('\n')}`, 'Type more of the task ID.');
   }
-  const any = matchTask(input, targets);
+  const any = matchKnownTask(ctx.config, input, targets);
   if (any.kind === 'one') {
     throw new AgentctlError(`${any.target.task} has no tmux window in session "${ctx.config.session}"`, 'The task is closed or dead; see "agentctl status". "agentctl pull" reads its report.');
   }
@@ -74,7 +84,7 @@ export async function resolveRunningTask(ctx: Context, input: string, windows?: 
 
 /** The ID of any task agentctl knows, from what the user typed (case does not matter, a unique prefix is enough). */
 export async function resolveTask(ctx: Context, input: string): Promise<string> {
-  const match = matchTask(input, await listTargets(ctx));
+  const match = matchKnownTask(ctx.config, input, await listTargets(ctx));
   if (match.kind === 'one') return match.target.task;
   throw new AgentctlError(match.kind === 'many' ? `"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}` : `no task "${input}"`, 'See "agentctl status".');
 }

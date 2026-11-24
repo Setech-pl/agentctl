@@ -2,7 +2,7 @@ import { promptQueueView } from './prompt-queue.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { clip, collapsedQuestion, collapsedQuestionText, extractQuestion, MAX_QUESTION } from './events.ts';
 import type { Context } from './context.ts';
-import { listTargets, matchTask, resolveRunningTask } from './resolve.ts';
+import { listTargets, matchKnownTask, resolveRunningTask } from './resolve.ts';
 import { readStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
 import { guessAgent } from './status.ts';
 import { screenMetadata, contentLines } from './tmux.ts';
@@ -61,7 +61,7 @@ const startUnfinished = (record: TaskRecord | null | undefined): boolean => ['ne
 
 /** A task whose window is gone but whose failed start left a capture: peek reads that instead of failing. */
 async function peekStartFailure(ctx: Context, taskArg: string, count: number): Promise<PeekResult | undefined> {
-  const match = matchTask(taskArg, await listTargets(ctx));
+  const match = matchKnownTask(ctx.config, taskArg, await listTargets(ctx));
   if (match.kind !== 'one') return undefined;
   const text = readStartFailureScreen(ctx.config, match.target.window);
   if (text === undefined) return undefined;

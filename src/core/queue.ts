@@ -180,11 +180,11 @@ export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
 /** The entries that wait for their turn, in turn order. */
 export const waiting = (entries: QueueEntry[]): QueueEntry[] => entries.filter((e) => e.status === 'queued');
 
-export function findEntry(config: Pick<GlobalConfig, 'path'>, input: string): QueueEntry {
+export function findEntry(config: GlobalConfig, input: string): QueueEntry {
   const entries = readQueue(config);
   const wanted = input.trim().toLowerCase();
   const exact = entries.filter((e) => e.task.toLowerCase() === wanted);
-  const found = exact.length > 0 ? exact : entries.filter((e) => e.task.toLowerCase().startsWith(wanted) && wanted !== '');
+  const found = exact.length > 0 || readTaskRecordById(config, wanted) ? exact : entries.filter((e) => e.task.toLowerCase().startsWith(wanted) && wanted !== '');
   if (found.length === 1) return found[0] as QueueEntry;
   if (found.length > 1) throw new AgentctlError(`"${input}" fits more than one queued task: ${found.map((e) => e.task).join(', ')}`, 'Use the full task ID.');
   throw new AgentctlError(`${input} is not in the queue`, entries.length > 0 ? `In the queue: ${entries.map((e) => e.task).join(', ')}` : 'The queue is empty. "agentctl queue list" shows it.');

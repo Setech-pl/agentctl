@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0256-EXACT | An exact task ID outside a command’s eligible set could select a review by prefix. | `tests/queue-mcp.test.ts` (`^FIELD0256-EXACT:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-SPEC | task_spec missed queued-only work and could show the review spec for the exact author ID. | `tests/queue-mcp.test.ts` (`^FIELD0256-SPEC:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | LIMITS0255-OWNER | A chat confirmation could change shared limits without an owner decision in the CLI or board. | `tests/owner-limits.test.ts` (`^LIMITS0255-OWNER:`) | 0.27.0 | fails on v0.26.0 (1 failing of 1) |
 | LIMITS0255-SHARES | Per-chat absolute ceilings stayed fixed after global changes and needed manual recalculation. | `tests/owner-limits.test.ts` (`^LIMITS0255-SHARES:`) | 0.27.0 | fails on v0.26.0 (1 failing of 1) |

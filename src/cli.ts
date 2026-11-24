@@ -50,7 +50,7 @@ import { CLAUDE_KINDS, parseJson } from './core/events.ts';
 import type { ClaudeKind, SelfArgv } from './core/events.ts';
 import { moveTask } from './core/move.ts';
 import { peekTask, PEEK_LINES } from './core/peek.ts';
-import { listTargets, matchTask } from './core/resolve.ts';
+import { listTargets, matchKnownTask, matchTask } from './core/resolve.ts';
 import type { TaskTarget } from './core/resolve.ts';
 import { migrateLegacyState } from './core/taskstore.ts';
 import { newTasks } from './core/new.ts';
@@ -311,7 +311,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   /** A task ID from what the user typed: any task agentctl knows (a unique prefix is enough). */
   const resolveAnyTask = async (ctx: Context, input: string): Promise<string> => {
-    const match = matchTask(input, await listTargets(ctx));
+    const match = matchKnownTask(ctx.config, input, await listTargets(ctx));
     if (match.kind === 'one') return match.target.task;
     throw new AgentctlError(match.kind === 'many' ? `"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}` : `no task "${input}"`, 'See "agentctl status".');
   };
@@ -339,9 +339,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       if (open.length === 0) throw new AgentctlError(`cohort ${meta.name} has no open tasks`, 'See "agentctl cohort show ' + meta.name + '".');
       return open;
     }
-    const outside = typed.filter((t) => !open.some((o) => o.toLowerCase() === t.toLowerCase() || o.toLowerCase().startsWith(t.toLowerCase())));
+    const targets = open.map(task => ({ task, window: task.toLowerCase(), alive: false }));
+    const selected = typed.map(t => matchKnownTask(ctx.config, t, targets));
+    const outside = typed.filter((_, i) => selected[i]?.kind !== 'one');
     if (outside.length > 0) throw new AgentctlError(`not an open task of cohort ${meta.name}: ${outside.join(', ')}`, `Its open tasks: ${open.join(', ') || 'none'}.`);
-    return typed;
+    return selected.flatMap(m => m.kind === 'one' ? [m.target.task] : []);
   };
 
   /** Window "watch" exists in the agentctl session: something is there to start the queued tasks. */

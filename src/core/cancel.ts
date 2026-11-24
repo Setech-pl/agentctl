@@ -5,7 +5,7 @@ import { removeWorktrees } from './close.ts';
 import { recordEvent } from './history.ts';
 import { cancelFields, dropEntry, readQueue, writeCancelledRecord } from './queue.ts';
 import type { QueueEntry } from './queue.ts';
-import { matchTask } from './resolve.ts';
+import { matchKnownTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { listTaskRecords, readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
@@ -93,7 +93,7 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     if (!chosen.some((c) => c.task === task)) chosen.push(partnerOf ? { task, partnerOf } : { task });
   };
   for (const input of inputs) {
-    const match = matchTask(input, targets);
+    const match = matchKnownTask(config, input, targets);
     if (match.kind === 'many') throw new AgentctlError(`"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}`, 'Type more of the task ID.');
     if (match.kind === 'none') throw new AgentctlError(`no task "${input}"`, 'See "agentctl status" and "agentctl queue list".');
     const task = match.target.task;

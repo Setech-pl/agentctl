@@ -8,9 +8,9 @@ import { loadGlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { auditPath, MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, McpToolDef, ToolResult } from '../src/core/mcp-tools.ts';
-import { readQueue } from '../src/core/queue.ts';
+import { readQueue, saveEntry } from '../src/core/queue.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
-import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch, watcherValidates } from './helpers.ts';
+import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch, watcherValidates } from './helpers.ts';
 
 const scratch = useScratch();
 const tool = (name: string): McpToolDef => MCP_TOOLS.find((t) => t.name === name) as McpToolDef;
@@ -54,6 +54,34 @@ function setup(name: string, extraYaml = '') {
 }
 
 describe('mcp: queue read tools', () => {
+  it('FIELD0256-EXACT: registry and CLI keep exact task IDs across lifecycle states', async () => {
+    const t = setup('exact-id', 'mcp: {allow: [queue, queue_retry, interrupt]}\n');
+    const id = 'FACADE-AREA-DOCS-2', review = id + '-REVIEW';
+    const spec = t.spec(review);
+    await t.call('queue', { spec });
+    await t.call('queue', { spec, confirm: true });
+    await watcherValidates(t.config, t.runner);
+    const ctx = new Context(t.runner, t.config, () => {});
+    const entry = readQueue(t.config)[0]!;
+    await saveEntry(ctx, { ...entry, status: 'failed' });
+    seedTask(t.config, id, { closed: true });
+    t.running(review, []);
+
+    assert.deepEqual(MCP_TOOLS.filter(tool => tool.input.task || tool.input.tasks).map(tool => tool.name).sort(),
+      'adopt answer cancel close cohort_add cohort_remove get_report hide interrupt mark move overlap peek pin queue_retry queue_rm queue_show queue_up report report_from resume send task_spec unblock unhide unpin'.split(' '));
+    for (const name of ['queue_retry', 'queue_show', 'peek', 'interrupt', 'hide', 'resume']) {
+      const input = tool(name).input.tasks ? { tasks: [id.toLowerCase()] } : { task: id.toLowerCase() };
+      assert.equal((await t.call(name, input)).isError, true, name);
+    }
+    const blocked = await runCli(t.config, t.runner, ['queue', 'retry', id.toLowerCase()]);
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.stderr, /not in the queue/);
+    assert.equal(readQueue(t.config)[0]?.status, 'failed');
+    assert.equal((await runCli(t.config, t.runner, ['peek', id])).code, 1);
+    assert.equal((await runCli(t.config, t.runner, ['peek', review])).code, 0);
+    assert.equal((await t.call('queue_show', { task: review })).isError, undefined);
+  });
+
   it('FIELD0256-SPEC: task_spec reads a queued-only spec by exact ID and unique prefix', async () => {
     const t = setup('queued-spec', 'mcp: {allow: [queue]}\n');
     const spec = t.spec('FACADE-AREA-DOCS-2', 'weight: heavy\n');

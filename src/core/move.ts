@@ -19,7 +19,7 @@ import type { Order } from './equivalents.ts';
 import type { SelfArgv } from './events.ts';
 import { newTasks } from './new.ts';
 import type { NewResult } from './new.ts';
-import { listTargets, matchTask, describeTargets } from './resolve.ts';
+import { listTargets, matchKnownTask, describeTargets } from './resolve.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { readTaskPrompt, readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
@@ -95,7 +95,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
     return { queueBefore: JSON.stringify(entry), queued: { ...entry, host: targetHost, spec: renderRawSpec(raw) }, sourceSpec, targetHost, from: recordFromSpec(fromSpec, config, ctx.runner.now()), to: { agent: entry.agent, model: entry.model, effort: entry.effort as Order['effort'] }, task: entry.task, window: windowName(entry.task), prompt: raw.prompt };
   }
   const targets = await listTargets(ctx);
-  const match = matchTask(taskArg, targets);
+  const match = matchKnownTask(config, taskArg, targets);
   if (match.kind === 'many') throw new AgentctlError(`"${taskArg}" fits more than one task:\n${describeTargets(match.matches).join('\n')}`, 'Type more of the task ID.');
   if (match.kind === 'none') throw new AgentctlError(`no task "${taskArg}"`, 'See "agentctl status".');
   const from = readTaskRecord(config, match.target.window);

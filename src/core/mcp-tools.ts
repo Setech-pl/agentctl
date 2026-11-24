@@ -80,7 +80,7 @@ import { describeMove, moveTask, planMove } from './move.ts';
 import { interruptTask } from './interrupt.ts';
 import { peekTask } from './peek.ts';
 import { joinReports, markPulled, noReadyMessage, selectReady } from './pull.ts';
-import { describeTargets, matchTask, resolveRunningTask } from './resolve.ts';
+import { describeTargets, matchKnownTask, matchTask, resolveRunningTask } from './resolve.ts';
 import { classifyScreen } from './state.ts';
 import { inspectField } from './input-field.ts';
 import { applyWithLiveHosts, observeHostWindows } from './host-runtime.ts';
@@ -281,7 +281,7 @@ function findRecord(ctx: Context, arg: string): TaskRecord {
   const seen = new Set<string>();
   const unique = live.filter((r) => (seen.has(r.window) ? false : (seen.add(r.window), true)));
   const targets = unique.map((r) => ({ task: r.task, window: r.window, alive: false }));
-  const match = matchTask(arg, targets);
+  const match = matchKnownTask(ctx.config, arg, targets);
   if (match.kind === 'many') throw new AgentctlError(`"${arg}" fits more than one task:\n${describeTargets(match.matches).join('\n')}`, 'Use the full task ID.');
   if (match.kind === 'none') throw new AgentctlError(`no task "${arg}"`, 'Call status (all: true lists closed and hidden tasks too).');
   return unique.find((r) => r.window === match.target.window) as TaskRecord;
@@ -2078,8 +2078,8 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
   const tasks = selectedIds.length && !args.cohort ? selectedIds.flatMap(id => { try { return [findRecord(ctx, id)]; } catch { return []; } }) : [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
   const queue = readQueue(ctx.config);
   const windows = await ctx.tmux.windows();
-  const selected = [...(Array.isArray(args.tasks) ? args.tasks as string[] : []), ...(typeof args.task === 'string' ? [args.task] : [])];
-  const fits = (r: { task: string; cohort?: string }) => args.cohort ? cohortKey(r.cohort ?? '') === cohortKey(args.cohort as string) : selected.length ? selected.some(id => r.task.toLowerCase().startsWith(id.toLowerCase())) : true;
+  const selected = new Set(tasks.map(r => r.task));
+  const fits = (r: { task: string; cohort?: string }) => args.cohort ? cohortKey(r.cohort ?? '') === cohortKey(args.cohort as string) : !selectedIds.length || selected.has(r.task);
   const targetTasks = tasks.filter(fits), targetQueue = queue.filter(fits);
   const names = new Set([...targetTasks.map(r => r.window), ...targetQueue.map(r => r.task.toLowerCase())]);
   return { tasks: targetTasks, queue: targetQueue, windows: windows.filter(w => names.has(w.plain)).map(({ id, plain }) => ({ id, plain })) };

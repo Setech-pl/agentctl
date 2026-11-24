@@ -469,6 +469,17 @@
       "FIELD0253-LIMITS: watch reports manual and chat changes exactly once with their sources"
     ]
   },
+  "FIELD0256-EXACT": {
+    "rev": "v0.27.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-EXACT: registry and CLI keep exact task IDs across lifecycle states",
+      "mcp: queue read tools",
+      "FIELD0256-EXACT: registry and CLI keep exact task IDs across lifecycle states"
+    ]
+  },
   "FIELD0256-SPEC": {
     "rev": "v0.27.0",
     "outcome": "FAILS",
