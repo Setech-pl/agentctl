@@ -2,6 +2,7 @@ import { providerDispatchCases } from './provider-live-cases.ts';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { LimitsReport } from '../src/core/limits.ts';
 import { defaultCacheRoot, withHarness } from './live-harness.ts';
 import type { Harness } from './live-harness.ts';
 
@@ -62,7 +63,7 @@ const windows = (h: Harness): string[] => h.tmux(['list-windows', '-t', `=${h.se
 
 async function limitsAndEvents(): Promise<void> {
   current = 'limits+events';
-  await withHarness({ name: 'limits', config: 'watch:\n  interval: 2\nlimits:\n  claude: 1\n' }, async (h) => {
+  await withHarness({ name: 'limits', config: 'watch:\n  interval: 2\n  idle_confirm_ticks: 1\nlimits:\n  claude: 1\n' }, async (h) => {
     const repo = makeRepo(h, 'repo');
     const a = h.agentctl(['new', spec(h, repo, 'LV-1'), '-y']);
     check('LV-1 starts on the fake claude', a.code === 0 && windows(h).includes('lv-1'), a.stderr);
@@ -72,8 +73,11 @@ async function limitsAndEvents(): Promise<void> {
     const watch = h.spawnAgentctl(['watch'], path.join(h.root, 'watch.out'));
     await sleep(5000);
     check('LV-2 still waits while the limit is 1', !windows(h).includes('lv-2'));
-    const lim = h.agentctl(['limits']);
-    check('limits shows 1/1 used and one queued', /claude\s+1\s+1\s+0\s+1\s+1\s+0\s+0\s+off\s+1/.test(lim.stdout), lim.stdout);
+    const lim = h.agentctl(['limits', '--json']);
+    const claude = lim.code === 0 ? (JSON.parse(lim.stdout) as LimitsReport).providers.find(p => p.agent === 'claude') : undefined;
+    check('limits shows idle LV-1 using the only slot and LV-2 queued',
+      claude?.limit === 1 && claude.used === 1 && claude.free === 0 && claude.working.length === 0
+      && claude.slotTasks?.join() === 'LV-1' && claude.queued === 1 && claude.queuedTasks?.join() === 'LV-2', lim.stdout + lim.stderr);
     const set = h.agentctl(['limits', 'set', 'claude=2', '-y']);
     check('limits set claude=2 writes the config and keeps a .bak', set.code === 0 && fs.existsSync(path.join(h.agentctlHome, 'config.yaml.bak')), set.stdout + set.stderr);
     const started = await until('LV-2 starts', () => windows(h).includes('lv-2'));
