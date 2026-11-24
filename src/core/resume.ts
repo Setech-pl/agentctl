@@ -68,7 +68,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
     const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
-    const originalPrompt = !sessionId && (Boolean(row.launchExit) || record.promptDelivery === 'launching' || Boolean(record.launchAt && record.pendingPrompt && record.promptKind !== 'followup'));
+    const originalPrompt = !sessionId && !row.tmuxLost && (Boolean(row.launchExit) || record.promptDelivery === 'launching' || Boolean(record.launchAt && record.pendingPrompt && record.promptKind !== 'followup'));
     out.push({ owner: record.owner, host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), ...(originalPrompt ? {originalPrompt} : {}), hasReport });
   }
   return out;

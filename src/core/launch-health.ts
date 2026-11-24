@@ -21,6 +21,7 @@ export async function checkLaunchHealth(ctx: Context, notifier: Notifier, self?:
   const starting = new Set(readQueue(config).filter(entry => entry.status === 'starting' || entry.status === 'accepted' || entry.status === 'queued').map(entry => entry.task));
   const windows = await ctx.tmux.windows();
   const byName = new Map(windows.map(window => [window.plain, window]));
+  const windowHosts = new Set(windows.map(window => window.host ?? ''));
   let terminal: Set<string | undefined> | undefined;
   for (const record of records) {
     if (signal?.aborted) return;
@@ -28,7 +29,8 @@ export async function checkLaunchHealth(ctx: Context, notifier: Notifier, self?:
     if ((pane && pane.exitCode === undefined) || starting.has(record.task) || (record.host && ctx.hosts.connection(record.host).unreachable)) continue;
     let cause = readLaunchExit(config, record);
     const early = inLaunchGrace(config, record, runner.now());
-    if (expectedStartClosure(config, record) || (!cause && pane?.exitCode === undefined && !early)) continue;
+    const missingDuringLaunch = early && windowHosts.has(record.host ?? '');
+    if (expectedStartClosure(config, record) || (!cause && pane?.exitCode === undefined && !missingDuringLaunch)) continue;
     terminal ??= new Set(readJournal(config).filter(event => event.kind === 'launch-failed').map(event => event.changeId));
     if (!pane && terminal.has(`launch-failed:${record.task}:${launchIdentity(record)}`)) continue;
     const release = tryFileLock(`${expectedCloseFile(config, record.window)}.launch.lock`);

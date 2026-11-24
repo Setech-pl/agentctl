@@ -195,6 +195,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   const { runner, tmux, config } = ctx;
   const infos = [...await ctx.localTmux.windows(), ...await ctx.hosts.windows(opts.cachedOnly || opts.remoteCachedOnly)];
   const windowByName = new Map(infos.map(info => [info.plain, info]));
+  const windowHosts = new Set(infos.map(info => info.host ?? ''));
   const live = new Set(infos.filter(w => w.exitCode === undefined).map(w => w.plain));
   let queuedStarts: Set<string> | undefined;
   const rows: StatusRow[] = [];
@@ -278,9 +279,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const paneExit = windowByName.get(record.window)?.exitCode;
     const trackedLaunch = record.launchAt || record.launchRetried || (record.promptDelivery === 'launching' && record.windowId);
     const launchExit = !alive && !closed && !cancelled && trackedLaunch ? readLaunchExit(config, record) : undefined;
-    const launchDead = !alive && (launchExit !== undefined || paneExit !== undefined || Boolean(record.launchAt && inLaunchGrace(config, record, runner.now()) && !expectedStartClosure(config, record)));
+    const sessionPresent = windowHosts.has(record.host ?? '');
+    const missingDuringLaunch = !alive && sessionPresent && record.launchAt && inLaunchGrace(config, record, runner.now()) && !expectedStartClosure(config, record);
+    const launchDead = !alive && (launchExit !== undefined || paneExit !== undefined || missingDuringLaunch);
     if (alive && record.launchAt && !opts.cachedOnly && !unreachable && inLaunchGrace(config, record, runner.now())) await saveLaunchTail(ctx, record, screenText);
-    const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
+    const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, sessionPresent, opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : launchDead ? (reportReady ? 'report-ready' : 'dead') : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     const quota = alive && !unreachable && !reportReady && !cancelled && !closed ? ((classifyScreen(screenText, settings) === 'limited' ? quotaError(screenText) : undefined) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!record.host && !opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;

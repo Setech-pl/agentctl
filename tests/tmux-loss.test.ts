@@ -14,11 +14,15 @@ const scratch = useScratch();
 test('lost server/session stays visible with recovery, one durable event per loss', async () => {
   const config = makeConfig(scratch.sub('loss'));
   const fake = new FakeTmux();
-  const { ctx } = makeContext(config, { respond: fake.respond });
+  const now = Date.UTC(2026, 10, 24, 4);
+  const { ctx } = makeContext(config, { respond: fake.respond, startTime: now });
   const wt = scratch.sub('worktree');
   const record = seedTask(config, 'LOST', { windowId: '@1', repos: [{ path: wt, worktree: wt }] });
   fs.writeFileSync(sessionsFile(config, record.window), JSON.stringify({ claude: [{ id: 'saved-session' }] }));
-  const noSession = seedTask(config, 'FRESH', { windowId: '@2', repos: [{ path: wt, worktree: wt }] });
+  const noSession = seedTask(config, 'FRESH', {
+    windowId: '@2', launchAt: new Date(now - 53_000).toISOString(), promptDelivery: 'launching', pendingPrompt: 'Do FRESH.',
+    repos: [{ path: wt, worktree: wt }],
+  });
   seedTask(config, 'LEGACY');
   seedTask(config, 'CLOSED', { closed: true });
   seedTask(config, 'CANCELLED', { cancelled: true });
@@ -33,8 +37,12 @@ test('lost server/session stays visible with recovery, one durable event per los
   assert.equal(rows.find(r => r.task === 'LEGACY')!.state, 'needs-attention');
   assert.match(lost.hint!, /tmux.*(server|session).*lost|utracono.*tmux/i);
   assert.match(lost.hint!, /agentctl resume LOST/);
-  assert.match(rows.find(r => r.task === noSession.task)!.hint!, /re-queue.*new task.*worktree/i);
-  assert.deepEqual((await findResumable(ctx)).find(r => r.task === 'LOST')?.sessionId, 'saved-session');
+  const fresh = rows.find(r => r.task === noSession.task)!;
+  assert.equal(fresh.state, 'needs-attention');
+  assert.match(fresh.hint!, /re-queue.*new task.*worktree/i);
+  const resumable = await findResumable(ctx);
+  assert.equal(resumable.find(r => r.task === 'LOST')?.sessionId, 'saved-session');
+  assert.ok(resumable.some(r => r.task === noSession.task && !r.originalPrompt), 'a server restart retains the provider resume mode');
   await collectStatus(ctx, { progress: false });
   const next = makeContext(config, { respond: fake.respond });
   await collectStatus(next.ctx, { progress: false });
