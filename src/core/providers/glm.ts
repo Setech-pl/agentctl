@@ -94,7 +94,7 @@ export function glmOnboardingDone(dir: string, home: string): { done: boolean; c
 
 /** The glm plan: only the glm statusLine tap writes glm-plan.json. Z.ai documents no quota endpoint, so in practice this stays n/d. */
 export function readGlmPlan(config: GlobalConfig, reader: UsageReader, now: number): PlanState {
-  const plan = planState('glm', readSnapshotFile(glmPlanFile(config)), now, 'Z.ai exposes no documented quota reading for these windows (see README "Providers")');
+  const plan = planState('glm', readSnapshotFile(glmPlanFile(config)), now, 'Z.ai exposes no documented quota endpoint or CLI reading for these windows (see README "Providers")');
   plan.source = 'glm-statusline';
   return plan;
 }

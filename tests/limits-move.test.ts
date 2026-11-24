@@ -311,7 +311,8 @@ describe('board: M moves a task', () => {
     const pinned = press(boardOf([row('NC-1', { pin: true })]), 'M');
     assert.equal(pinned.state.mode.kind, 'list');
     assert.match(pinned.state.notice?.text as string, /pinned \(pin: true\)/);
-    const done = press(boardOf([row('NC-1', { state: 'superseded' })]), 'M');
+    const moved = boardOf([row('NC-1', { state: 'superseded', finished: true })]);
+    const done = press({ ...moved, showFinished: true, selected: 'NC-1' }, 'M');
     assert.match(done.state.notice?.text as string, /already moved/);
     assert.equal(press(boardOf([]), 'M').state.notice?.level, 'error');
   });

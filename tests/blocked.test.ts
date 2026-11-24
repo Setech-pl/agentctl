@@ -5,6 +5,7 @@ import { describe, it } from 'node:test';
 import { cancelTasks, planCancel } from '../src/core/cancel.ts';
 import { Context } from '../src/core/context.ts';
 import type { Notifier } from '../src/core/notify.ts';
+import { readJournal } from '../src/core/journal.ts';
 import { liveWindows } from '../src/core/plan.ts';
 import { commitQueueAdd, describeQueue, planQueueAdd, queueTick, QueueMemory, readQueue, unblockEntry } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
@@ -54,7 +55,7 @@ describe('blocked: a queued task whose after names a cancelled task', () => {
     await cancelTasks(s.ctx, plan);
     assert.match(s.out.join('\n'), /⛓ B-2 is blocked: it waited for A-1\. agentctl unblock B-2 --drop-after A-1, or agentctl cancel B-2/);
     const c = await s.conditions();
-    assert.equal(c['B-2'], '⛓ zablokowane – A-1 anulowane');
+    assert.equal(c['B-2'], '⛓ zablokowane – A-1 anulowane; B-2 czeka na martwe zadanie A-1');
     assert.notEqual(c['C-3'], c['B-2']);
     const list = await runCli(s.config, s.runner, ['queue', 'list']);
     assert.match(list.stdout, /B-2 .*⛓ zablokowane – A-1 anulowane/);
@@ -73,7 +74,7 @@ describe('blocked: a queued task whose after names a cancelled task', () => {
     await s.queueUp(s.specOf('B-2', 'after: A-1\n'));
     assert.match((await s.conditions())['B-2'] ?? '', /wolne miejsce/, 'with its report A-1 would let B-2 start');
     await cancelTasks(s.ctx, await planCancel(s.ctx, ['A-1']));
-    assert.equal((await s.conditions())['B-2'], '⛓ zablokowane – A-1 anulowane');
+    assert.equal((await s.conditions())['B-2'], '⛓ zablokowane – A-1 anulowane; B-2 czeka na martwe zadanie A-1');
   });
 
   it('a task that waits for a blocked task is blocked too; a blocked task never starts even when a window is free', async () => {
@@ -82,7 +83,7 @@ describe('blocked: a queued task whose after names a cancelled task', () => {
     await s.queueUp(s.specOf('B-2', 'after: A-1\n') + s.specOf('C-3', 'after: B-2\n') + s.specOf('D-4'));
     await cancelTasks(s.ctx, await planCancel(s.ctx, ['A-1']));
     const c = await s.conditions();
-    assert.equal(c['B-2'], '⛓ zablokowane – A-1 anulowane');
+    assert.equal(c['B-2'], '⛓ zablokowane – A-1 anulowane; B-2 czeka na martwe zadanie A-1');
     assert.equal(c['C-3'], '⛓ zablokowane – B-2 zablokowane');
     const memory = new QueueMemory();
     const began = await queueTick(s.ctx, memory, s.notifier, {});
@@ -127,6 +128,7 @@ describe('blocked: the notification', () => {
     await watchTick(s.ctx, memory, s.notifier);
     await watchTick(s.ctx, new WatchMemory(), s.notifier);
     assert.deepEqual(s.notified, ['B-3 zablokowane – A-1 anulowane'], 'once');
+    assert.equal(readJournal(s.config).filter(e => e.kind === 'blocked' && e.text.includes('B-3 czeka na martwe zadanie A-1')).length, 1);
     await cancelTasks(s.ctx, await planCancel(s.ctx, ['A-2']));
     await watchTick(s.ctx, memory, s.notifier);
     assert.deepEqual(s.notified, ['B-3 zablokowane – A-1 anulowane', 'B-3 zablokowane – A-2 anulowane'], 'a second author is news');

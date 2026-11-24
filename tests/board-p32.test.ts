@@ -265,7 +265,7 @@ describe('p32: adaptive refresh and the watch debounce', () => {
   });
 });
 
-// ---- the 230-archived-tasks regression fixture (generated under AGENTCTL_LIVE_CACHE when set, else the scratch dir)
+// ---- the 230-archived-tasks regression fixture, isolated per gate run
 
 function buildFixture(root: string, count: number): ReturnType<typeof makeConfig> {
   const config = makeConfig(root);
@@ -284,8 +284,7 @@ const fixtures = new Map<string, ReturnType<typeof makeConfig>>();
 function fixture(name: string, count: number): ReturnType<typeof makeConfig> {
   let config = fixtures.get(name);
   if (!config) {
-    const base = process.env.AGENTCTL_LIVE_CACHE ?? scratch.dir;
-    config = buildFixture(path.join(base, name), count);
+    config = buildFixture(path.join(scratch.dir, name), count);
     fixtures.set(name, config);
   }
   return config;

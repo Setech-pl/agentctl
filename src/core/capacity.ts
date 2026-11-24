@@ -18,7 +18,7 @@ import { codexPlanFile, openReader, planWindowCurrent, readPlans, stalePlanLabel
 import type { PlanWindowView } from './usage.ts';
 import { readSamples } from './usage-samples.ts';
 import type { UsageSample } from './usage-samples.ts';
-import { isObject } from './util.ts';
+import { isObject, plural } from './util.ts';
 import { agentHomes } from './usage-sources.ts';
 import { windowKind } from './usage-parse.ts';
 import { taskNames } from './task-accounting.ts';
@@ -137,7 +137,8 @@ export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): st
     const names = p.taskCounts;
     const occupied = names?.slots.length ? `, used slots ${p.used}${taskNames(names.slots)}` : '';
     const reports = names?.reports.length ? `; ${names.reports.length} report-ready${taskNames(names.reports)}` : '';
-    const closable = names?.reportWindows.length ? ` – close zwolni ${names.reportWindows.length}${taskNames(names.reportWindows)}` : '';
+    const freed = names?.reportWindows.length ?? 0;
+    const closable = freed ? ` – close zwolni ${freed} ${plural(freed, 'okno', 'okna', 'okien')}${taskNames(names!.reportWindows)}` : '';
     return [`capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: ${reading}, free slots ${p.freeSlots ?? 'unbounded'}${occupied}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.reservation ? `; ${reservationText(p.provider, p.reservation)}` : ''}${p.hostSlots?.length ? `; hosts ${p.hostSlots.map(h => `${h.host} ${h.used}/${h.limit ?? 'unbounded'}, free ${h.free ?? 'unbounded'}`).join(' / ')}` : ''}${reports}${closable}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`, ...(p.globalSlots ? [`  ${p.provider} global ${p.globalSlots.used}/${p.globalSlots.limit ?? '∞'}`, ...p.chats!.map(chat => `  ${p.provider} ${renderChatLoad(chat)}`)] : [])];
   });
 }

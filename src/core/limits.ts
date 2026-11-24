@@ -323,7 +323,8 @@ export function renderLimits(report: LimitsReport): string[] {
 /** The provider and chat counts for concise MCP responses. */
 export function compactLimits(report: LimitsReport): string {
   return report.providers.flatMap(p => [
-    `${p.agent}: used=${p.used}${taskNames(p.slotTasks ?? [])} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued}${taskNames(p.queuedTasks ?? [])} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}${p.plan ? `; plan ${p.plan}` : ''}`,
+    `${p.agent}: used=${p.used}${taskNames(p.slotTasks ?? [])} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued}${taskNames(p.queuedTasks ?? [])} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`,
+    ...(p.plan ? [`  ${p.agent} plan ${p.plan}`] : []),
     ...(p.working.length || p.reportReady.length ? [`  working=${p.working.length}${taskNames(p.working)} report-ready=${p.reportReady.length}${taskNames(p.reportReady)}`] : []),
     ...(p.chats ?? []).map(chat => `  ${renderChatLoad(chat)}`),
   ]).join('\n');

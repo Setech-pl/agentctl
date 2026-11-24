@@ -272,7 +272,7 @@ describe('glm limits and usage', () => {
     assert.equal(glmPlan.windows[0].usedPercent, 42);
     assert.ok(!fs.existsSync(path.join(path.dirname(glmPlanFile(config)), 'claude-plan.json')), 'the claude plan file is untouched');
     const { readGlmPlan } = await import('../src/core/providers/glm.ts');
-    const plan = readGlmPlan(config, openReader(config), Date.now());
+    const plan = readGlmPlan(config, openReader(config), runner.now());
     assert.equal(plan.available, true);
     assert.equal(plan.source, 'glm-statusline');
     assert.equal(plan.maxPercent, 42);

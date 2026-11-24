@@ -763,7 +763,7 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
     const b = blocked.get(entry.task);
     const deadText = (task: string) => `${entry.task} czeka na martwe zadanie ${task}`;
     const reasons = b ? [
-      ...b.cancelled.map(task => ({ key: task, text: `${task} anulowane; ${deadText(task)}` })),
+      ...b.cancelled.map(task => ({ key: task, text: `${task} anulowane`, journalDetail: deadText(task) })),
       ...(b.dead ?? []).map(task => ({ key: `${task}:dead`, text: deadText(task) })),
       ...(b.verdicts ?? []).map(v => ({ key: `${v.task}:${v.reason}`, text: `${v.task}: ${v.reason}` })),
     ] : [];
@@ -774,7 +774,8 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
       const text = `${entry.task} zablokowane – ${reason.text}`;
       await opts.log?.(`queue: ${text}`);
       await notifyPlain(ctx, notifier, entry.task, text, opts.self);
-      await recordJournal(ctx, { kind: 'blocked', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      const journalText = 'journalDetail' in reason ? `${text}; ${reason.journalDetail}` : text;
+      await recordJournal(ctx, { kind: 'blocked', task: entry.task, owner: entry.owner, text: journalText, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
       said.push(text);
     }
   }

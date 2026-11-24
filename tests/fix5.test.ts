@@ -193,9 +193,17 @@ describe('FIX5 E3 + P37: events_since with HH:MM is the most recent past occurre
 });
 
 describe('FIX5 E2/E4: Polish numerals', () => {
-  const line = (n: number) => snapshotLines([{ provider: 'claude', ordered: false, remainingPercent: 50, resetsInMinutes: 10, ageSeconds: 1, staleDescription: '', freeSlots: 1, reportReady: n, estimate: null }] as never)[0]!;
-  for (const [n, text] of [[1, '1 okno report-ready – close zwolni okno'], [2, '2 okna report-ready – close zwolni okna'], [4, '4 okna'], [5, '5 okien report-ready – close zwolni okien'], [12, '12 okien'], [22, '22 okna']] as const)
-    it(`E2: capacity line for ${n} report-ready windows`, () => assert.ok(line(n).includes(text), line(n)));
+  const line = (n: number) => {
+    const tasks = Array.from({length: n}, (_, i) => `TASK-${i + 1}`);
+    return snapshotLines([{ provider: 'claude', ordered: false, remainingPercent: 50, resetsInMinutes: 10, ageSeconds: 1, staleDescription: '', freeSlots: 1, reportReady: n, estimate: null,
+      taskCounts: {active: [], working: [], queued: [], slots: tasks, reports: tasks, reportWindows: tasks} }] as never)[0]!;
+  };
+  for (const [n, word] of [[1, 'okno'], [2, 'okna'], [4, 'okna'], [5, 'okien'], [12, 'okien'], [22, 'okna']] as const)
+    it(`E2: capacity line for ${n} report-ready windows`, () => {
+      assert.ok(line(n).includes(`${n} report-ready (TASK-1`), line(n));
+      assert.ok(line(n).includes(`close zwolni ${n} ${word} (TASK-1`), line(n));
+      if (n > 5) assert.ok(line(n).includes('TASK-5, …)'), line(n));
+    });
   it('E4: "WYNIKI RAPORTU" counts decisions and actions in Polish', async () => {
     const f = fixture('f5-e4');
     const forms: [number, number, string][] = [[1, 1, '1 decyzja, 1 akcja'], [2, 2, '2 decyzje, 2 akcje'], [5, 0, '5 decyzji, 0 akcji'], [0, 5, '0 decyzji, 5 akcji'], [22, 12, '22 decyzje, 12 akcji']];
