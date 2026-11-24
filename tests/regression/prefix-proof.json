@@ -480,6 +480,16 @@
       "FIELD0256-EXACT: registry and CLI keep exact task IDs across lifecycle states"
     ]
   },
+  "FIELD0256-GC-KEEP": {
+    "rev": "v0.27.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-GC-KEEP: CLI keeps variadic and comma-delimited tasks despite force-dirty",
+      "FIELD0256-GC-KEEP: CLI keeps variadic and comma-delimited tasks despite force-dirty"
+    ]
+  },
   "FIELD0256-SPEC": {
     "rev": "v0.27.0",
     "outcome": "FAILS",

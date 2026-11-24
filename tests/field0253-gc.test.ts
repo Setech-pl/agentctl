@@ -3,12 +3,21 @@ import { test } from 'node:test';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { applyAcceptedWrites } from '../src/core/queue.ts';
-import { fakeWatcher } from './helpers.ts';
+import { fakeWatcher, runCli } from './helpers.ts';
 import { gcFixture } from './field0253-gc-fixture.ts';
 
 const notifier = { notify: async () => {} };
 const tool = (name: string) => MCP_TOOLS.find(t => t.name === name)!;
 const requestId = (text: string) => /request_id: ([a-f0-9-]{36})/.exec(text)?.[1];
+
+test('FIELD0256-GC-KEEP: CLI keeps variadic and comma-delimited tasks despite force-dirty', async () => {
+  const { config, runner } = gcFixture('cli-gc-keep', 4, true);
+  const result = await runCli(config, runner, ['gc', '--keep', 'gc-0, GC-1', 'GC-2', '--force-dirty', 'GC-0,GC-1,GC-2,GC-3']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Skipped \(pinned\): 3,/);
+  for (const id of ['GC-0', 'GC-1', 'GC-2']) assert.match(result.stdout, new RegExp(`worktree ${id} .*keep requested`));
+  assert.match(result.stdout, /worktree GC-3 .*closed task/);
+});
 
 test('FIELD0253-GC: the watcher plans 301 worktrees before issuing a bound GC token', async () => {
   let now = 0;

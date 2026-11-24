@@ -1339,7 +1339,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
         const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
         if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirtyAll || opts.forceDirty, includeCache: opts.includeCache, keepCache: opts.keepCache, keep: opts.keep });
+        const taskIds = (values?: string[]) => values?.flatMap(value => value.split(',').map(id => id.trim()).filter(Boolean));
+        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirtyAll || taskIds(opts.forceDirty), includeCache: opts.includeCache, keepCache: taskIds(opts.keepCache), keep: taskIds(opts.keep) });
         if (!opts.apply) {
           if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
           for (const l of renderGc(plan, view)) line(l);
