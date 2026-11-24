@@ -4,6 +4,7 @@ import { secretRedactor } from './secret-redaction.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { GlobalConfig } from './config.ts';
+import type { LaunchExit } from './start-failure.ts';
 import type { Context } from './context.ts';
 import { notifyPhone } from './phone-send.ts';
 import { listTaskRecords, readTaskRecord } from './taskstore.ts';
@@ -14,7 +15,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'state-write-recovered', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-held', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
+export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'state-write-recovered', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'launch-failed', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-held', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -29,6 +30,7 @@ export interface JournalEntry {
   /** What the notification said, or a short statement of the event. */
   text: string;
   /** One repository command, with a result code only after it exits. */
+  launch?: LaunchExit;
   setup?: { repo: string; repoIndex: number; repoCount: number; command: string; commandIndex: number; commandCount: number; log: string; exitCode?: number };
   nodeModules?: { repo: string; result: 'hit' | 'miss' | 'unsupported'; bytes: number };
   cleanup?: { moved: { path: string; bytes: number }[]; bytes: number; unsupported?: string };

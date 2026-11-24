@@ -534,6 +534,19 @@
       "FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible"
     ]
   },
+  "FIELD0256-LAUNCH": {
+    "rev": "v0.27.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-LAUNCH: Codex exits within grace, retries once and remains resumable with its cause",
+      "queue: adding",
+      "FIELD0256-LAUNCH: Codex exits within grace, retries once and remains resumable with its cause",
+      "FIELD0256-DEAD-GC: a clean task dead at launch is a worktree-only safe candidate",
+      "FIELD0256-DEAD-GC: a clean task dead at launch is a worktree-only safe candidate"
+    ]
+  },
   "FIELD0256-SPEC": {
     "rev": "v0.27.0",
     "outcome": "FAILS",

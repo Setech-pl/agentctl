@@ -27,7 +27,7 @@ import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
 import type { PlanOptions } from './plan.ts';
 import { waitForReady } from './ready.ts';
-import { saveStartFailureScreen } from './start-failure.ts';
+import { LaunchExited, launchExitText, saveLaunchTail, saveStartFailureScreen, storeLaunchExit, trackLaunch } from './start-failure.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { recordFromSpec, renderTaskMd, readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
@@ -319,7 +319,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     if (remote) ctx.info(`${spec.task}: Remote Control on: the session "${spec.task}" appears in the Claude app (Code). If a dialog comes up, ${RC_FIRST_TIME}`);
     // tmux's own ID of the window: operations keep finding it when `watch` puts a state icon in front of its name.
     const windowId = (await taskTmux.windows()).find((w) => w.plain === spec.window)?.id;
-    if (windowId) await setHeaderField(runner, taskFile(config, spec.window), 'window_id', windowId);
+    await trackLaunch(ctx, taskTmux, record, windowId);
     await execution.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(spec.window), '@agentctl-role', spec.host ? spec.window : 'task']);
     await taskTmux.typeCommand(spec.window, commandLine);
     ctx.info(`${spec.task}: window ${config.session}:${spec.window} running ${spec.agent} (model ${spec.model}, effort ${spec.effort}) via ${commandLine}`);
@@ -336,6 +336,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
       ...(settings.dialogPattern ? { dialogPattern: settings.dialogPattern } : {}),
       timeoutMs: settings.readyTimeout * 1000,
+      trackExit: Boolean(windowId),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(waitTrust
         ? {
@@ -347,6 +348,11 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
         : {}),
     });
     const fresh = readTaskRecord(config, spec.window);
+    if (fresh && ready.exitCode !== undefined) {
+      const cause = await storeLaunchExit(ctx, fresh, ready.exitCode, ready.screen, 'okno zakończyło pracę przed gotowością agenta', true);
+      throw new LaunchExited(`${spec.task}: ${launchExitText(cause)}`);
+    }
+    if (fresh) await saveLaunchTail(ctx, fresh, ready.screen);
     if (fresh?.promptDelivery === 'sent') { ready.ready = true; ready.trust = false; }
     if (fresh?.promptDelivery === 'launching' && (ready.trust || ready.ready)) await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending');
     if (ready.aborted) {

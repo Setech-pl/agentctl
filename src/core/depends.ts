@@ -50,6 +50,7 @@ export function verdictPending(row: StatusRow | undefined, clock?: VerdictClock)
 export interface Blockers {
   cancelled: string[];
   blocked: string[];
+  dead?: string[];
   verdicts?: Array<{ task: string; reason: string }>;
 }
 
@@ -61,19 +62,22 @@ export interface Blockers {
  */
 export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status' | 'afterVerdicts'>[], rows: readonly StatusRow[], clock?: VerdictClock): Map<string, Blockers> {
   const cancelled = cancelledTasks(rows);
+  const dead = new Set(rows.filter(r => r.state === 'dead' && r.report !== 'yes').map(r => r.task));
   const blocked = new Map<string, Blockers>();
   const waiting = entries.filter((e) => e.status === 'queued');
   for (let grew = true; grew; ) {
     grew = false;
     for (const e of waiting) {
       const b: Blockers = { cancelled: e.after.filter((t) => cancelled.has(t)), blocked: e.after.filter((t) => blocked.has(t)) };
+      const stopped = e.after.filter(t => dead.has(t));
+      if (stopped.length) b.dead = stopped;
       const verdicts = e.after.flatMap(task => {
         const allowed = e.afterVerdicts?.[task] ?? DEFAULT_AFTER_VERDICTS;
         const row = rows.find(r => r.task === task);
         return hasReport(row) && !verdictPending(row, clock) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
       });
       if (verdicts.length) b.verdicts = verdicts;
-      if (b.cancelled.length + b.blocked.length + verdicts.length === 0) continue;
+      if (b.cancelled.length + b.blocked.length + verdicts.length + stopped.length === 0) continue;
       const known = blocked.get(e.task);
       if (known && known.cancelled.length === b.cancelled.length && known.blocked.length === b.blocked.length && JSON.stringify(known.verdicts) === JSON.stringify(b.verdicts)) continue;
       blocked.set(e.task, b);
@@ -84,9 +88,10 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
 }
 
 /** "⛓ zablokowane – NC-1 anulowane": the cause shown by `status`, `queue list` and the board. */
-export function blockedText(b: Blockers): string {
-  if (b.verdicts?.length && !b.cancelled.length && !b.blocked.length) return `waiting: ${b.verdicts.map(v => `${v.task} ${v.reason}`).join(', ')}`;
-  return `${BLOCKED_ICON} zablokowane – ${[...b.cancelled.map((t) => `${t} anulowane`), ...b.blocked.map((t) => `${t} zablokowane`), ...(b.verdicts ?? []).map(v => `${v.task}: ${v.reason}`)].join(', ')}`;
+export function blockedText(b: Blockers, dependent?: string): string {
+  if (b.verdicts?.length && !b.cancelled.length && !b.dead?.length && !b.blocked.length) return `waiting: ${b.verdicts.map(v => `${v.task} ${v.reason}`).join(', ')}`;
+  const waiting = (task: string) => `${dependent ? `${dependent} ` : ''}czeka na martwe zadanie ${task}`;
+  return `${BLOCKED_ICON} zablokowane – ${[...b.cancelled.map(t => `${t} anulowane; ${waiting(t)}`), ...(b.dead ?? []).map(waiting), ...b.blocked.map(t => `${t} zablokowane`), ...(b.verdicts ?? []).map(v => `${v.task}: ${v.reason}`)].join(', ')}`;
 }
 
 /** Tasks that exist: started (also closed and archived ones) or waiting in the queue. */

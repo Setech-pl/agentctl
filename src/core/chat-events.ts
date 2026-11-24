@@ -281,6 +281,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   overloaded: 'PRZECIĄŻENIE',
   'overload-retry': 'PONOWIENIE',
   'queue-retry': 'PONOWIENIE STARTU',
+  'launch-failed': 'BŁĄD STARTU',
   'mcp-write': 'MCP',
   'disk-warn': 'DYSK',
   'disk-critical': 'DYSK KRYTYCZNY',

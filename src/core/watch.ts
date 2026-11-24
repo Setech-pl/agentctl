@@ -8,6 +8,7 @@ import { applyInstanceLabel } from './instance.ts';
 import { beginTitle } from './title.ts';
 import { packageVersion } from './version.ts';
 import { recordMachineLoad } from './machine.ts';
+import { checkLaunchHealth } from './launch-health.ts';
 import { limitedTick } from './limited.ts';
 import { drainPromptQueue } from './prompt-queue.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
@@ -163,7 +164,7 @@ const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'host-unreachable':
 /** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
 async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
   const kind = e.from === 'host-unreachable' && e.to !== 'host-unreachable' ? 'host-recovered' : JOURNALED[e.to];
-  if (!kind || row.tmuxLost) return;
+  if (!kind || row.tmuxLost || (kind === 'dead' && row.launchExit)) return;
   const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null) : undefined;
   await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
 }
@@ -253,6 +254,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   };
   await step('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
   await step('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
+  await step('launch health', signal => checkLaunchHealth(ctx, notifier, options.self, signal));
   // Admission observes slots and named dependencies. Full status and report processing are optional for it.
   await step('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }));
   await step('WALL maintenance', () => maintainWall(ctx));
@@ -290,7 +292,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     for (const row of allRows) {
       if (signal.aborted) break;
       const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
-      if (row.tmuxLost || row.state === 'host-unreachable') continue;
+      if (row.tmuxLost || row.launchExit || row.state === 'host-unreachable') continue;
       if (record?.host && record.promptDelivery === 'launching' && row.window === 'alive') {
         await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'prompt_delivery', 'pending');
         record.promptDelivery = 'pending';

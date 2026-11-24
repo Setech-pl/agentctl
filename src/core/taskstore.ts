@@ -32,6 +32,8 @@ export interface TaskRecord {
    * while it still belongs to this task's window. Absent for tasks started before it was recorded.
    */
   windowId?: string;
+  launchAt?: string;
+  launchRetried?: boolean;
   session: string;
   agent: RecordAgent;
   model: string;
@@ -184,6 +186,8 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     task: record.task,
     window: record.window,
     ...(record.windowId ? { window_id: record.windowId } : {}),
+    ...(record.launchAt ? { launch_at: record.launchAt } : {}),
+    ...(record.launchRetried ? { launch_retried: true } : {}),
     session: record.session,
     agent: record.agent,
     model: record.model,
@@ -348,6 +352,8 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
   if (typeof data.outputs_protocol === 'number') record.outputsProtocol = data.outputs_protocol;
   for (const [key, field] of [['attempt_id', 'attemptId'], ['attempt_started', 'attemptStarted'], ['attempt_report_baseline', 'attemptReportBaseline'], ['turn_ended_at', 'turnEndedAt'], ['summary_delivered', 'summaryDelivered']] as const) if (typeof data[key] === 'string') record[field] = data[key];
   if (typeof data.window_id === 'string' && /^@\d+$/.test(data.window_id)) record.windowId = data.window_id;
+  if (typeof data.launch_at === 'string') record.launchAt = data.launch_at;
+  if (data.launch_retried === true) record.launchRetried = true;
   if (data.switched_by === 'flag' || data.switched_by === 'limit') record.switchedBy = data.switched_by;
   if (typeof data.review_of === 'string') record.reviewOf = data.review_of;
   if (data.review_mode === 'readonly-on-author') record.reviewMode = data.review_mode;

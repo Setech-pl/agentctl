@@ -20,6 +20,8 @@ export interface WindowInfo {
   /** The name without the icon: the task's window name. */
   plain: string;
   role?: string;
+  /** Present for a retained pane whose process exited. null when tmux has no exit status. */
+  exitCode?: number | null;
 }
 
 export interface TmuxOptions {
@@ -70,7 +72,7 @@ export class Tmux {
 
   /** The windows of the agentctl session (empty when the session does not exist). */
   async windows(): Promise<WindowInfo[]> {
-    const r = await this.runner.exec('tmux', ['list-windows', '-t', `=${this.session}`, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}'], {
+    const r = await this.runner.exec('tmux', ['list-windows', '-t', `=${this.session}`, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}\t#{pane_dead}\t#{pane_dead_status}'], {
       readOnly: true,
       dryResult: { code: 1 },
     });
@@ -83,7 +85,9 @@ export class Tmux {
       const fields = tab >= 0 ? line.slice(tab + 1).split('\t') : [line];
       const name = (fields[0] ?? '').trim();
       const role = fields[1]?.trim();
-      infos.push({ id, name, plain: role && (['watch', 'board', 'manager'].includes(role) || this.taskRoles && role !== 'task' && /^[a-z0-9][a-z0-9_-]*$/.test(role)) ? role : stripIcon(name, this.icons), ...(role ? { role } : {}) });
+      const status = fields[3]?.trim();
+      const exit = fields[2] === '1' ? {exitCode: status && /^\d+$/.test(status) ? Number(status) : null} : {};
+      infos.push({ id, name, plain: role && (['watch', 'board', 'manager'].includes(role) || this.taskRoles && role !== 'task' && /^[a-z0-9][a-z0-9_-]*$/.test(role)) ? role : stripIcon(name, this.icons), ...(role ? { role } : {}), ...exit });
     }
     return infos;
   }
@@ -253,8 +257,8 @@ export class Tmux {
     return this.runner.exec('tmux', ['attach-session', '-t', `=${this.session}`], { interactive: true });
   }
 
-  async killWindow(window: string): Promise<ExecResult> {
-    return this.runner.exec('tmux', ['kill-window', '-t', await this.targetFor(window)]);
+  async killWindow(window: string, id?: string): Promise<ExecResult> {
+    return this.runner.exec('tmux', ['kill-window', '-t', id || await this.targetFor(window)]);
   }
 
   /** What `key` is bound to in the root key table (no prefix); empty when nothing is. */

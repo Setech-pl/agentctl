@@ -16,6 +16,12 @@ import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, cohortKey, errorMessage } from './util.ts';
 import { applyIntegrationGc } from './integration-gc.ts';
 import type { IntegrationGcScope } from './integration-gc.ts';
+import { readQueue } from './queue.ts';
+import { pendingStarts, withStartLock } from './start-lock.ts';
+import { readLaunchExit } from './start-failure.ts';
+import { readJournal } from './journal.ts';
+import { inspectReport } from './report-state.ts';
+import { readTaskRecordById } from './taskstore.ts';
 
 /*
  * `agentctl gc`: take back the disk space that finished tasks leave behind - their worktrees, the files next to their reports, the state
@@ -45,6 +51,7 @@ export interface GcItem {
   dirtyFiles?: number;
   unpushedCommits?: number;
   head?: string;
+  dead?: boolean;
 }
 
 export interface GcSkip {
@@ -107,17 +114,32 @@ async function git(ctx: Context, args: string[]): Promise<{ code: number; out: s
 }
 
 /** Fresh safety facts, independent of cached disk measurements. No network or ignored files. */
-async function worktreeRisk(ctx: Context, wt: string, base?: string) {
+async function worktreeRisk(ctx: Context, wt: string, base?: string, againstBase = false) {
   const status = await git(ctx, ['-C', wt, 'status', '--porcelain', '--untracked-files=normal']);
   if (status.code !== 0) throw new Error(`git status failed: ${status.err || status.code}`);
-  const upstream = await git(ctx, ['-C', wt, 'rev-parse', '--verify', '--quiet', '@{upstream}']);
-  const comparison = upstream.code === 0 && upstream.out ? '@{upstream}' : base ?? 'main';
+  const upstream = againstBase ? undefined : await git(ctx, ['-C', wt, 'rev-parse', '--verify', '--quiet', '@{upstream}']);
+  const comparison = upstream?.code === 0 && upstream.out ? '@{upstream}' : base ?? 'main';
   const ahead = await git(ctx, ['-C', wt, 'rev-list', '--count', `${comparison}..HEAD`]);
   if (ahead.code !== 0 || !/^\d+$/.test(ahead.out)) throw new Error(`cannot check unpushed commits against ${comparison}: ${ahead.err || 'no count'}`);
   return { dirtyFiles: status.out ? status.out.split('\n').length : 0, unpushedCommits: Number(ahead.out), comparison };
 }
 
 const permitsDirty = (tasks: boolean | string[] | undefined, task: string) => tasks === true || Array.isArray(tasks) && tasks.some(t => t.toLowerCase() === task.toLowerCase());
+
+function deadWorktreeScope(ctx: Context, live: ReadonlySet<string>) {
+  const pending = new Set([...readQueue(ctx.config).filter(entry => entry.status !== 'failed'), ...pendingStarts(ctx.config)].map(entry => entry.task));
+  let terminal: Set<string | undefined> | undefined;
+  return (record: TaskRecord): boolean => {
+    if (record.closed || record.cancelled || live.has(record.window) || pending.has(record.task) || record.supersededBy || record.agent === 'unknown') return false;
+    const cause = readLaunchExit(ctx.config, record);
+    if (!cause && (record.launchAt || record.promptDelivery !== 'launching')) return false;
+    if (cause?.startup && !record.launchRetried) {
+      terminal ??= new Set(readJournal(ctx.config).filter(event => event.kind === 'launch-failed').map(event => event.changeId));
+      if (!terminal.has(`launch-failed:${record.task}:${cause.identity}`)) return false;
+    }
+    return !inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId).ready;
+  };
+}
 
 interface WorktreeListing {
   path: string;
@@ -152,6 +174,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const currentNames = new Set(currentRecords.map(r => r.window));
   const all: TaskRecord[] = [...currentRecords, ...archivedRecords.filter(r => !currentNames.has(r.window))];
   const live = new Set(await ctx.tmux.listWindows());
+  const dead = deadWorktreeScope(ctx, live);
   const finished = (r: TaskRecord): boolean => (r.closed === true || r.cancelled === true || archived.has(r.window)) && !live.has(r.window);
   const items: GcItem[] = [];
   const skipped: GcSkip[] = [];
@@ -174,7 +197,9 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   };
 
   // 1. worktrees
-  for (const record of mine) {
+  const deadRecords = currentRecords.filter(r => !kept(r) && (cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(cohort)) && dead(r));
+  for (const record of [...mine, ...deadRecords]) {
+    const deadTask = deadRecords.includes(record);
     if (record.reviewMode) continue; // Borrowed worktrees are owned by the author record.
     for (const repo of record.repos) {
       const wt = repo.worktree;
@@ -183,13 +208,13 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
       const key = path.resolve(wt);
       if (seenWorktrees.has(key)) continue;
       seenWorktrees.add(key);
-      const user = others.find((o) => o.repos.some((x) => same(x.worktree, wt)));
+      const user = others.find((o) => o.task !== record.task && o.repos.some((x) => same(x.worktree, wt)));
       if (user) {
         skipped.push({ task: record.task, kind: 'worktree', target: wt, reason: kept(user) ? `pinned/kept task ${user.task} also uses this worktree` : `also used by ${user.task}, which is not finished` });
         continue;
       }
       let risk;
-      try { risk = await worktreeRisk(ctx, wt, repo.base); }
+      try { risk = await worktreeRisk(ctx, wt, repo.base, deadTask); }
       catch (error) {
         skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, reason: errorMessage(error) });
         continue;
@@ -205,12 +230,16 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
         continue;
       }
       const detail = `${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison}`;
+      if (deadTask && (risk.dirtyFiles || risk.unpushedCommits || (record.report && location(record.report).startsWith(`${location(wt)}${path.sep}`) && fs.existsSync(record.report)))) {
+        skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, bytes: await size(wt), reason: `dead worktree contains changes, commits or a report (${detail}); kept` });
+        continue;
+      }
       if ((risk.dirtyFiles || risk.unpushedCommits) && !permitsDirty(opts.forceDirty, record.task)) {
         skipped.push({ task: record.task, kind: 'worktree', target: wt, repo: repo.path, ...risk, bytes: await size(wt), reason: `uncommitted changes / unpushed work (${detail}); requires force_dirty: [${record.task}] / --force-dirty ${record.task}` });
         continue;
       }
       const bytes = await size(wt);
-      items.push({ kind: 'worktree', task: record.task, target: wt, bytes, ...risk, detail: `${record.cancelled ? 'cancelled' : 'closed'} task, ${detail}`, repo: repo.path, ...(repo.base ? { base: repo.base } : {}) });
+      items.push({ kind: 'worktree', task: record.task, target: wt, bytes, ...risk, detail: `${deadTask ? 'dead without commits' : record.cancelled ? 'cancelled task' : 'closed task'}, ${detail}`, repo: repo.path, ...(repo.base ? { base: repo.base } : {}), ...(deadTask ? {dead: true} : {}) });
       removing.add(key);
     }
   }
@@ -380,17 +409,26 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
         // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
         const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes && kind === 'worktree' ? lastMeasurement(item.target)?.bytes ?? 0 : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
-          const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
-          if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
-          const users = linkUsers(item.target, knownLinkReferences(config));
-          if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
-          const risk = await worktreeRisk(ctx, item.target, item.base);
-          const forced = permitsDirty(plan.forceDirty, item.task);
-          if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
-          if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
-          assertUnpinned();
-          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
-          if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
+          const remove = async () => {
+            if (item.dead) {
+              const record = readTaskRecordById(config, item.task);
+              if (!record || !record.repos.some(r => same(r.worktree, item.target)) || !deadWorktreeScope(ctx, new Set(await ctx.tmux.listWindows()))(record)) throw new Error('dead task changed since preview; kept');
+              if (record.report && fs.existsSync(record.report) && location(record.report).startsWith(`${location(item.target)}${path.sep}`)) throw new Error('dead worktree contains a report; kept');
+            }
+            const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
+            if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
+            const users = linkUsers(item.target, knownLinkReferences(config));
+            if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
+            const risk = await worktreeRisk(ctx, item.target, item.base, item.dead);
+            const forced = !item.dead && permitsDirty(plan.forceDirty, item.task);
+            if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
+            if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
+            assertUnpinned();
+            const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
+            if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
+          };
+          if (item.dead) await withStartLock(ctx, remove);
+          else await remove();
         } else if (kind === 'cache') {
           if (!plan.includeCache) throw new Error('cache deletion requires explicit include_cache: true');
           const record = [...listTaskRecords(config), ...listArchivedRecords(config)].find(r => r.task === item.task);

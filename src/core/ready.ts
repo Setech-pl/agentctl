@@ -38,6 +38,7 @@ export interface ReadyOptions {
   dialogPattern?: string;
   timeoutMs: number;
   intervalMs?: number;
+  trackExit?: boolean;
   /** Keep polling while the trust dialog is up instead of returning; the dialog is never answered. */
   waitTrust?: TrustWait;
   /** Aborting (Ctrl-C) ends the wait; the result has `aborted: true`. */
@@ -52,6 +53,7 @@ export interface ReadyResult {
   dialog?: boolean;
   /** The wait was aborted through `signal`. */
   aborted?: boolean;
+  exitCode?: number | null;
   /** The last screen that was captured. */
   screen: string;
 }
@@ -81,7 +83,11 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
   let previousKimiView: string | undefined;
   for (;;) {
     if (opts.signal?.aborted) return { ready: false, trust: inTrust, aborted: true, screen };
-    const r = await tmux.capture(window);
+    const infos = opts.trackExit ? await tmux.windows() : undefined;
+    const pane = infos && tmux.resolve(window, infos);
+    if (infos && !pane) return { ready: false, trust: false, exitCode: null, screen };
+    const r = await tmux.capture(window, undefined, infos);
+    if (pane && pane.exitCode !== undefined) return { ready: false, trust: false, exitCode: pane.exitCode, screen: r.code === 0 ? r.stdout : screen };
     const previous = previousKimiView;
     previousKimiView = undefined;
     if (r.code === 0) {

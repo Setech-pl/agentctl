@@ -97,7 +97,7 @@ describe('mcp: cancel', () => {
     assert.deepEqual(readQueue(t.config).map((e) => e.task), ['Q-2']);
     assert.equal(readTaskRecord(t.config, 'q-1')?.cancelSource, 'mcp');
     const list = json<{ task: string; blocked: boolean; startCondition: string }[]>(await t.call('queue_list', { format: 'json' }));
-    assert.deepEqual(list.map((l) => [l.task, l.blocked, l.startCondition]), [['Q-2', true, '⛓ zablokowane – Q-1 anulowane']]);
+    assert.deepEqual(list.map((l) => [l.task, l.blocked, l.startCondition]), [['Q-2', true, '⛓ zablokowane – Q-1 anulowane; Q-2 czeka na martwe zadanie Q-1']]);
   });
 
   it('cohort cancels every open task of a cohort, the queued ones too; task and cohort together, or neither, is an error', async () => {

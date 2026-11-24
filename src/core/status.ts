@@ -4,6 +4,9 @@ import { quotaError, quotaReset } from './quota-error.ts';
 import { transcriptQuotaError } from './transcript.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import { tmuxLoss } from './tmux-loss.ts';
+import { expectedStartClosure, inLaunchGrace, launchExitText, readLaunchExit, saveLaunchTail } from './start-failure.ts';
+import type { LaunchExit } from './start-failure.ts';
+import { readQueue } from './queue.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { cachedRequest } from './response-budget.ts';
@@ -77,6 +80,7 @@ export interface StatusRow {
   state: TaskState;
   /** A launched tmux window disappeared before completion; recovery is in hint. */
   tmuxLost?: boolean;
+  launchExit?: LaunchExit;
   window: 'alive' | 'gone';
   /** The tmux window name of the task without any state icon, and tmux's ID of the window while it exists. */
   windowName: string;
@@ -190,7 +194,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   if (cachedRequest()) opts = { ...opts, cachedOnly: true };
   const { runner, tmux, config } = ctx;
   const infos = [...await ctx.localTmux.windows(), ...await ctx.hosts.windows(opts.cachedOnly || opts.remoteCachedOnly)];
-  const live = new Set(infos.map((w) => w.plain));
+  const windowByName = new Map(infos.map(info => [info.plain, info]));
+  const live = new Set(infos.filter(w => w.exitCode === undefined).map(w => w.plain));
+  let queuedStarts: Set<string> | undefined;
   const rows: StatusRow[] = [];
   const knownWindows = new Set<string>();
   // The records are copied: the loop annotates them (reportCandidate), and the caller's scan cache must stay pristine.
@@ -214,7 +220,10 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let unreachable = !!record.host && !record.closed && !record.cancelled && !archived && ctx.hosts.connection(record.host).unreachable;
     const alive = live.has(record.window) || unreachable;
     // Re-queued records retain attempt history, but no window has been launched yet. The queue owns their display.
-    if (!alive && !record.started && record.promptDelivery === 'launching' && !record.cancelled && !record.closed && !archived) continue;
+    if (!alive && !record.started && record.promptDelivery === 'launching' && !record.cancelled && !record.closed && !archived) {
+      queuedStarts ??= new Set(readQueue(config).filter(e => e.status !== 'failed').map(e => e.task));
+      if (queuedStarts.has(record.task)) continue;
+    }
     // Closed, cancelled or archived and not live: the board only counts them (unless a section is expanded), so the
     // prompt queue, the outputs and the tokens are not collected for them. Everything that decides the state stays.
     const shallow = opts.shallowClosed === true && !alive && (archived || record.closed === true || record.cancelled === true);
@@ -265,9 +274,13 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const unconfirmed = record.promptDelivery === 'needs-attention' && !reportReady && !deliveryEvidence(ctx, record, screenText);
     // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
     const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
-    const lossHint = record.host ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
+    const paneExit = windowByName.get(record.window)?.exitCode;
+    const launchExit = !alive && !closed && !cancelled ? readLaunchExit(config, record) : undefined;
+    const launchDead = !alive && (launchExit !== undefined || paneExit !== undefined || Boolean(record.launchAt && inLaunchGrace(config, record, runner.now()) && !expectedStartClosure(config, record)));
+    if (alive && record.launchAt && !opts.cachedOnly && !unreachable && inLaunchGrace(config, record, runner.now())) await saveLaunchTail(ctx, record, screenText);
+    const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
-    let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : launchDead ? (reportReady ? 'report-ready' : 'dead') : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
     const quota = alive && !unreachable && !reportReady && !cancelled && !closed ? ((classifyScreen(screenText, settings) === 'limited' ? quotaError(screenText) : undefined) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!record.host && !opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;
     if (state === 'report-ready' && hiddenBy === 'auto') hiddenBy = null;
     if (quota && !['working', 'background', 'report-ready', 'closed', 'cancelled', 'superseded'].includes(state)) state = 'limited';
@@ -333,6 +346,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       effective: `${record.agent} ${record.model}/${record.effort}`,
       switchedBy: record.switchedBy ?? null,
       state,
+      ...(launchExit ? {launchExit} : {}),
       ...(lossHint ? { tmuxLost: true } : {}),
       ...(reportCandidate && !reportReady ? { reportCandidate } : {}),
       ...screenMetadata(screenText),
@@ -352,7 +366,9 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       lastLine: lastContentLine(screenText, settings.footerPatterns),
       progress,
       collide: [],
-      hint: [unreachable ? `${ctx.hosts.connection(record.host!).detail}; retry at ${new Date(ctx.hosts.connection(record.host!).retryAt).toISOString()}` : null, record.host ? remoteAttachHint(config, record) : null, lossHint, reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null, record.reviewFreshness].filter(Boolean).join('; ') || null,
+      hint: [unreachable ? `${ctx.hosts.connection(record.host!).detail}; retry at ${new Date(ctx.hosts.connection(record.host!).retryAt).toISOString()}` : null, record.host ? remoteAttachHint(config, record) : null, lossHint,
+        launchExit ? launchExitText(launchExit) : paneExit !== undefined ? `kod wyjścia ${paneExit ?? 'n/d'}; watch zachowa ekran wyjścia` : null,
+        reportCandidate && reportCandidate !== record.report && !reportState.exists ? `Raport poza ścieżką kanoniczną; użyj report_from ze ścieżką ${reportCandidate}` : null, writeFailure ? `State write failed: ${writeFailure.reason}; old TASK.md preserved` : startupDialog ? record.promptError : unconfirmed ? record.promptError : record.promptDelivery === 'confirming' || record.promptDelivery === 'sending' ? (deliveryNote(record) ?? 'dostarczenie niepotwierdzone – sprawdzam; watch confirms within delivery_confirm_s') : record.promptDelivery === 'pending' ? 'original prompt pending; watch sends it once after folder trust and empty ready input' : stateHint(record.task, state, record.pin === true, record.supersededBy), !record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report) ? `raport pochodzi z kopii ${record.reportSource} – sprawdź` : null, record.reviewFreshness].filter(Boolean).join('; ') || null,
       // Codex: the session log names a pending request_user_input question exactly (the text of the expanded view),
       // for a collapsed one and for a waiting one alike; the screen reader covers every other dialog.
       question: (record.agent === 'codex' && (state === 'needs-input' || (settings.asyncQuestionPattern && new RegExp(settings.asyncQuestionPattern, PATTERN_FLAGS).test(screenText))) ? sessionQuestion(config, record) : undefined) ?? (state === 'needs-input' ? ((startupDialog ? record.promptError : undefined) ?? extractQuestion(screenText) ?? (stored?.outcome === 'needs-input' && stored.text !== '' ? stored.text : null)) : null),

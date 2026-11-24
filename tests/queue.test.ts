@@ -65,6 +65,55 @@ async function add(s: Setup, text: string, opts: { agent?: 'claude' | 'codex' } 
 }
 
 describe('queue: adding', () => {
+  it('FIELD0256-LAUNCH: Codex exits within grace, retries once and remains resumable with its cause', async () => {
+    const s = setup('launch-health', 'limits: {codex: 1}\ncapacity: {codex_refresh: false}\n');
+    const task = 'FACADE-AREA-DOCS-2', worktree = `${s.repo}-${task.toLowerCase()}`, window = task.toLowerCase();
+    s.tmux.newWindowScreen = composerFixture('› Ask Codex to do anything\n');
+    await add(s, specOf(s.repo, task, {agent: 'codex'}));
+    assert.deepEqual(await s.tick(), [task]);
+    fs.mkdirSync(worktree, {recursive: true});
+    await add(s, specOf(s.repo, 'DEPENDENT', {after: task}));
+    const first = s.tmux.windows.find(w => w.name === window)!;
+    first.screen = Array.from({length: 25}, (_, i) => `launch line ${i + 1}`).join('\n');
+    first.exitCode = 17;
+    await s.runner.sleep(53_000);
+    const memory = new WatchMemory();
+    await watchTick(s.ctx, memory, s.notifier);
+    await memory.queue.idle();
+    const retry = s.tmux.windows.find(w => w.name.endsWith(window))!;
+    assert.ok(retry && retry.id !== first.id, 'the original task gets one fresh window');
+    assert.equal(readTaskRecord(s.config, window)?.repos[0]?.worktree, worktree);
+    const dead = readJournal(s.config).find(e => e.kind === 'dead' && e.task === task) as {launch?: {exitCode: number; lines: string[]; logPath: string}} | undefined;
+    assert.equal(dead?.launch?.exitCode, 17);
+    assert.equal(dead?.launch?.lines.length, 20);
+    assert.equal(dead?.launch?.lines[0], 'launch line 6');
+    assert.ok(fs.existsSync(dead!.launch!.logPath));
+    retry.exitCode = 21;
+    retry.screen = 'retry failure';
+    await s.runner.sleep(20_000);
+    await watchTick(s.ctx, memory, s.notifier);
+    await watchTick(s.ctx, new WatchMemory(), s.notifier);
+    assert.equal(s.tmux.windows.some(w => w.name.endsWith(window)), false);
+    const events = readJournal(s.config);
+    assert.equal(events.filter(e => String(e.kind) === 'launch-failed' && e.task === task).length, 1);
+    assert.match(events.find(e => String(e.kind) === 'launch-failed')?.text ?? '', /kod wyjścia 21[\s\S]*retry failure/);
+    assert.ok(events.some(e => e.kind === 'blocked' && e.text.includes(`DEPENDENT czeka na martwe zadanie ${task}`)));
+    assert.match((await runCli(s.config, s.runner, ['status'])).stdout, /kod wyjścia 21[\s\S]*retry failure/);
+    const preview = await runCli(s.config, s.runner, ['resume', task], {confirm: async () => false});
+    assert.equal(preview.code, 0, preview.stderr);
+    assert.match(preview.stdout, /FACADE-AREA-DOCS-2.*original prompt/);
+    assert.match((await runCli(s.config, s.runner, ['queue', 'list'])).stdout, /DEPENDENT czeka na martwe zadanie/);
+    const secondWorktree = scratch.sub('legacy-secondary');
+    seedTask(s.config, 'LEGACY-LAUNCH', {started: '', promptDelivery: 'launching', repos: [{path: s.repo, worktree}, {path: s.repo, worktree: secondWorktree}]});
+    const legacy = await runCli(s.config, s.runner, ['resume', 'LEGACY-LAUNCH'], {confirm: async () => false});
+    assert.equal(legacy.code, 0, legacy.stderr);
+    assert.match(legacy.stdout, /LEGACY-LAUNCH.*original prompt/);
+    const resumed = await runCli(s.config, s.runner, ['resume', task, '-y']);
+    assert.equal(resumed.code, 0, resumed.stderr);
+    assert.equal(readTaskRecord(s.config, window)?.repos[0]?.worktree, worktree);
+    assert.ok(s.tmux.windows.some(w => w.name === window));
+  });
+
   it('FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible', async t => {
     let load = 0;
     t.mock.method(os, 'loadavg', () => [load, 0, 0]);

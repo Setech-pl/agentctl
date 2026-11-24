@@ -115,6 +115,7 @@ export interface FakeWindow {
   /** The screen as `capture-pane -e` shows it (ANSI colours); absent: the same as `screen`. */
   styled?: string;
   role?: string;
+  exitCode?: number;
 }
 
 /**
@@ -163,7 +164,7 @@ export class FakeTmux {
       case 'list-windows': {
         if (this.windows.length === 0) return { code: 1 };
         const format = args[args.indexOf('-F') + 1] ?? '#{window_name}';
-        return { stdout: this.windows.map((w) => format.replace('#{window_id}', w.id).replace('#{window_name}', w.name).replace('#{@agentctl-role}', w.role ?? '')).join('\n') };
+        return { stdout: this.windows.map((w) => format.replace('#{window_id}', w.id).replace('#{window_name}', w.name).replace('#{@agentctl-role}', w.role ?? '').replace('#{pane_dead}', w.exitCode === undefined ? '0' : '1').replace('#{pane_dead_status}', String(w.exitCode ?? ''))).join('\n') };
       }
       case 'has-session':
         return { code: this.windows.length ? 0 : 1 };

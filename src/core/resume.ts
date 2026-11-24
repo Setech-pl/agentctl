@@ -2,6 +2,7 @@ import { chatQuotaWait } from './chat-quotas.ts';
 import { checkHostLimit } from './host-limits.ts';
 import { installRemoteHooks } from './host-task.ts';
 import { writeLaunchScript } from './launch-script.ts';
+import { launchExitText, storeLaunchExit, trackLaunch } from './start-failure.ts';
 import { validateLaunch, launchEnvironment } from './safety.ts';
 import { assertCheckoutNotBorrowed, readonlyReviewEnvironment } from './readonly-review.ts';
 import { provider, isActive, providerCommand } from './providers/registry.ts';
@@ -10,7 +11,7 @@ import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
 import { attemptFields } from './report-state.ts';
 import fs from 'node:fs';
-import { buildResumeArgv, reportInstructions } from './agents.ts';
+import { buildAgentArgv, buildResumeArgv, promptWithHeader, reportInstructions } from './agents.ts';
 import { checkWindowLimit } from './checks.ts';
 import type { LiveWindow } from './checks.ts';
 import type { AgentName } from './config.ts';
@@ -21,7 +22,7 @@ import { liveWindows } from './plan.ts';
 import { matchKnownTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { readTaskRecord, setHeaderField, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
+import { readTaskPrompt, readTaskRecord, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
@@ -44,6 +45,7 @@ export interface ResumeCandidate {
   worktree: string;
   /** A session of the task that the hooks or the usage tap recorded; absent: `--continue` / `--last` find the latest one in the worktree. */
   sessionId?: string;
+  originalPrompt?: boolean;
   hasReport: boolean;
 }
 
@@ -61,12 +63,13 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     if (record.host) {
       if (!record.remoteDir || !record.remoteReport || ctx.hosts.connection(record.host).unreachable) continue;
       if (!opts.rows && (await ctx.hosts.forHost(record.host).exec('test', ['-d', worktree], {readOnly: true})).code !== 0) continue;
-    } else if (!fs.existsSync(worktree)) continue;
+    } else if (!record.repos.every(repo => fs.existsSync(repo.worktree))) continue;
     const hasReport = row.report === 'yes';
     if (hasReport && !opts.all) continue;
     const sessions = readTaskSessions(ctx.config, record.window);
     const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
-    out.push({ owner: record.owner, host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), hasReport });
+    const originalPrompt = !sessionId && (Boolean(row.launchExit) || record.promptDelivery === 'launching' || Boolean(record.launchAt && record.pendingPrompt && record.promptKind !== 'followup'));
+    out.push({ owner: record.owner, host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), ...(originalPrompt ? {originalPrompt} : {}), hasReport });
   }
   return out;
 }
@@ -107,7 +110,7 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   }
   const summary = [
     items.length === 0 ? 'Nothing to resume.' : `Resume ${items.length} task${items.length === 1 ? '' : 's'}:`,
-    ...items.map((c) => `  ${c.task}  ${c.agent}/${c.model}/${c.effort}  ${c.sessionId ? `session ${c.sessionId.slice(0, 8)}` : provider(c.agent).resumeLabel()}  in ${c.worktree}${c.hasReport ? '  (has a report)' : ''}`),
+    ...items.map((c) => `  ${c.task}  ${c.agent}/${c.model}/${c.effort}  ${c.sessionId ? `session ${c.sessionId.slice(0, 8)}` : c.originalPrompt ? 'original prompt' : provider(c.agent).resumeLabel()}  in ${c.worktree}${c.hasReport ? '  (has a report)' : ''}`),
     ...skipped.map((s) => `  skipped ${s.task}: ${s.reason}`),
   ];
   return { items, skipped, summary };
@@ -118,8 +121,8 @@ export interface ResumeResult {
   command: string;
 }
 
-/** Make the windows and start the agents in resume mode. The prompt is not pasted again. Stops at the first failure and says which tasks went. */
-export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined } = {}): Promise<ResumeResult[]> {
+/** Reopen saved sessions or send the original task when a dead launch left no session. */
+export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined; launchRetry?: boolean } = {}): Promise<ResumeResult[]> {
   if (ctx.runner.dryRun) return startResumed(ctx, plan, opts);
   const admission = await withStartLock(ctx, async () => {
     const fresh = await planResume(ctx, plan.items.map(c => c.task), { all: true });
@@ -130,7 +133,7 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: { self?:
   try { return await startResumed(ctx, admission.plan, opts); }
   finally { await releaseStarts(ctx, admission.ids); }
 }
-async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined }): Promise<ResumeResult[]> {
+async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfArgv | undefined; launchRetry?: boolean }): Promise<ResumeResult[]> {
   const { runner, config } = ctx;
   const results: ResumeResult[] = [];
   let sessionUp = await ctx.localTmux.hasSession();
@@ -144,9 +147,13 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     if (!c.host && !record.reviewMode) await assertCheckoutNotBorrowed(ctx, c.task);
     const order = { agent: c.agent, model: c.model, effort: c.effort as import('./config.ts').Effort, task: c.task };
     validateLaunch(config, order, record.env);
+    const previousAttempt = record.attemptId;
+    const prompt = c.originalPrompt ? readTaskPrompt(config, c.window) : undefined;
+    if (c.originalPrompt && !prompt && !record.pendingPrompt) throw new AgentctlError(`${c.task}: original prompt is unavailable`);
+    const pending = record.promptKind !== 'followup' && (c.originalPrompt || (c.sessionId && !record.deliveryStartedAt)) ? record.pendingPrompt : undefined;
     const attempt = attemptFields(record, runner.now());
     Object.assign(record, attempt);
-    await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, observed: null, observed_warning: null, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null }));
+    await withStartLock(ctx, () => setHeaderFields(runner, taskFile(config, c.window), { attempt: attempt.attempt, attempt_id: attempt.attemptId, attempt_started: attempt.attemptStarted, attempt_report_baseline: attempt.attemptReportBaseline, observed: null, observed_warning: null, turn_ended_at: null, report_candidate: null, pulled: null, summary_delivered: null, report_complete_hash: null, launch_at: null, launch_retried: opts.launchRetry ? true : null }));
     const wiring = !c.host && config.notify.events && opts.self ? planEventWiring({ attempt: record.attemptId, agent: c.agent, task: c.task, window: c.window, config, self: opts.self, env: record.env, worktree: c.worktree }) : undefined;
     for (const file of wiring?.files ?? []) {
       await runner.writeFile(file.path, file.content);
@@ -158,19 +165,32 @@ async function startResumed(ctx: Context, plan: ResumePlan, opts: { self?: SelfA
     const remoteArgs = c.host ? await installRemoteHooks(ctx, { host: c.host, remoteDir: record.remoteDir, agent: c.agent, task: c.task }, record) : undefined;
     let launchEnv = launchEnvironment(config, order, record.env);
     if (record.reviewMode) launchEnv = await readonlyReviewEnvironment(ctx, record, launchEnv);
-    const command = await writeLaunchScript(execution, record.remoteDir ?? taskDir(config, c.window), buildResumeArgv({ agent: c.agent, model: c.model, effort: c.effort as never, task: c.task, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) }, config.agents[c.agent], remoteArgs ?? wiring?.args, c.sessionId), launchEnv, !c.host);
+    const launch = { ...order, remoteControl: record.remoteControl, command: providerCommand(config, c.agent) };
+    const settings = config.agents[c.agent], hooks = remoteArgs ?? wiring?.args;
+    const argv = c.originalPrompt ? buildAgentArgv(launch, settings, hooks) : buildResumeArgv(launch, settings, hooks, c.sessionId);
+    const command = await writeLaunchScript(execution, record.remoteDir ?? taskDir(config, c.window), argv, launchEnv, !c.host);
+    const report = record.remoteReport ?? record.report;
+    const note = pending && previousAttempt ? pending.replaceAll(previousAttempt, attempt.attemptId)
+      : c.originalPrompt ? promptWithHeader({ model: c.model, effort: order.effort, prompt: prompt ?? pending!, report, reviewOf: record.reviewOf }, attempt.attemptId)
+      : reportInstructions(attempt.attemptId, report, record.reviewOf != null);
+    await queuePrompt(ctx, record, note, 'launching');
     const started = await openAgentWindow(ctx, { ...request, window: c.window, cwd: c.worktree, env: {}, sessionUp: c.host ? await tmux.hasSession() : sessionUp });
     if (started.code !== 0) throw new AgentctlError(`${c.task}: tmux could not make the window: ${started.stderr.trim() || `exit ${started.code}`}`, results.length > 0 ? `Resumed before it: ${results.map((r) => r.task).join(', ')}.` : undefined);
     if (!c.host) sessionUp = true;
     const windowId = (await tmux.windows()).find((w) => w.plain === c.window)?.id;
-    if (windowId) await setHeaderField(runner, taskFile(config, c.window), 'window_id', windowId);
+    await trackLaunch(ctx, tmux, record, windowId, opts.launchRetry);
 
     await execution.exec('tmux', ['set-option', '-w', '-t', windowId || tmux.target(c.window), '@agentctl-role', c.host ? c.window : 'task']);
     await tmux.typeCommand(c.window, command);
-    const settings = config.agents[c.agent], note = reportInstructions(attempt.attemptId, record.remoteReport ?? record.report, record.reviewOf != null);
-    const ready = await waitForReady(execution, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000) });
-    await queuePrompt(ctx, record, note);
-    if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: report instructions pending until idle: ${note}`);
+    const ready = await waitForReady(execution, tmux, c.window, { pattern: settings.readyPattern, emptyInput: true, trustPattern: settings.trustPattern, timeoutMs: Math.min(5000, settings.readyTimeout * 1000), trackExit: Boolean(windowId) });
+    if (ready.exitCode !== undefined) {
+      const fresh = readTaskRecord(config, c.window) ?? record;
+      const cause = await storeLaunchExit(ctx, fresh, ready.exitCode, ready.screen, 'okno zakończyło pracę po wznowieniu', true);
+      ctx.info(`${c.task}: ${launchExitText(cause)}`);
+    } else {
+      await setHeaderFields(runner, taskFile(config, c.window), {prompt_delivery: 'pending'});
+      if (!ready.ready || await deliverPendingPrompt(ctx, c.window) !== 'sent') ctx.info(`${c.task}: prompt pending until idle`);
+    }
     ctx.info(`${c.task}: window ${config.session}:${c.window} running ${c.agent} (model ${c.model}, effort ${c.effort}) via ${command}`);
     results.push({ task: c.task, command });
   }

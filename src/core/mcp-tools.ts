@@ -325,6 +325,7 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
     lastLine: r.lastLine,
     question: r.question,
     hint: r.hint,
+    ...(r.launchExit ? {launch_exit: r.launchExit} : {}),
     cohort: r.cohort,
     ...(r.owner ? {owner: r.owner} : {}),
     collisions: r.collide.length,
@@ -1991,7 +1992,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     const plan = scope as Awaited<ReturnType<typeof sendScope>>;
     return { target: plan.identity, message: plan.message?.id };
   }
-  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head }));
+  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead }));
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
     if (!value || typeof value !== 'object') return value;
@@ -2466,11 +2467,11 @@ function durableStatus(ctx: Context, scopedChat?: string): string {
   const entries = readQueue(ctx.config).filter(e => !inScope || inScope(e));
   const latest = new Map<string, ReturnType<typeof readJournal>[number]>();
   const inactive = new Set([...listArchivedRecords(ctx.config).map(r => r.task), ...listTaskRecords(ctx.config).filter(r => r.closed || r.cancelled || r.hidden || r.pulled || r.supersededBy).map(r => r.task)]);
-  const states = new Set(['task-start', 'queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
+  const states = new Set(['task-start', 'queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'launch-failed', 'cancelled', 'queue-failed']);
   for (const event of readJournal(ctx.config)) if (event.task && states.has(event.kind) && (!inScope || inScope(event))) latest.set(event.task, event);
   return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${durableQueueCondition(ctx.config, e, ctx.runner.now())}`),
     'Active tasks from journal/events (last known; no live window probe):',
-    ...[...latest.values()].filter(e => !inactive.has(e.task!) && !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
+    ...[...latest.values()].filter(e => !inactive.has(e.task!) && !['dead', 'launch-failed', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
 export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;

@@ -4,7 +4,8 @@ import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { applyAcceptedWrites } from '../src/core/queue.ts';
 import { readJournal } from '../src/core/journal.ts';
-import { fakeWatcher, runCli } from './helpers.ts';
+import { readTaskRecord } from '../src/core/taskstore.ts';
+import { fakeWatcher, runCli, seedTask } from './helpers.ts';
 import { gcFixture } from './field0253-gc-fixture.ts';
 
 const notifier = { notify: async () => {} };
@@ -18,6 +19,17 @@ test('FIELD0256-GC-KEEP: CLI keeps variadic and comma-delimited tasks despite fo
   assert.match(result.stdout, /Skipped \(pinned\): 3,/);
   for (const id of ['GC-0', 'GC-1', 'GC-2']) assert.match(result.stdout, new RegExp(`worktree ${id} .*keep requested`));
   assert.match(result.stdout, /worktree GC-3 .*closed task/);
+});
+
+test('FIELD0256-DEAD-GC: a clean task dead at launch is a worktree-only safe candidate', async () => {
+  const { config, ctx } = gcFixture('dead-gc', 1, false);
+  const existing = readTaskRecord(config, 'gc-0')!;
+  seedTask(config, 'GC-0', {...existing, started: '', closed: false, promptDelivery: 'launching'});
+  const preview = await tool('gc_preview').run({context: () => ctx, notify: async () => {}}, {});
+  assert.match(preview.text, /dead without commits/);
+  const view = JSON.parse(preview.text);
+  assert.equal(view.sections.remove.count, 1);
+  assert.equal(view.sections.remove.items[0].kind, 'worktree');
 });
 
 test('FIELD0256-GC-EVENT: deferred cohort GC publishes one summary', async () => {

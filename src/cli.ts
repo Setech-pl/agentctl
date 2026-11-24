@@ -1191,7 +1191,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('resume')
-    .description('After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume <session> or --continue, Codex with "resume <session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first.')
+    .description('Reopen a task with its saved worktrees under the same ID. Takes up the saved conversation when one exists, and resends the original prompt if a dead launch established no session. Keeps the provider, model and effort. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first.')
     .argument('[tasks...]', 'task IDs; a unique prefix is enough. Default: every task that can be resumed')
     .option('--all', 'also tasks that already have a report')
     .option('-y, --yes', 'do not ask')

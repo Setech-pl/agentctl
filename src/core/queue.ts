@@ -12,7 +12,7 @@ import { activeProviders, perProvider, isActive } from './providers/registry.ts'
 import { releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
-import { closeFailedStartWindow, keepFailedWindow, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
+import { closeFailedStartWindow, keepFailedWindow, LaunchExited, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
 import { withFileLock } from './file-lock.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
@@ -706,7 +706,7 @@ export async function unblockEntry(ctx: Context, input: string, opts: { dropAfte
     if (dropped.length === 0) throw new AgentctlError(`${entry.task} does not wait for ${opts.dropAfter}`, entry.after.length > 0 ? `Its after: ${entry.after.join(', ')}` : `${entry.task} has no after.`);
   } else {
     if (!blocked) throw new AgentctlError(`${entry.task} is not blocked`, entry.after.length > 0 ? `It waits for ${entry.after.join(', ')}; "agentctl unblock ${entry.task} --drop-after <task>" removes one of them.` : undefined);
-    dropped = [...blocked.cancelled, ...blocked.blocked, ...(blocked.verdicts ?? []).map(v => v.task)];
+    dropped = [...blocked.cancelled, ...(blocked.dead ?? []), ...blocked.blocked, ...(blocked.verdicts ?? []).map(v => v.task)];
   }
   const after = entry.after.filter((t) => !dropped.includes(t));
   const raw = splitSpecs(entry.spec, `queue entry ${entry.task}`)[0] as RawSpec;
@@ -761,7 +761,12 @@ export async function announceBlocked(ctx: Context, notifier: Notifier, rows: re
   const blocked = findBlocked(entries.map((e) => ({ ...e, after: effectiveAfter(ctx.config, e, rows, ctx.runner.now()) })), rows, verdictClock(ctx.config, ctx.runner.now()));
   for (const entry of entries) {
     const b = blocked.get(entry.task);
-    const reasons = b ? [...b.cancelled.map(task => ({ key: task, text: `${task} anulowane` })), ...(b.verdicts ?? []).map(v => ({ key: `${v.task}:${v.reason}`, text: `${v.task}: ${v.reason}` }))] : [];
+    const deadText = (task: string) => `${entry.task} czeka na martwe zadanie ${task}`;
+    const reasons = b ? [
+      ...b.cancelled.map(task => ({ key: task, text: `${task} anulowane; ${deadText(task)}` })),
+      ...(b.dead ?? []).map(task => ({ key: `${task}:dead`, text: deadText(task) })),
+      ...(b.verdicts ?? []).map(v => ({ key: `${v.task}:${v.reason}`, text: `${v.task}: ${v.reason}` })),
+    ] : [];
     const fresh = reasons.filter(r => !(entry.blockedNotified ?? []).includes(r.key));
     if (!b || fresh.length === 0) continue;
     await writeEntry(ctx, { ...entry, blockedNotified: [...(entry.blockedNotified ?? []), ...fresh.map(r => r.key)] });
@@ -950,7 +955,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
       return { position, entry, condition: { kind: 'ready', text: config.queue.enabled ? 'uruchamiane – czeka na najbliższy tick watch' : 'queue.enabled is false; the watcher does not start it' }, since: entry.queuedAt };
     }
     const stuck = blocked.get(entry.task);
-    if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck), blockers: stuck }, since: entry.queuedAt };
+    if (stuck) return { position, entry, condition: { kind: 'blocked', text: blockedText(stuck, entry.task), blockers: stuck }, since: entry.queuedAt };
     if (paused) return { position, entry, condition: { kind: 'paused', text: reason }, since: entry.queuedAt };
     if (entry.retryAt && Date.parse(entry.retryAt) > nowMs) return { position, entry, condition: { kind: 'hold', text: `retry at ${entry.retryAt}: ${entry.error ?? ''}` }, since: entry.queuedAt };
     const unmet = unmetAfter(effectiveAfter(config, entry, rows, nowMs), rows, entry.afterVerdicts);
@@ -1216,7 +1221,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host, owner: i.owner }); }
 
   // A block that the author's corrected report lifted is said before the released task starts (P94).
-  await announceReleased(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
+  await announceBlocked(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
   entries = readQueue(config);
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());
@@ -1437,6 +1442,11 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await notifyPlain(ctx, notifier, entry.task, done, opts.self);
       await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
+      if (e instanceof LaunchExited) {
+        await dropEntry(ctx, starting);
+        await opts.log?.(`queue: ${entry.task}: ${e.message.split('\n')[0]}`);
+        return;
+      }
       if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
       if (e instanceof ReviewBlocked) { await blockEntryReview(ctx, entry, e); return; }
       if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
