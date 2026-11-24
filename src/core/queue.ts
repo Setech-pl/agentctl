@@ -1,4 +1,7 @@
 import { checkHostLimit } from './host-limits.ts';
+import { collectMachine } from './machine.ts';
+import { readReservations, reservationText } from './limits.ts';
+import type { Reservations } from './limits.ts';
 import { peakHold } from './peak.ts';
 import { freshTaskDiskStartHold, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { expireProviderHolds, providerHolds } from './provider-hold.ts';
@@ -107,6 +110,9 @@ export interface QueueEntry {
   startingPid?: number;
   /** The cancelled authors of `after` that the watcher has announced as "blocked" already (once per author). */
   blockedNotified?: string[];
+  /** The once-per-registration hold event was emitted. */
+  holdNotified?: boolean;
+  holdReason?: string;
   /** Mount point that blocked this start. Remounting alone does not restart an interrupted checkout. */
   volumeBlock?: string;
   reviewBlock?: { text: string; retryOnUpdate: boolean };
@@ -381,6 +387,29 @@ async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: P
 // ---- explicit starts handed to the watcher
 
 const workerFile = (config: Pick<GlobalConfig, 'stateDir'>): string => path.join(config.stateDir, 'queue-worker.json');
+function workerAt(config: Pick<GlobalConfig, 'stateDir'>): number | undefined {
+  try { const {at} = JSON.parse(fs.readFileSync(workerFile(config), 'utf8')); return typeof at === 'number' ? at : undefined; }
+  catch { return undefined; }
+}
+
+export function durableQueueCondition(config: GlobalConfig, entry: QueueEntry, now: number, lastTick = workerAt(config)): string {
+  const interval = config.watch.interval * 1000;
+  if ((entry.status === 'queued' || entry.status === 'accepted') && now - Date.parse(entry.queuedAt) >= interval && config.queue.enabled && (lastTick === undefined || now - lastTick > 2 * interval)) return 'WSTRZYMANE: opóźnienie watch';
+  if (entry.status === 'queued' && entry.holdReason) return `WSTRZYMANE: ${entry.holdReason}`;
+  return entry.status === 'queued' ? 'registered' : entry.status;
+}
+
+function queueLoadHold(config: GlobalConfig): string | undefined {
+  if (config.capacity.loadThreshold === undefined) return undefined;
+  const machine = collectMachine(config);
+  return machine.overloaded ? `obciążenie (load1 ${machine.loadAverage[0]!.toFixed(1)} > ${machine.threshold})` : undefined;
+}
+
+function providerSlotWait(config: GlobalConfig, agent: AgentName, used: number, reservations: Reservations): string | undefined {
+  const wait = globalQuotaWait(config, agent, used);
+  const reservation = reservations[agent];
+  return wait && reservation && !globalQuotaWait(config, agent, used - reservation.count) ? reservationText(agent, reservation) : wait;
+}
 
 /** Every tick of the watcher says it is there: the MCP `new` only hands a start over to a watcher that is alive. */
 async function touchWorker(ctx: Context): Promise<void> {
@@ -771,7 +800,7 @@ async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry
   // An old-format automatic review is rebuilt BEFORE any residue check: the residue it complains about is the author's checkout it must not use.
   if (entry.unvalidated) {
     // The spec never passed the watcher's validation (P93): it goes back to it, in its place; the watcher checks it again at its next tick.
-    const { failedAt: _f, error: _e, ...rest } = entry;
+    const { failedAt: _f, error: _e, holdNotified: _hold, holdReason: _reason, ...rest } = entry;
     const again: QueueEntry = { ...rest, status: 'accepted' };
     await writeEntry(ctx, again);
     return again;
@@ -782,7 +811,7 @@ async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry
   // P96: a failed start keeps its window (start_failure.keep_window); the fresh start needs the name, so the old window goes, its capture stays.
   await closeFailedStartWindow(ctx, entry.task);
   const highest = readQueue(ctx.config).reduce((n, e) => Math.max(n, e.order, e.seq), 0);
-  const { failedAt: _f, error: _e, startingAt: _s, reviewBlock: _b, ...rest } = entry;
+  const { failedAt: _f, error: _e, startingAt: _s, reviewBlock: _b, holdNotified: _hold, holdReason: _reason, ...rest } = entry;
   const again: QueueEntry = { ...rest, status: 'queued', order: highest + 1, ...(entry !== original && !entry.reuse ? {} : { reuse: true }) };
   if (entry !== original && entry.autoReview) await syncReviewLedger(ctx, entry.autoReview.author, entry.task, entry.autoReview.heads);
   await writeEntry(ctx, again);
@@ -877,7 +906,10 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   const cancelled = cancelledTasks(rows);
   // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
   const holds = queueHolds(config, nowMs);
+  const loadHold = queueLoadHold(config);
+  const reservations = readReservations(config, nowMs);
   const heavy = heavyBudget(config, entries, live);
+  const parallelFull = entries.filter(e => e.status === 'starting').length >= config.queue.parallelStarts;
   const hostSlots = [...live, ...entries.filter(e => e.status === 'starting' && !live.some(w => w.window === e.task.toLowerCase()))];
   let setups = setupSlots(config, entries);
   let position = 0;
@@ -894,6 +926,8 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (peak) return {position, entry, condition: {kind: 'hold', text: peak}, since: entry.queuedAt};
     const diskHold = taskDiskStartHold(config, entry.host, repos, nowMs);
     if (diskHold) return {position, entry, condition: {kind: 'hold', text: diskHold}, since: entry.queuedAt};
+    if (loadHold) return {position, entry, condition: {kind: 'hold', text: loadHold}, since: entry.queuedAt};
+    if (parallelFull) return {position, entry, condition: {kind: 'slot', text: 'czeka na równoległy start'}, since: entry.queuedAt};
     if (setups >= config.queue.maxParallelSetups) return {position, entry, condition: {kind: 'slot', text: `czeka na setup: ${setups}/${config.queue.maxParallelSetups}`}, since: entry.queuedAt};
     const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
     if (heavyReason) {
@@ -930,7 +964,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     const held = holds[entry.agent];
     if (held) return { position, entry, condition: { kind: 'hold', text: held }, since: entry.queuedAt };
     if (!config.quotas) {
-      const text = globalQuotaWait(config, entry.agent, used[entry.agent]);
+      const text = providerSlotWait(config, entry.agent, used[entry.agent], reservations);
       if (text) return { position, entry, condition: { kind: 'slot', text }, since: entry.queuedAt };
       used[entry.agent]++;
       hostSlots.push(entry);
@@ -943,7 +977,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     const ready = new Map(views.filter(view => view.condition.kind === 'ready').map(view => [view.entry, view]));
     while (ready.size) {
       for (const [entry, view] of ready) {
-        const reason = globalQuotaWait(config, entry.agent, used[entry.agent]) ?? chatQuotaWait(config, entry, hostSlots)
+        const reason = providerSlotWait(config, entry.agent, used[entry.agent], reservations) ?? chatQuotaWait(config, entry, hostSlots)
           ?? checkHostLimit(config, entry, hostSlots)
           ?? (setups >= config.queue.maxParallelSetups ? `czeka na setup: ${setups}/${config.queue.maxParallelSetups}` : undefined)
           ?? heavyWait(config, isHeavy(entry), heavy.size);
@@ -961,7 +995,16 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
       if (isHeavy(next)) heavy.add(next.task);
     }
   }
-  return views.map(view => ({ ...view, ...(config.quotas && !view.entry.owner ? {entry: {...view.entry, owner: DEFAULT_OWNER}} : {}), condition: { ...view.condition, text: redact(view.condition.text) } }));
+  const lastTick = workerAt(config);
+  return views.map(view => {
+    const {entry, condition} = view;
+    const interval = config.watch.interval * 1000;
+    const lag = config.queue.enabled && (condition.kind === 'ready' || condition.kind === 'accepted') && nowMs - Date.parse(entry.queuedAt) >= interval
+      && (lastTick === undefined || nowMs - lastTick > 2 * interval);
+    const text = lag ? 'WSTRZYMANE: opóźnienie watch'
+      : entry.holdNotified && entry.status === 'queued' && condition.kind !== 'ready' ? `WSTRZYMANE: ${condition.text}` : condition.text;
+    return { ...view, ...(config.quotas && !entry.owner ? {entry: {...entry, owner: DEFAULT_OWNER}} : {}), condition: { ...condition, text: redact(text) } };
+  });
 }
 
 /** The clock of the verdict rules (P94): now and `report.settle_s`. */
@@ -1032,6 +1075,26 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
   return [fmt(header), ...body.map(fmt)];
 }
 
+async function recordHeldOrders(ctx: Context, reasons: ReadonlyMap<number, string>): Promise<void> {
+  if (!reasons.size) return;
+  await withStartLock(ctx, async () => {
+    for (const fresh of readQueue(ctx.config)) {
+      const reason = reasons.get(fresh.seq);
+      if (!reason || fresh.holdNotified || (fresh.status !== 'queued' && fresh.status !== 'accepted')) continue;
+      await recordJournal(ctx, { kind: 'queue-held', task: fresh.task, owner: fresh.owner, cohort: fresh.cohort, text: `WSTRZYMANE: ${reason}` });
+      await writeEntry(ctx, { ...fresh, holdNotified: true, holdReason: reason });
+    }
+  });
+}
+
+async function recordUndispatchedOrders(ctx: Context, live: Awaited<ReturnType<typeof liveWindows>>, rows: StatusRow[]): Promise<void> {
+  const entries = readQueue(ctx.config);
+  if (!entries.some(e => e.status === 'queued' && !e.holdNotified)) return;
+  const views = describeQueue(ctx.config, entries, live, rows, ctx.runner.now());
+  await recordHeldOrders(ctx, new Map(views.filter(({entry, condition}) => entry.status === 'queued' && !entry.holdNotified && !['after', 'blocked'].includes(condition.kind))
+    .map(({entry, condition}) => [entry.seq, condition.kind === 'ready' ? 'czeka na kolejny tick watch' : condition.text])));
+}
+
 // ---- starting
 
 /** What `watch` remembers about the starts it has begun. */
@@ -1088,6 +1151,10 @@ async function closeNeverReadyWindow(ctx: Context, task: string, opts: { force?:
 export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
   const { config } = ctx;
   await expireProviderHolds(ctx);
+  const now = ctx.runner.now(), interval = config.watch.interval * 1000, lastTick = workerAt(config);
+  if (config.queue.enabled && (lastTick === undefined || now - lastTick > 2 * interval)) {
+    await recordHeldOrders(ctx, new Map(readQueue(config).filter(entry => (entry.status === 'queued' || entry.status === 'accepted') && !entry.holdNotified && now - Date.parse(entry.queuedAt) >= interval).map(entry => [entry.seq, 'opóźnienie watch'])));
+  }
   await touchWorker(ctx);
   // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
   await validateAccepted(ctx, notifier, opts);
@@ -1097,7 +1164,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     const mount = missingWorktreeVolume(entryWorktrees(config, entry));
     if (mount) await blockEntryVolume(ctx, entry, mount, notifier, opts.self);
   }
-  if (!config.queue.enabled) return [];
+  if (!config.queue.enabled) {
+    await recordHeldOrders(ctx, new Map(waiting(readQueue(config)).filter(e => !e.holdNotified).map(entry => [entry.seq, 'queue.enabled is false'])));
+    return [];
+  }
   // A paused queue starts nothing that waits in line; an explicit start (`direct`) is not in the line.
   const paused = isPaused(config);
   let entries = readQueue(config);
@@ -1134,7 +1204,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     } else await failEntry(ctx, entry, 'the start was interrupted (the watcher stopped before it finished)', notifier, opts, false);
   }
   entries = readQueue(config);
-  if (paused && !entries.some(e => e.direct)) return [];
+  if (paused && !entries.some(e => e.direct)) {
+    await recordHeldOrders(ctx, new Map(waiting(entries).filter(e => !e.holdNotified).map(entry => [entry.seq, 'queue paused (agentctl queue resume)'])));
+    return [];
+  }
   const live = await liveWindows(ctx);
   const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -1149,6 +1222,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
   const candidates: QueueEntry[] = [];
+  const loadHold = queueLoadHold(config);
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
     && !chatQuotaWait(config, entry, live) && !checkHostLimit(config, entry, live);
   const start = async (entry: QueueEntry): Promise<void> => {
@@ -1164,6 +1238,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   };
   for (const entry of waiting(entries)) {
     if (entry.volumeBlock) continue;
+    if (loadHold) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     const author = directAuthorState(config, entry, readQueue(config));
@@ -1222,6 +1297,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     await start(next);
   }
   for (const task of [...memory.held.keys()]) if (!stillHeld.has(task)) memory.held.delete(task);
+  await recordUndispatchedOrders(ctx, live, rows);
   return began;
 }
 
@@ -1275,7 +1351,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   let entry = initial;
   let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
-    if (fresh.volumeBlock || entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
+    if (fresh.volumeBlock || queueLoadHold(config) || entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
     const slots = await liveWindows(ctx);
     if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), slots).size)) return false;
     if (config.quotas) {

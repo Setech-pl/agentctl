@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0256-HOLD | Registered orders stayed idle without a hold event or a visible owner reservation reason. | `tests/queue.test.ts` (`^FIELD0256-HOLD:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-CHAT-USAGE | Named chats lacked a common footer showing their effective quotas and global headroom. | `tests/owner-limits.test.ts` (`^FIELD0256-CHAT-USAGE:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-COUNTS | Capacity and events disagreed on ready reports and stale status listed pulled or closed tasks as active. | `tests/capacity.test.ts` (`^FIELD0256-COUNTS:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-EVENTS | A chat saw unrelated task events and truncated raw JSON GC results. | `tests/a2-wall-events.test.ts` (`^FIELD0256-EVENTS:`)<br>`tests/field0253-gc.test.ts` (`^FIELD0256-GC-EVENT:`) | 0.27.1 | fails on v0.27.0 (2 failing of 2) |

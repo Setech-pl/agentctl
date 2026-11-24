@@ -1,5 +1,5 @@
 import { peakLines } from './core/peak.ts';
-import { providerHoldLines } from './core/provider-hold.ts';
+import { holdUntil, providerHoldLines } from './core/provider-hold.ts';
 import { pulledCohortTasks, checkPulledClose } from './core/pulled.ts';
 import { acceptConsult, planConsult } from './core/consult.ts';
 import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, renderReadTimings } from './core/doctor-timings.ts';
@@ -67,7 +67,7 @@ import type { FetchLike } from './core/phone.ts';
 import { awayReport, phoneActive, renderAway, setAway } from './core/away.ts';
 import { channelSummaries, cliWallIdentity, findMessage, postMessage, readOwnerState, readThread, readWall, renderRead, renderThread, setStatus, taskShell, WALL_KINDS, WALL_STATUSES } from './core/wall.ts';
 import type { WallIdentity, WallKind, WallStatus } from './core/wall.ts';
-import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces } from './core/limits.ts';
+import { applySetLimits, collectLimits, parseAssignments, parseCounts, parseHoldArgs, planSetLimits, releasePlaces, renderLimits, reservePlaces, reservationLines } from './core/limits.ts';
 import { decideLimitRequest, pendingLimitRequests } from './core/limit-requests.ts';
 import { collectOverlaps, renderOverlaps, touchWarnings } from './core/collisions.ts';
 import type { NewOptions, NewResult } from './core/new.ts';
@@ -880,7 +880,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         const disk = await collectDisk(ctx);
         if (opts.json) return line(JSON.stringify(rows, null, 2));
         for (const m of listCohorts(ctx.config).filter(m => m.note?.startsWith('CONSULT ') && (cohort === undefined || m.name === cohort))) line(`${m.name}: ${m.note}`);
-        for (const hold of [...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now())]) line(hold);
+        for (const hold of [...providerHoldLines(ctx.config, ctx.runner.now()), ...reservationLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now())]) line(hold);
         if (opts.detail) line(machineLine(collectMachine(ctx.config)));
         line(diskLine(disk));
         if (rows.length === 0) {
@@ -996,10 +996,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .description('Hold places for agents you start by hand (they count against the limit, so the queue leaves room for them). Several reservations add up; "limits release" gives them back.')
     .argument('<places...>', 'claude=1 codex=2 (a bare provider name means 1)')
     .option('--note <text>', 'what the place is for (shown by "limits")')
+    .option('--until <time>', 'expire this provider’s reservation at HH:MM, an ISO time, or after a duration (e.g. 3h)')
     .action(
-      guarded(async (places: string[], opts: { note?: string }) => {
+      guarded(async (places: string[], opts: { note?: string; until?: string }) => {
         const ctx = contextFor(false, { migrate: false });
-        const reservations = await reservePlaces(ctx, parseCounts(places, 1, activeProviders(ctx.config)), opts.note);
+        const reservations = await reservePlaces(ctx, parseCounts(places, 1, activeProviders(ctx.config)), opts.note, opts.until ? holdUntil(opts.until, ctx.runner.now()) : undefined);
         line(`Reserved: ${Object.entries(reservations).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ')}`);
       }),
     );

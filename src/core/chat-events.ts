@@ -289,6 +289,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'task-start': 'START',
   'task-ordered': 'ZLECENIE',
   'queue-start': 'START',
+  'queue-held': 'KOLEJKA',
   'queue-failed': 'BŁĄD STARTU',
   'setup-started': 'SETUP',
   'setup-finished': 'SETUP OK',

@@ -5,7 +5,7 @@ import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from '
 import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from './watch-snapshot.ts';
 import { peakLines, peakHold } from './peak.ts';
 import { pulledOpen, pulledSummary, pulledCohortTasks, checkPulledClose } from './pulled.ts';
-import { readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
+import { holdUntil, readProviderHoldState, providerHoldText, providerHoldLines } from './provider-hold.ts';
 import { withStartLock } from './start-lock.ts';
 import { commitQueueAdd } from './queue.ts';
 import { acceptConsult, planConsult } from './consult.ts';
@@ -67,7 +67,7 @@ import { stableScript } from './mcp-install.ts';
 import { closeTasks, planClose, resolveCloseTasks } from './close.ts';
 import { cohortEntries, cohortRows, findCohort, openCohortTasks, summarizeCohorts } from './cohort.ts';
 import { collectOverlaps, collideText } from './collisions.ts';
-import { ACCEPTED_TEXT, acceptSpecs, isPaused, describeQueue, directStartText, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
+import { ACCEPTED_TEXT, acceptSpecs, isPaused, describeQueue, directStartText, durableQueueCondition, findDirectStart, planQueueAdd, queueDependencyRows, readQueue, removeFromQueue, waiting, watchAlive, withAcceptLock } from './queue.ts';
 import { acceptedText, deferMcpWrites, gcPreviewPlanFile, readMcpRequest, readMcpRequests, recordMcpRequest } from './mcp-requests.ts';
 import type { McpRequest } from './mcp-requests.ts';
 import { readSetupProgress } from './setup-progress.ts';
@@ -101,7 +101,7 @@ import { collectUsage } from './usage-report.ts';
 import { planResume, resumeTasks } from './resume.ts';
 import { planGc, renderGc, gcResultLine, gcView } from './gc.ts';
 import { chatEventScope, collectEvents, renderEvents } from './chat-events.ts';
-import { QUOTA_DECISION_HINT, applySetLimits, chatUsageLine, collectLimits, compactLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservePlaces } from './limits.ts';
+import { QUOTA_DECISION_HINT, applySetLimits, chatUsageLine, collectLimits, compactLimits, holdText, parseHoldInput, planSetLimits, readReservations, releasePlaces, reservationLines, reservePlaces } from './limits.ts';
 import type { LimitAssignments } from './limits.ts';
 import { requestLimitChange } from './limit-requests.ts';
 import { planLine } from './usage-report.ts';
@@ -371,6 +371,7 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   if (colliding.length > 0) extra.push(`⚠${colliding.length} tasks overlap; overlap has details.`);
   extra.push(...peakLines(ctx.config, ctx.runner.now()));
   extra.push(...providerHoldLines(ctx.config, ctx.runner.now()));
+  extra.push(...reservationLines(ctx.config, ctx.runner.now()));
   extra.push(awayLine(ctx));
   const disk = await collectDisk(ctx);
   extra.push(diskLine(disk));
@@ -526,7 +527,7 @@ async function runLimits(deps: McpDeps): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const rows = await collectStatus(ctx, {progress: false, cachedOnly: true, shallowClosed: true});
   const report = collectLimits(ctx.config, await liveWindows(ctx, rows), ctx.runner.now(), true, rows);
-  const reserved = readReservations(ctx.config);
+  const reserved = readReservations(ctx.config, ctx.runner.now());
   return ok(
     `Limits of simultaneous agents per provider. used = windows of agentctl + reserved places + external sessions (counted only if countExternal is true); free = limit - used; queued = tasks waiting for a place of that provider.\n\n${JSON.stringify({ ...report, reservations: reserved }, null, 2)}`,
   );
@@ -601,18 +602,20 @@ async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolRes
   });
 }
 
-async function runReserve(deps: McpDeps, args: Partial<Record<AgentName, number>> & { note?: string | undefined; release?: boolean | undefined; confirm?: boolean | undefined }): Promise<ToolResult> {
+async function runReserve(deps: McpDeps, args: Partial<Record<AgentName, number>> & { note?: string; until?: string; release?: boolean; confirm?: boolean }): Promise<ToolResult> {
   return writeTool(deps, 'reserve', { detail: `${args.release ? 'release ' : ''}${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const counts: Partial<Record<(typeof AGENT_NAMES)[number], number | undefined>> = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined && args[agent] !== 0) counts[agent] = args[agent];
     if (Object.keys(counts).length === 0) throw new AgentctlError(`give ${activeProviders(ctx.config).join(' and/or ')} (a number from 1)`);
     const what = Object.entries(counts).map(([a, n]) => `${a} ${n}`).join(', ');
+    if (args.release && args.until) throw new AgentctlError('until applies only to a reservation');
+    const until = args.until ? holdUntil(args.until, ctx.runner.now()) : undefined;
     if (!args.confirm) {
-      const have = Object.entries(readReservations(ctx.config)).map(([a, r]) => `${a} ${r.count}${r.note ? ` (${r.note})` : ''}`).join(', ') || 'nothing';
-      return { text: `${args.release ? 'Release' : 'Reserve'} places: ${what}${args.note ? ` – ${args.note}` : ''}. Reserved now: ${have}. A reserved place counts against the limit, so the queue leaves room for an agent the user starts by hand.\n\nNot done yet. Ask the user, then call reserve again with confirm: true.`, executed: false, announce: '' };
+      const have = reservationLines(ctx.config, ctx.runner.now()).join(', ') || 'nothing';
+      return { text: `${args.release ? 'Release' : 'Reserve'} places: ${what}${args.note ? ` – ${args.note}` : ''}${until ? ` until ${formatLocalTime(until)}` : ''}. Reserved now: ${have}. A reserved place counts against the limit, so the queue leaves room for an agent the user starts by hand.\n\nNot done yet. Ask the user, then call reserve again with confirm: true.`, executed: false, announce: '' };
     }
     if (args.release) await releasePlaces(ctx, counts);
-    else await reservePlaces(ctx, counts, args.note);
+    else await reservePlaces(ctx, counts, args.note, until);
     return { text: `${args.release ? 'Released' : 'Reserved'}: ${what}.`, executed: true, announce: `${args.release ? 'zwolnienie' : 'rezerwacja'} ${what}` };
   });
 }
@@ -1413,9 +1416,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'WRITE, off unless the user put "reserve" in mcp.allow. Holds places of a provider for agents the user starts by hand (they count against the limit, so the queue leaves room); release: true gives places back. Numbers are how many places. ' +
       'The FIRST call (confirm omitted) only describes it; ask the user, then call again with confirm: true.',
-    input: { ...perProvider(DEFAULT_PROVIDERS, id => limitArg.describe(`Places of ${provider(id).displayName}.`)), note: z.string().max(100).optional().describe('What the place is for (shown by limits).'), release: z.boolean().optional().describe('true: give the places back instead of reserving.'), confirm: z.boolean().optional().describe('true only after the user agreed.') },
+    input: { ...perProvider(DEFAULT_PROVIDERS, id => limitArg.describe(`Places of ${provider(id).displayName}.`)), note: z.string().max(100).optional().describe('What the place is for (shown by limits).'), until: z.string().max(40).optional().describe('Expiration cue: local HH:MM, ISO timestamp or duration (3h).'), release: z.boolean().optional().describe('true: give the places back instead of reserving.'), confirm: z.boolean().optional().describe('true only after the user agreed.') },
     annotations: { title: 'Reserve places for agents started by hand', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    run: (deps, args) => guarded(() => runReserve(deps, args as { claude?: number; codex?: number; note?: string; release?: boolean; confirm?: boolean })),
+    run: (deps, args) => guarded(() => runReserve(deps, args as Parameters<typeof runReserve>[1])),
   }),
   def({
     name: 'version',
@@ -2004,7 +2007,7 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
   if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
   if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, limitSettings: ctx.config.limitSettings, profile: ctx.config.limitRuntime.profile, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
-  if (name === 'reserve') return { reservations: readReservations(ctx.config) };
+  if (name === 'reserve') return { reservations: readReservations(ctx.config, ctx.runner.now()) };
   if (name === 'queue_up' || name === 'queue_rm') {
     const entry = findEntry(ctx.config, args.task as string);
     if (name === 'queue_up' && entry.status !== 'queued') throw new AgentctlError(`${entry.task} is ${entry.status}, not waiting`);
@@ -2465,7 +2468,7 @@ function durableStatus(ctx: Context, scopedChat?: string): string {
   const inactive = new Set([...listArchivedRecords(ctx.config).map(r => r.task), ...listTaskRecords(ctx.config).filter(r => r.closed || r.cancelled || r.hidden || r.pulled || r.supersededBy).map(r => r.task)]);
   const states = new Set(['task-start', 'queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
   for (const event of readJournal(ctx.config)) if (event.task && states.has(event.kind) && (!inScope || inScope(event))) latest.set(event.task, event);
-  return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.status === 'queued' ? 'registered' : e.status}`),
+  return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${durableQueueCondition(ctx.config, e, ctx.runner.now())}`),
     'Active tasks from journal/events (last known; no live window probe):',
     ...[...latest.values()].filter(e => !inactive.has(e.task!) && !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
@@ -2495,6 +2498,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
   const snapshot = { version: 1, at: at ?? ctx.runner.now(), interval: ctx.config.watch.interval,
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
     providerHolds: readProviderHoldState(ctx.config).holds,
+    reservations: readReservations(ctx.config, ctx.runner.now()),
     rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
   if (signal?.aborted) return;
@@ -2539,10 +2543,11 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
         ...((explicit || name === 'capacity') && capacity ? {capacity, capacity_at: capacityAt} : {}),
       }, null, 2));
       return ok([note, diskLine(freshDisk), ...((explicit || name === 'capacity') && capacity
-        ? [`Capacity from snapshot (${capacityAt}):`, ...snapshotLines(capacity)] : []), fallback].filter(Boolean).join('\n'));
+        ? [`Capacity from snapshot (${capacityAt}):`, ...snapshotLines(capacity)] : []), fallback, ...(name === 'status' ? reservationLines(ctx.config, now) : [])].filter(Boolean).join('\n'));
     }
     if (snap.degraded || (age >= 2 * ctx.config.watch.interval * 1000 && !(name === 'capacity' || name === 'status' && explicit))
       || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
+      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now))
       || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
     if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
@@ -2557,7 +2562,7 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
       const shown = rows.slice(offset, offset + limit);
       const statusData = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
       const overlaps = shown.filter(r => r.collide.length > 0).length;
-      text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
+      text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...reservationLines(ctx.config, now), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
       const capacity: Capacity = snap.capacity;
       const [change] = capacityChangeLine(deps, ctx, capacity.providers.map(p => ({
         provider: p.provider, windows: p.windows, free: p.slots.free,

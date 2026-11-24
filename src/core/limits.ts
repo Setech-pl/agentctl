@@ -16,7 +16,7 @@ import { recordJournal, recordJournalOnce } from './journal.ts';
 import { withFileLock, withStateWriteLock } from './file-lock.ts';
 import { atomicWriteFile } from './atomic-file.ts';
 import { readQueue, waiting, watchAlive } from './queue.ts';
-import { AgentctlError, errorMessage, isObject, Problems } from './util.ts';
+import { AgentctlError, errorMessage, formatLocalTime, isObject, Problems } from './util.ts';
 import { OWNER_IDENTITY, postMessage } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
 import path from 'node:path';
@@ -37,20 +37,21 @@ export interface Reservation {
   note?: string;
   /** ISO time of the last change. */
   at: string;
+  until?: string;
 }
 
 export type Reservations = Partial<Record<AgentName, Reservation>>;
 
 export const reservationsFile = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'reservations.json');
 
-export function readReservations(config: Pick<GlobalConfig, 'path'>): Reservations {
+export function readReservations(config: Pick<GlobalConfig, 'path'>, now = Date.now()): Reservations {
   try {
     const data: unknown = JSON.parse(fs.readFileSync(reservationsFile(config), 'utf8'));
     const out: Reservations = {};
     if (typeof data === 'object' && data !== null) {
       for (const agent of PROVIDER_IDS) {
         const r = (data as Record<string, unknown>)[agent] as Partial<Reservation> | undefined;
-        if (r && typeof r.count === 'number' && r.count > 0) out[agent] = { count: Math.floor(r.count), ...(typeof r.note === 'string' && r.note !== '' ? { note: r.note } : {}), at: typeof r.at === 'string' ? r.at : '' };
+        if (r && typeof r.count === 'number' && r.count > 0 && (!r.until || Date.parse(r.until) > now)) out[agent] = { count: Math.floor(r.count), ...(typeof r.note === 'string' && r.note !== '' ? { note: r.note } : {}), at: typeof r.at === 'string' ? r.at : '', ...(r.until ? {until: r.until} : {}) };
       }
     }
     return out;
@@ -78,14 +79,15 @@ export function parseCounts(args: string[], bare: number | undefined, ids: reado
   return out;
 }
 
-export async function reservePlaces(ctx: Context, counts: Partial<Record<AgentName, number | undefined>>, note?: string): Promise<Reservations> {
-  const reservations = readReservations(ctx.config);
+export async function reservePlaces(ctx: Context, counts: Partial<Record<AgentName, number | undefined>>, note?: string, until?: string): Promise<Reservations> {
+  const reservations = readReservations(ctx.config, ctx.runner.now());
   const at = new Date(ctx.runner.now()).toISOString();
   for (const agent of activeProviders(ctx.config)) {
     const n = counts[agent];
     if (n === undefined) continue;
     const have = reservations[agent];
-    reservations[agent] = { count: (have?.count ?? 0) + n, ...(note ? { note } : have?.note ? { note: have.note } : {}), at };
+    const expires = until ?? have?.until;
+    reservations[agent] = { count: (have?.count ?? 0) + n, ...(note ? { note } : have?.note ? { note: have.note } : {}), at, ...(expires ? {until: expires} : {}) };
   }
   await writeReservations(ctx, reservations);
   await recordJournal(ctx, { kind: 'limits-changed', text: `zarezerwowano ${describeCounts(counts)}${note ? ` (${note})` : ''}` });
@@ -94,7 +96,7 @@ export async function reservePlaces(ctx: Context, counts: Partial<Record<AgentNa
 
 /** Release places; a provider without a number is released completely. */
 export async function releasePlaces(ctx: Context, counts: Partial<Record<AgentName, number | undefined>>): Promise<Reservations> {
-  const reservations = readReservations(ctx.config);
+  const reservations = readReservations(ctx.config, ctx.runner.now());
   const at = new Date(ctx.runner.now()).toISOString();
   for (const agent of activeProviders(ctx.config)) {
     if (!(agent in counts)) continue;
@@ -185,7 +187,7 @@ export async function detectExternal(ctx: Context): Promise<ExternalAgent[]> {
 /** Places taken by something other than a window of agentctl: the reservations, and the sessions found outside (when counted). */
 export async function slotHolders(ctx: Context): Promise<LiveWindow[]> {
   const out: LiveWindow[] = [];
-  const reservations = readReservations(ctx.config);
+  const reservations = readReservations(ctx.config, ctx.runner.now());
   for (const agent of activeProviders(ctx.config)) {
     const r = reservations[agent];
     for (let i = 0; r && i < r.count; i++) out.push({ window: `reserved${r.note ? ` (${r.note})` : ''}`, agent, kind: 'reserved' });
@@ -211,6 +213,7 @@ export interface ProviderLoad {
   queuedTasks?: string[];
   reserved: number;
   reservedNote: string | null;
+  reservation?: Reservation;
   external: { pid: number; cwd: string | null }[];
   used: number;
   /** null: no limit. */
@@ -237,7 +240,7 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
   const holds = providerHolds(config, now);
   const plans = showPlans ? readPlanStates(config, openReader(config), now) : undefined;
   const queue = waiting(readQueue(config));
-  const reservations = readReservations(config);
+  const reservations = readReservations(config, now);
   return {
     countExternal: config.countExternal,
     config: config.path,
@@ -266,11 +269,20 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
       const queuedTasks = queue.filter(e => e.agent === agent).map(e => e.task);
       const slotTasks = facts.slots.filter(w => w.kind === undefined || w.kind === 'starting').map(w => rows?.find(r => r.windowName === w.window)?.task ?? w.window.toUpperCase());
       const reportWindows = facts.reports.filter(r => facts.slots.some(w => w.window === r.windowName && !w.kind)).map(r => r.task);
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, slotTasks, queuedTasks, ownerSlots,
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, ...(reservations[agent] ? {reservation: reservations[agent]} : {}), external, used, slotTasks, queuedTasks, ownerSlots,
         ...(rows ? { active: facts.active.map(r => r.task), reportWindows } : {}), ...(chats.length ? { chats } : {}), ...(plan ? {plan: planLine(plan, now)} : {}), ...(holds[agent] ? {providerHold: holds[agent]} : {}),
         free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queuedTasks.length, queueHold: config.usage.queueHold[agent] ?? null };
     }),
   };
+}
+
+export function reservationText(agent: AgentName, reservation: Reservation): string {
+  return `rezerwacja właściciela: ${agent} ${reservation.count}${reservation.note ? ` (${reservation.note})` : ''}${reservation.until ? ` do ${formatLocalTime(reservation.until)}` : ' do zwolnienia'}`;
+}
+
+export function reservationLines(config: GlobalConfig, now: number): string[] {
+  const reservations = readReservations(config, now);
+  return activeProviders(config).flatMap(agent => reservations[agent] ? [reservationText(agent, reservations[agent])] : []);
 }
 
 export function chatUsageLine(report: LimitsReport, owner: string): string {

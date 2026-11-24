@@ -523,6 +523,17 @@
       "FIELD0256-GC-KEEP: CLI keeps variadic and comma-delimited tasks despite force-dirty"
     ]
   },
+  "FIELD0256-HOLD": {
+    "rev": "v0.27.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible",
+      "queue: adding",
+      "FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible"
+    ]
+  },
   "FIELD0256-SPEC": {
     "rev": "v0.27.0",
     "outcome": "FAILS",

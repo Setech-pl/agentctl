@@ -2,6 +2,7 @@ import { composerFixture } from './composer-fixture.ts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { describe, it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import type { Notifier } from '../src/core/notify.ts';
@@ -64,6 +65,31 @@ async function add(s: Setup, text: string, opts: { agent?: 'claude' | 'codex' } 
 }
 
 describe('queue: adding', () => {
+  it('FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible', async t => {
+    let load = 0;
+    t.mock.method(os, 'loadavg', () => [load, 0, 0]);
+    const s = setup('hold-notice', 'limits: {claude: 1}\ncapacity: {load_threshold: 10, codex_refresh: false}\n');
+    assert.equal((await runCli(s.config, s.runner, ['limits', 'reserve', 'claude=1', '--note', 'owner review'])).code, 0);
+    await add(s, specOf(s.repo, 'RESERVED'));
+    assert.deepEqual(await s.tick(), []);
+    assert.deepEqual(await s.tick(), []);
+    const held = readJournal(s.config).filter(e => String(e.kind) === 'queue-held');
+    assert.equal(held.length, 1);
+    assert.match(held[0]!.text, /WSTRZYMANE: rezerwacja właściciela: claude 1 \(owner review\)/);
+    assert.match((await runCli(s.config, s.runner, ['queue', 'list'])).stdout, /WSTRZYMANE: rezerwacja właściciela/);
+    assert.match((await runCli(s.config, s.runner, ['status'])).stdout, /rezerwacja właściciela: claude 1/);
+    assert.match((await runCli(s.config, s.runner, ['capacity'])).stdout, /rezerwacja właściciela: claude 1/);
+    assert.equal((await runCli(s.config, s.runner, ['limits', 'release', 'claude'])).code, 0);
+    load = 11;
+    await add(s, specOf(s.repo, 'LOAD'));
+    assert.deepEqual(await s.tick(), []);
+    assert.match(readJournal(s.config).find(e => String(e.kind) === 'queue-held' && e.task === 'LOAD')?.text ?? '', /WSTRZYMANE: obciążenie.*11\.0 > 10/);
+    load = 0;
+    assert.equal((await runCli(s.config, s.runner, ['limits', 'reserve', 'claude=1', '--until', '1s'])).code, 0);
+    await s.runner.sleep(2000);
+    assert.deepEqual(await s.tick(), ['RESERVED']);
+  });
+
   it('writes one numbered entry per task into <config dir>/queue and lists them in turn', async () => {
     const s = setup('add');
     await add(s, specOf(s.repo, 'NC-1') + specOf(s.repo, 'NC-2'));

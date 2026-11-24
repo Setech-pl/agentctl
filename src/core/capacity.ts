@@ -11,7 +11,7 @@ import type { AgentName } from './config.ts';
 import { AGENT_NAMES } from './config.ts';
 import type { Context } from './context.ts';
 import { computeStats, selectHistory } from './history.ts';
-import { collectLimits } from './limits.ts';
+import { collectLimits, reservationText } from './limits.ts';
 import { liveWindows } from './plan.ts';
 import { readQueue, waiting } from './queue.ts';
 import { codexPlanFile, openReader, readPlans, stalePlanLabel } from './usage.ts';
@@ -94,6 +94,7 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
       return {
         provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, expired: plan.expired === true, staleDescription: plan.expired && plan.readAt !== null ? stalePlanLabel(now - plan.readAt) : plan.stale && plan.readAt !== null ? `${adapter(provider).displayName}: brak aktywnej sesji od ${((now - plan.readAt) / 3600000).toFixed(1)} h (odczyt z ${new Date(plan.readAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})` : null, windows,
         providerHold: load.providerHold ?? null,
+        reservation: load.reservation ?? null,
         limited: Boolean(load.providerHold) || rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
         slots: { starting: load.starting, active: load.active?.length ?? 0, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
         taskCounts: { active: load.active ?? [], working: load.working, reports: load.reportReady, reportWindows: load.reportWindows ?? [], slots: load.slotTasks ?? [], queued: load.queuedTasks ?? [] },
@@ -109,7 +110,7 @@ export type Capacity = Awaited<ReturnType<typeof collectCapacity>>;
 export function capacitySnapshot(report: Capacity, ordered: readonly AgentName[] = []) {
   return report.providers.map((p) => {
     const worst = [...p.windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
-    return { provider: p.provider, ...((report.hosts ?? []).length ? {hostSlots: report.hosts!.map(h => ({host: h.host, ...h.providers.find(s => s.agent === p.provider)})).filter(s => s.agent === p.provider)} : {}), ordered: ordered.includes(p.provider), queueHold: p.queue.hold ?? null, providerHold: p.providerHold, remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, expired: p.expired, staleDescription: p.staleDescription, planNote: p.provider === 'glm' && p.ageSeconds === null ? p.note : '', reportReady: p.slots.reportReady, taskCounts: p.taskCounts, used: p.slots.used, freeSlots: p.slots.free, ...(p.chats ? {globalSlots: {used: p.slots.used, limit: p.slots.limit}, chats: p.chats} : {}), estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
+    return { provider: p.provider, ...((report.hosts ?? []).length ? {hostSlots: report.hosts!.map(h => ({host: h.host, ...h.providers.find(s => s.agent === p.provider)})).filter(s => s.agent === p.provider)} : {}), ordered: ordered.includes(p.provider), queueHold: p.queue.hold ?? null, providerHold: p.providerHold, reservation: p.reservation, remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, expired: p.expired, staleDescription: p.staleDescription, planNote: p.provider === 'glm' && p.ageSeconds === null ? p.note : '', reportReady: p.slots.reportReady, taskCounts: p.taskCounts, used: p.slots.used, freeSlots: p.slots.free, ...(p.chats ? {globalSlots: {used: p.slots.used, limit: p.slots.limit}, chats: p.chats} : {}), estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
   });
 }
 export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): string[] {
@@ -120,7 +121,7 @@ export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): st
     const occupied = names?.slots.length ? `, used slots ${p.used}${taskNames(names.slots)}` : '';
     const reports = names?.reports.length ? `; ${names.reports.length} report-ready${taskNames(names.reports)}` : '';
     const closable = names?.reportWindows.length ? ` – close zwolni ${names.reportWindows.length}${taskNames(names.reportWindows)}` : '';
-    return [`capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: ${reading}, free slots ${p.freeSlots ?? 'unbounded'}${occupied}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.hostSlots?.length ? `; hosts ${p.hostSlots.map(h => `${h.host} ${h.used}/${h.limit ?? 'unbounded'}, free ${h.free ?? 'unbounded'}`).join(' / ')}` : ''}${reports}${closable}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`, ...(p.globalSlots ? [`  ${p.provider} global ${p.globalSlots.used}/${p.globalSlots.limit ?? '∞'}`, ...p.chats!.map(chat => `  ${p.provider} ${renderChatLoad(chat)}`)] : [])];
+    return [`capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: ${reading}, free slots ${p.freeSlots ?? 'unbounded'}${occupied}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.reservation ? `; ${reservationText(p.provider, p.reservation)}` : ''}${p.hostSlots?.length ? `; hosts ${p.hostSlots.map(h => `${h.host} ${h.used}/${h.limit ?? 'unbounded'}, free ${h.free ?? 'unbounded'}`).join(' / ')}` : ''}${reports}${closable}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`, ...(p.globalSlots ? [`  ${p.provider} global ${p.globalSlots.used}/${p.globalSlots.limit ?? '∞'}`, ...p.chats!.map(chat => `  ${p.provider} ${renderChatLoad(chat)}`)] : [])];
   });
 }
 export function renderCapacity(report: Capacity): string[] {
