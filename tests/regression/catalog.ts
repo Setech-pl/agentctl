@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0256-SPEC', fixedIn: '0.27.1', symptom: 'task_spec missed queued-only work and could show the review spec for the exact author ID.', scenarios: [s('queue-mcp.test.ts', '^FIELD0256-SPEC:')] },
   { id: 'LIMITS0255-OWNER', fixedIn: '0.27.0', symptom: 'A chat confirmation could change shared limits without an owner decision in the CLI or board.', scenarios: [s('owner-limits.test.ts', '^LIMITS0255-OWNER:')] },
   { id: 'LIMITS0255-SHARES', fixedIn: '0.27.0', symptom: 'Per-chat absolute ceilings stayed fixed after global changes and needed manual recalculation.', scenarios: [s('owner-limits.test.ts', '^LIMITS0255-SHARES:')] },
   { id: 'LIMITS0255-SCHEDULE', fixedIn: '0.27.0', symptom: 'The dispatcher could not switch between limit profiles at local times across midnight and DST.', scenarios: [s('owner-limits.test.ts', '^LIMITS0255-SCHEDULE:')] },

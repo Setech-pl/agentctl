@@ -469,6 +469,17 @@
       "FIELD0253-LIMITS: watch reports manual and chat changes exactly once with their sources"
     ]
   },
+  "FIELD0256-SPEC": {
+    "rev": "v0.27.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-SPEC: task_spec reads a queued-only spec by exact ID and unique prefix",
+      "mcp: queue read tools",
+      "FIELD0256-SPEC: task_spec reads a queued-only spec by exact ID and unique prefix"
+    ]
+  },
   "FLOW-CLOSE": {
     "rev": "v0.25.3",
     "outcome": "FAILS",

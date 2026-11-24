@@ -861,7 +861,21 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
 
 async function runTaskSpec(deps: McpDeps, args: { task: string }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const record = findRecord(ctx, args.task);
+  const entries = readQueue(ctx.config);
+  let record = readTaskRecordById(ctx.config, args.task.trim());
+  if (!record && entries.length) {
+    const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+    const targets = new Map(entries.map(e => [e.task.toLowerCase(), { task: e.task, window: e.task.toLowerCase(), alive: false }]));
+    for (const r of records) targets.set(r.task.toLowerCase(), { task: r.task, window: r.window, alive: false });
+    const match = matchTask(args.task, [...targets.values()]);
+    if (match.kind === 'many') throw new AgentctlError(`"${args.task}" fits more than one task: ${match.matches.map(t => t.task).join(', ')}`, 'Use the full task ID.');
+    if (match.kind === 'one') {
+      record = records.find(r => r.task === match.target.task);
+      const entry = entries.find(e => e.task === match.target.task);
+      if (!record && entry) return ok(JSON.stringify(redactQueue(entry, ctx.config), null, 2));
+    }
+  }
+  record ??= findRecord(ctx, args.task);
   const prompt = readTaskPrompt(ctx.config, record.window) ?? '(the prompt could not be read)';
   const header = {
     task: record.task,

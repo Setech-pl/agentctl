@@ -54,6 +54,24 @@ function setup(name: string, extraYaml = '') {
 }
 
 describe('mcp: queue read tools', () => {
+  it('FIELD0256-SPEC: task_spec reads a queued-only spec by exact ID and unique prefix', async () => {
+    const t = setup('queued-spec', 'mcp: {allow: [queue]}\n');
+    const spec = t.spec('FACADE-AREA-DOCS-2', 'weight: heavy\n');
+    await t.call('queue', { spec });
+    assert.equal((await t.call('queue', { spec, confirm: true })).isError, undefined);
+    await watcherValidates(t.config, t.runner);
+    seedTask(t.config, 'FACADE-AREA-DOCS-2-REVIEW');
+    const result = await t.call('task_spec', { task: 'facade-area-docs-2' });
+    assert.match(result.text, /"status": "queued"/);
+    const exact = JSON.parse(result.text);
+    assert.equal(exact.task, 'FACADE-AREA-DOCS-2');
+    assert.equal(exact.status, 'queued');
+    assert.match(exact.spec, /weight: heavy/);
+    assert.match(exact.spec, /Prompt of FACADE-AREA-DOCS-2\./);
+    assert.equal((await t.call('task_spec', { task: 'facade' })).isError, true);
+    assert.equal(JSON.parse((await t.call('task_spec', { task: 'FACADE-AREA-DOCS-2-R' })).text.split('\n\n--- prompt')[0]!).task, 'FACADE-AREA-DOCS-2-REVIEW');
+  });
+
   it('queue_list and overlap are read tools, always there, with read-only annotations', () => {
     for (const name of ['queue_list', 'overlap']) {
       assert.equal(tool(name).kind, 'read');
