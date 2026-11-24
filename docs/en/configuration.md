@@ -45,6 +45,8 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `providers_config.glm.env` | mapping · `{CLAUDE_CODE_AUTO_MODE_SERVER: "0"}` · g | Environment of every GLM task, added to the built-in default; a key you set wins over the default. The Z.ai endpoint and token (`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`) are refused: they come only from the wrapper. |
 | `start_failure` | mapping · `{keep_window: true}` · g | What a start that did not reach the agent's input leaves behind. |
 | `start_failure.keep_window` | boolean · `true` · g | `true`: the window of a failed start (the agent never showed its input) stays open for diagnosis, and its last screen is saved in `<state_dir>/<task>/start-failure-screen.txt` either way. `queue_retry` closes the leftover window first. `false`: the window is closed at once (the capture stays), so it cannot hold a provider slot. A window that waits for you (folder trust, first-run onboarding) is never closed. |
+| `launch` | mapping · `{grace_s: 120}` · g | Automatic recovery of an exited agent window. |
+| `launch.grace_s` | nonnegative seconds · `120` · g | Watch retries once after an exit before prompt confirmation or within this interval. |
 | `cache` | path · ~/Projects/cache · g | Directory with one folder per task, `<cache>/<task>/`: the only place the agents write to (reports). |
 | `state_dir` | path · `<config dir>/tasks` · g | agentctl's own state per task (`TASK.md`, `setup.log`, `event.json`, `notified.json`), out of the agents' reach. Closed tasks are archived next to it, in `archive/`. |
 | `tmux` | mapping · socket unset · g | Optional dedicated tmux server. |
@@ -144,7 +146,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `agents.<agent>.limit_patterns` | list of regexes · see below · g | The usage limit is used up (state `limited`). A message has to open its line, so a diff or a quoted sentence is not taken for one. |
 | `agents.<agent>.background_patterns` | list of regexes · see below · g | The agent waits for its own shells or monitors (state `background`). |
 | `capacity` | mapping · see below · g | Dispatcher capacity settings. |
-| `capacity.load_threshold` | positive number · 3 × logical CPUs · g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. Capacity JSON/text and status --detail include load (1/5/15 min) and free memory bytes. |
+| `capacity.load_threshold` | positive number · 3 × logical CPUs for alerts · g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. An explicit threshold also holds queue admission. |
 | `capacity.snapshot` | boolean · true · g | Add both providers' capacity to new and queue responses. |
 | `capacity.stale_minutes` | integer 1–10080 · 30 · g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
 | `capacity.sample_limit` | integer 2–10000 · 2048 · g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |

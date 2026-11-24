@@ -45,6 +45,8 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `providers_config.glm.env` | mapping · `{CLAUDE_CODE_AUTO_MODE_SERVER: "0"}` · g | Środowisko GLM: domyślnie CLAUDE_CODE_AUTO_MODE_SERVER=0; endpoint/token odrzucone, agents/spec env wygrywa. |
 | `start_failure` | mapping · `{keep_window: true}` · g | Zachowanie po nieudanym starcie. |
 | `start_failure.keep_window` | boolean · `true` · g | Zachowaj okno diagnostyczne; zapis ekranu powstaje też przy false. Dialog człowieka nigdy nie jest zamykany. |
+| `launch` | mapping · `{grace_s: 120}` · g | Automatyczne wznowienie zakończonego okna agenta. |
+| `launch.grace_s` | sekundy od zera · `120` · g | Watch ponawia start raz po wyjściu przed potwierdzeniem polecenia albo w tym przedziale. |
 | `cache` | path · ~/Projects/cache · g | Raporty w podkatalogach zadań; domyślnie ~/Projects/cache. |
 | `state_dir` | path · `<config dir>/tasks` · g | Wewnętrzny stan zadań; archive obok, raporty poza nim. |
 | `tmux` | mapping · socket unset · g | Opcjonalny osobny serwer tmux. |
@@ -144,7 +146,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `agents.<agent>.limit_patterns` | list of regexes · see below · g | Regexy wyczerpania limitu. |
 | `agents.<agent>.background_patterns` | list of regexes · see below · g | Regexy własnych zadań tła. |
 | `capacity` | mapping · see below · g | Odczyty planu, estymacje i sondy. |
-| `capacity.load_threshold` | positive number · 3 × logical CPUs · g | Próg load 1-min; domyślnie 3 × logiczne CPU. |
+| `capacity.load_threshold` | liczba dodatnia · 3 × logiczne CPU dla alertów · g | Próg obciążenia z jednej minuty. Jawnie ustawiony próg wstrzymuje też start z kolejki. |
 | `capacity.snapshot` | boolean · true · g | Snapshot przy zlecaniu; MCP stopki opcjonalne. |
 | `capacity.stale_minutes` | integer 1–10080 · 30 · g | Wiek ustawiający stale. |
 | `capacity.sample_limit` | integer 2–10000 · 2048 · g | Limit zapisanych odczytów. |

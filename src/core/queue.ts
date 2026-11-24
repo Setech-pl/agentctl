@@ -1221,7 +1221,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host, owner: i.owner }); }
 
   // A block that the author's corrected report lifted is said before the released task starts (P94).
-  await announceBlocked(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
+  await announceReleased(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
   entries = readQueue(config);
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());

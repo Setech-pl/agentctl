@@ -221,6 +221,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const alive = live.has(record.window) || unreachable;
     // Re-queued records retain attempt history, but no window has been launched yet. The queue owns their display.
     if (!alive && !record.started && record.promptDelivery === 'launching' && !record.cancelled && !record.closed && !archived) {
+      if (!record.launchAt && !record.repos.some(repo => fs.existsSync(repo.worktree))) continue;
       queuedStarts ??= new Set(readQueue(config).filter(e => e.status !== 'failed').map(e => e.task));
       if (queuedStarts.has(record.task)) continue;
     }
@@ -275,7 +276,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     // A startup dialog `new` stopped at (prompt_delivery: needs-input) is a question to the human, not a delivery failure.
     const startupDialog = record.promptDelivery === 'needs-input' && !reportReady;
     const paneExit = windowByName.get(record.window)?.exitCode;
-    const launchExit = !alive && !closed && !cancelled ? readLaunchExit(config, record) : undefined;
+    const trackedLaunch = record.launchAt || record.launchRetried || (record.promptDelivery === 'launching' && record.windowId);
+    const launchExit = !alive && !closed && !cancelled && trackedLaunch ? readLaunchExit(config, record) : undefined;
     const launchDead = !alive && (launchExit !== undefined || paneExit !== undefined || Boolean(record.launchAt && inLaunchGrace(config, record, runner.now()) && !expectedStartClosure(config, record)));
     if (alive && record.launchAt && !opts.cachedOnly && !unreachable && inLaunchGrace(config, record, runner.now())) await saveLaunchTail(ctx, record, screenText);
     const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, infos.length > 0, opts.cachedOnly);
