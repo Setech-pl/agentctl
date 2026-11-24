@@ -5,14 +5,15 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { collectCapacity, capacitySnapshot, capacityTrend, renderCapacity } from '../src/core/capacity.ts';
 import { collectGuide, dispatcherGuide } from '../src/core/guide.ts';
-import { readJournal } from '../src/core/journal.ts';
+import { readJournal, recordJournal } from '../src/core/journal.ts';
+import { collectEvents } from '../src/core/chat-events.ts';
 import { openReader, readPlans } from '../src/core/usage.ts';
 import { readSamples, recordSamples, samplesPath } from '../src/core/usage-samples.ts';
 import type { UsageSample } from '../src/core/usage-samples.ts';
-import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
+import { MCP_TOOLS, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { loadViewLines, usagePanel } from '../src/core/board.ts';
 import { Context } from '../src/core/context.ts';
-import { acknowledgingRespond, DiskRunner, FakeTmux, makeConfig, runCli, useScratch } from './helpers.ts';
+import { acknowledgingRespond, DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
 import { makeWorld, setClaudePlan } from './usage-world.ts';
 const scratch = useScratch();
 const NOW = Date.parse('2026-11-03T12:00:00Z');
@@ -206,6 +207,39 @@ describe('guide: one source across fronts', () => {
 });
 
 describe('capacity: scheduling evidence', () => {
+  it('FIELD0256-COUNTS: accounting agrees on unpulled reports and filters historical fallback', async () => {
+    const t = world('accounting', 'limits: {claude: 4, count_report_ready: true}\n');
+    const writeReport = (task: string, fields = {}) => {
+      const r = seedTask(t.config, task, fields);
+      fs.mkdirSync(path.dirname(r.report), {recursive: true});
+      fs.writeFileSync(r.report, 'Verdict: PASS\n');
+      fs.utimesSync(r.report, new Date(NOW - 1000), new Date(NOW - 1000));
+      return r;
+    };
+    seedTask(t.config, 'WORKING');
+    t.fake.add('working', 'Thinking…\nesc to interrupt');
+    seedTask(t.config, 'DEAD');
+    writeReport('CLOSED', {closed: true});
+    writeReport('PULLED', {pulled: new Date(NOW).toISOString()});
+    writeReport('READY');
+    await recordJournal(t.ctx, {kind: 'report-ready', task: 'CLOSED', text: 'old report'});
+    await recordJournal(t.ctx, {kind: 'report-ready', task: 'PULLED', text: 'received report'});
+    await recordJournal(t.ctx, {kind: 'report-ready', task: 'READY', text: 'new report'});
+    await recordJournal(t.ctx, {kind: 'dead', task: 'DEAD', text: 'gone'});
+    const events = await collectEvents(t.ctx, {client: 'cli', since: '1h', keep: true});
+    assert.deepEqual(events.summary.reportsToPull, ['READY']);
+    assert.deepEqual(events.summary.activeTasks, ['WORKING']);
+    const capacity = renderCapacity(await collectCapacity(t.ctx, {cachedOnly: true})).join('\n');
+    assert.match(capacity, /1 report-ready \(READY\)/);
+    assert.doesNotMatch(capacity, /close zwolni/);
+    assert.match((await runCli(t.config, t.runner, ['limits'])).stdout, /report-ready \(READY\)/);
+    await publishMcpSnapshot(t.ctx);
+    await t.runner.sleep(6 * 60_000);
+    const status = await MCP_TOOLS.find(t => t.name === 'status')!.run({context: () => t.ctx, notify: async () => {}}, {});
+    const fallback = status.text.split('Active tasks from journal/events').at(-1)!;
+    assert.match(fallback, /READY: report-ready/);
+    assert.doesNotMatch(fallback, /CLOSED|PULLED|DEAD/);
+  });
   it('reports live reservations, nearest queue entry and seven-day model statistics without task history rows', async () => {
     const t = world('evidence', 'limits: {claude: 4}\n');
     const { seedTask } = await import('./helpers.ts');

@@ -12,6 +12,7 @@ import { splitSpecs } from './spec.ts';
 import type { RawSpec } from './spec.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
+import { accountTasks } from './task-accounting.ts';
 import { listArchivedRecords, listTaskRecords, setHeaderField, taskFile } from './taskstore.ts';
 import type { GlobalConfig } from './config.ts';
 import { AgentctlError, cohortKey, cohortNameProblem, isObject } from './util.ts';
@@ -162,12 +163,13 @@ export interface CohortCounts {
 }
 
 export function countCohort(rows: readonly StatusRow[], entries: readonly QueueEntry[]): CohortCounts {
+  const facts = accountTasks(rows);
   const c: CohortCounts = { active: 0, queued: entries.length, reports: 0, closed: 0, cancelled: 0, total: rows.length + entries.length };
+  c.active = facts.active.length;
+  c.reports = facts.reports.length;
   for (const r of rows) {
     if (r.cancelled) c.cancelled++;
     else if (r.closed) c.closed++;
-    else if (r.state === 'report-ready') c.reports++;
-    else c.active++;
   }
   return c;
 }

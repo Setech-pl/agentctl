@@ -48,6 +48,7 @@ import { sendPrompts } from './send.ts';
 import type { TaskState } from './state.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
+import { accountTasks, taskNames } from './task-accounting.ts';
 import { snapshotRecords, readTaskRecord } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { logLines, markTask } from './history.ts';
@@ -343,7 +344,9 @@ function groupOrder(state: BoardState): { key: string; name: string | null }[] {
 
 /** The rows of the active section, in list order (grouped by cohort when there are cohorts), including the ones of folded groups. */
 function activeAll(state: BoardState): BoardRow[] {
-  const rows = state.rows.filter((r) => !r.closed && !r.cancelled && (!r.finished || r.state === 'report-ready') && !collapsedPulled(state, r) && (state.showHidden || !r.hidden) && passes(state, r.cohort));
+  const visible = state.rows.filter(r => (state.showHidden || !r.hidden) && passes(state, r.cohort));
+  const facts = accountTasks(visible);
+  const rows = [...facts.active, ...facts.reports];
   const ordered = isGrouped(state) ? groupOrder(state).flatMap(g => priorityRows(rows.filter(r => groupOf(r.cohort) === g.key))) : priorityRows(rows);
   return [...ordered.filter(needsPull), ...ordered.filter(r => !needsPull(r))];
 }
@@ -355,7 +358,11 @@ export function activeRows(state: BoardState): BoardRow[] {
 
 /** The active rows the cursor can reach: the ones in a folded group are not among them. */
 export function reachableRows(state: BoardState): BoardRow[] {
-  return activeAll(state).filter((r) => !state.folded.includes(groupOf(r.cohort)));
+  return [...activeAll(state), ...recentPulledRows(state)].filter(r => !state.folded.includes(groupOf(r.cohort)));
+}
+
+function recentPulledRows(state: BoardState): BoardRow[] {
+  return state.rows.filter(r => pulledOpen(r) && !collapsedPulled(state, r) && (state.showHidden || !r.hidden) && passes(state, r.cohort));
 }
 
 /** The queue as the board lists it: the cohort filter applies; a task that already has a window (its start waits on a dialog) has its task row and no separate queue row (P42). */
@@ -366,7 +373,7 @@ export function queueViews(state: BoardState): QueueView[] {
 
 /** Finished tasks other than report-ready, which has its own priority/pulled sections. */
 export function finishedRows(state: BoardState): BoardRow[] {
-  return state.rows.filter((r) => !r.closed && !r.cancelled && r.finished && r.state !== 'report-ready' && !collapsedPulled(state, r) && (state.showHidden || !r.hidden) && passes(state, r.cohort));
+  return state.rows.filter((r) => !r.closed && !r.cancelled && (r.finished || r.window === 'gone' || r.state === 'dead') && r.state !== 'report-ready' && !collapsedPulled(state, r) && (state.showHidden || !r.hidden) && passes(state, r.cohort));
 }
 
 /** Tasks closed with `agentctl close` (or archived): their own section, only while the `a` key lists hidden tasks. */
@@ -386,10 +393,11 @@ export function displayRows(state: BoardState): BoardRow[] {
 
 /** Cursor order: unpulled reports, active rows, queue, pulled cohort headers/rows, then history sections. */
 export function navTasks(state: BoardState): string[] {
-  const active = reachableRows(state).map((r) => r.task);
+  const active = activeAll(state).filter(r => !state.folded.includes(groupOf(r.cohort))).map(r => r.task);
+  const recent = recentPulledRows(state).filter(r => !state.folded.includes(groupOf(r.cohort))).map(r => r.task);
   const rest = [...(state.showFinished ? finishedRows(state) : []), ...closedRows(state), ...cancelledRows(state)].map(r => r.task);
   const pulled = pulledGroups(state).flatMap(g => [pulledId(g.key), ...(state.pulledExpanded?.includes(g.key) ? g.rows.map(r => r.task) : [])]);
-  return [...(managerListed(state) ? [MANAGER_SELECT] : []), ...active, ...queueViews(state).map((v) => v.entry.task), ...pulled, ...rest];
+  return [...(managerListed(state) ? [MANAGER_SELECT] : []), ...active, ...queueViews(state).map((v) => v.entry.task), ...recent, ...pulled, ...rest];
 }
 
 /** The manager line is on the board and can be selected: its window exists. */
@@ -1189,11 +1197,12 @@ export async function loadLimitsPanel(ctx: Context): Promise<{ lines: string[]; 
     choices.push({ line: lines.length, action: { kind: 'request', id: request.id } });
     lines.push(`${request.id} · ${request.by} · do ${formatLocalTime(new Date(request.expires).toISOString())}`, `  Powód: ${request.reason}`, ...request.difference.split('\n').map(line => `  ${line}`));
   }
-  const report = collectLimits(config, await liveWindows(ctx), now);
+  const rows = await collectStatus(ctx, {progress: false, cachedOnly: true, shallowClosed: true});
+  const report = collectLimits(config, await liveWindows(ctx, rows), now, true, rows);
   for (const provider of report.providers) {
     choices.push({ line: lines.length, action: { kind: 'provider', agent: provider.agent, limit: provider.limit } });
     const until = timed[provider.agent]?.until;
-    lines.push(`${provider.agent} · ${provider.used}/${provider.limit ?? '∞'}${until ? ` · limit do ${formatLocalTime(until)}` : ''}${provider.providerHold ? ` · ${providerHoldText(provider.agent, provider.providerHold)}` : ''}`);
+    lines.push(`${provider.agent} · ${provider.used}/${provider.limit ?? '∞'}${taskNames(provider.slotTasks ?? [])}${until ? ` · limit do ${formatLocalTime(until)}` : ''}${provider.providerHold ? ` · ${providerHoldText(provider.agent, provider.providerHold)}` : ''}${provider.plan ? ` · ${provider.plan}` : ''}`);
     for (const chat of provider.chats ?? []) lines.push(`  ${renderChatLoad(chat)}`);
   }
   for (const name of Object.keys(config.limitSettings.profiles)) {
@@ -1214,7 +1223,10 @@ export function updateLimitsPanel(mode: Extract<BoardMode, { kind: 'view' }>, da
 /** The lines of a view: the same text the command prints. */
 export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
   if (what === 'capacity') return renderCapacity(await collectCapacity(ctx));
-  if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now(), true));
+  if (what === 'limits') {
+    const rows = await collectStatus(ctx, {progress: false, cachedOnly: true, shallowClosed: true});
+    return renderLimits(collectLimits(ctx.config, await liveWindows(ctx, rows), ctx.runner.now(), true, rows));
+  }
   if (what === 'hosts') {
     const cache = Object.keys(ctx.config.hosts).length === 0 ? undefined : readHostsCache();
     const health = Object.keys(ctx.config.hosts).map(name => ctx.hosts.connection(name).unreachable ? {name, state: 'unreachable' as const, probedAt: '', detail: ctx.hosts.connection(name).detail} : cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
@@ -1355,6 +1367,7 @@ export function listItems(state: BoardState): ListItem[] {
     ...(ready.length ? [{ kind: 'ready-title', count: ready.length } as ListItem, ...sectionItems(ready, 'ready'), ...(ordinary.length + queue.length ? [{ kind: 'active-title', count: ordinary.length + queue.length } as ListItem] : [])] : []),
     ...sectionItems(ordinary),
     ...(queue.length > 0 ? [{ kind: 'queue-title', count: queue.length, paused: state.queuePaused } as ListItem, ...queue.map((view): ListItem => ({ kind: 'queue', view }))] : []),
+    ...recentPulledRows(state).filter(r => !state.folded.includes(groupOf(r.cohort))).map((row): ListItem => ({ kind: 'row', row })),
     ...pulledGroups(state).flatMap((g): ListItem[] => [{ kind: 'pulled', key: g.key, count: g.rows.length, expanded: Boolean(state.pulledExpanded?.includes(g.key)) }, ...(state.pulledExpanded?.includes(g.key) ? g.rows.map((row): ListItem => ({ kind: 'row', row })) : [])]),
     ...(state.resumable.length > 0 ? [{ kind: 'resume-title', count: state.resumable.length } as ListItem, ...state.resumable.map((task): ListItem => ({ kind: 'resume', task }))] : []),
     ...(finished.length > 0 ? [{ kind: 'finished', count: finished.length, expanded: state.showFinished } as ListItem] : []),

@@ -1,4 +1,5 @@
 import { chatOwner, effectiveChatCeilings, quotaWarnings } from './chat-quotas.ts';
+import { accountTasks, taskNames } from './task-accounting.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { refreshDiskFreeSpace, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
 import { watchSnapshotPath, watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from './watch-snapshot.ts';
@@ -344,11 +345,11 @@ function statusRowForChat(r: StatusRow): Record<string, unknown> {
 
 /** "3 tasks: 1 working, 1 report-ready, 1 waiting" and what is not shown. */
 export function statusLine(shown: StatusRow[], hiddenCount: number): string {
-  const counts = new Map<string, number>();
-  for (const r of shown) counts.set(r.state, (counts.get(r.state) ?? 0) + 1);
-  const parts = [...counts].map(([state, n]) => `${n} ${state}`);
+  const counts = accountTasks(shown).byState;
+  const parts = [...counts].map(([state, rows]) => `${rows.length} ${state}`);
   const base = shown.length === 0 ? 'No tasks' : `${shown.length} task${shown.length === 1 ? '' : 's'}: ${parts.join(', ')}`;
-  return hiddenCount > 0 ? `${base} (${hiddenCount} hidden or closed not shown; all: true lists them)` : base;
+  const detail = [...counts].map(([state, rows]) => `${state}${taskNames(rows.map(row => row.task))}`).join(' · ');
+  return base + (hiddenCount > 0 ? ` (${hiddenCount} hidden or closed not shown; all: true lists them)` : '') + (detail ? ` — ${detail}` : '');
 }
 
 async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohort?: string | undefined; detail?: boolean; capacity?: boolean; offset?: number; limit?: number }): Promise<ToolResult> {
@@ -523,7 +524,8 @@ async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; al
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now(), true);
+  const rows = await collectStatus(ctx, {progress: false, cachedOnly: true, shallowClosed: true});
+  const report = collectLimits(ctx.config, await liveWindows(ctx, rows), ctx.runner.now(), true, rows);
   const reserved = readReservations(ctx.config);
   return ok(
     `Limits of simultaneous agents per provider. used = windows of agentctl + reserved places + external sessions (counted only if countExternal is true); free = limit - used; queued = tasks waiting for a place of that provider.\n\n${JSON.stringify({ ...report, reservations: reserved }, null, 2)}`,
@@ -2460,11 +2462,12 @@ function durableStatus(ctx: Context, scopedChat?: string): string {
   const inScope = scopedChat ? chatEventScope(ctx.config, scopedChat) : undefined;
   const entries = readQueue(ctx.config).filter(e => !inScope || inScope(e));
   const latest = new Map<string, ReturnType<typeof readJournal>[number]>();
+  const inactive = new Set([...listArchivedRecords(ctx.config).map(r => r.task), ...listTaskRecords(ctx.config).filter(r => r.closed || r.cancelled || r.hidden || r.pulled || r.supersededBy).map(r => r.task)]);
   const states = new Set(['task-start', 'queue-start', 'needs-input', 'needs-trust', 'needs-attention', 'limited', 'overloaded', 'report-ready', 'dead', 'cancelled', 'queue-failed']);
   for (const event of readJournal(ctx.config)) if (event.task && states.has(event.kind) && (!inScope || inScope(event))) latest.set(event.task, event);
   return [`Durable queue (${entries.length}; first 20):`, ...entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.status === 'queued' ? 'registered' : e.status}`),
     'Active tasks from journal/events (last known; no live window probe):',
-    ...[...latest.values()].filter(e => !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
+    ...[...latest.values()].filter(e => !inactive.has(e.task!) && !['dead', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
 export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;
@@ -2473,7 +2476,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
   const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live});
-  const limits = collectLimits(ctx.config, live, ctx.runner.now(), true);
+  const limits = collectLimits(ctx.config, live, ctx.runner.now(), true, observed);
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
   const doctor: {name: string; status: string; detail: string}[] = [

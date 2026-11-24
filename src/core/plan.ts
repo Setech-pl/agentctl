@@ -68,11 +68,12 @@ export async function liveWindows(ctx: Context, knownRows?: StatusRow[], ignoreR
     return Boolean(r?.pendingPrompt && r.promptDelivery === 'needs-attention' && !r.deliveryStartedAt);
   };
   const rows = knownRows ?? (records.some(r => inspectReport(ctx.config, r, ctx.runner.now(), !r.attemptId).ready) ? await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: records, archived: [] }, orphans: false }) : []);
-  const windows = names.map((window): LiveWindow => {
+  const windows = names.flatMap((window): LiveWindow[] => {
     const agent = agentByWindow.get(window);
     const record = recordByWindow.get(window);
+    if (record?.closed || record?.cancelled) return [];
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
-    return agent ? { window, agent, host: record?.host, ...(record?.owner ? {owner: record.owner} : {}), ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window };
+    return [agent ? { window, agent, host: record?.host, ...(record?.owner ? {owner: record.owner} : {}), ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window }];
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
   return [...windows, ...pendingStarts(ctx.config).filter(r => r.id !== ignoreReservation && !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, host: r.host, ...(r.owner ? {owner: r.owner} : {}), kind: 'starting' as const })), ...(await slotHolders(ctx))];

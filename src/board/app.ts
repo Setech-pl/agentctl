@@ -11,6 +11,7 @@ import {
   applySnapshot,
   boardColumns,
   boardLayout,
+  activeRows,
   cancelledTitle,
   closedTitle,
   cohortLabel,
@@ -52,6 +53,7 @@ import {
   withSize,
 } from '../core/board.ts';
 import type { BoardCell, BoardEffect, BoardState } from '../core/board.ts';
+import { accountTasks, taskNames } from '../core/task-accounting.ts';
 import type { Context } from '../core/context.ts';
 import { loadGlobalConfig } from '../core/config.ts';
 import { ConfigStore } from '../core/config-store.ts';
@@ -98,6 +100,8 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
   const { state } = props;
   const cols = boardColumns(props.width);
   const visible = visibleItems(state, props.capacity);
+  const facts = accountTasks(activeRows(state));
+  const awaiting = [...facts.active.map(r => r.task), ...queueViews(state).map(v => v.entry.task)];
   const cells = (task: string, key: string, content: BoardCell[]) => state.selected === task
     ? h(Selection, { key, content, width: props.width, style: props.selection })
     : h(Cells, { key, cells: content });
@@ -106,9 +110,9 @@ function TaskList(props: { state: BoardState; width: number; capacity: number; i
       ? [h(Text, { key: 'empty', dimColor: true }, state.refreshedAt === null ? 'Loading…' : state.rows.length === 0 ? 'No tasks. Start one with "agentctl new <spec>".' : state.cohortFilter !== null ? 'No tasks in this cohort. k picks another.' : 'No active tasks. z opens the finished ones.')]
       : visible.items.map((item) =>
           item.kind === 'ready-title'
-            ? h(Text, { key: 'ready-title', bold: true, color: 'green', wrap: 'truncate-end' }, `Raporty do pobrania (${item.count})`)
+            ? h(Text, { key: 'ready-title', bold: true, color: 'green', wrap: 'truncate-end' }, `Raporty do pobrania (${item.count})${taskNames(facts.reports.map(r => r.task))}`)
             : item.kind === 'active-title'
-            ? h(Text, { key: 'active-title', bold: true, wrap: 'truncate-end' }, `Aktywne i czekające (${item.count})`)
+            ? h(Text, { key: 'active-title', bold: true, wrap: 'truncate-end' }, `Aktywne i czekające (${item.count})${taskNames(awaiting)}`)
             : item.kind === 'pulled'
             ? state.selected === `@pulled:${item.key}`
               ? h(Selection, { key: `pulled-${item.key}`, content: `▸ ${pulledTitle(item)}`, width: props.width, style: props.selection })

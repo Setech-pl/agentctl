@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0256-COUNTS', fixedIn: '0.27.1', symptom: 'Capacity and events disagreed on ready reports and stale status listed pulled or closed tasks as active.', scenarios: [s('capacity.test.ts', '^FIELD0256-COUNTS:')] },
   { id: 'FIELD0256-EVENTS', fixedIn: '0.27.1', symptom: 'A chat saw unrelated task events and truncated raw JSON GC results.', scenarios: [s('a2-wall-events.test.ts', '^FIELD0256-EVENTS:'), s('field0253-gc.test.ts', '^FIELD0256-GC-EVENT:')] },
   { id: 'FIELD0256-STALE', fixedIn: '0.27.1', symptom: 'Expired provider readings still appeared as current percentages.', scenarios: [s('capacity.test.ts', '^FIELD0256-STALE:')] },
   { id: 'FIELD0256-GC-KEEP', fixedIn: '0.27.1', symptom: 'GC ignored comma-delimited task IDs in --keep and --force-dirty.', scenarios: [s('field0253-gc.test.ts', '^FIELD0256-GC-KEEP:')] },

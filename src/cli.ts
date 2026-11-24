@@ -78,6 +78,7 @@ import { resolveRunningTask } from './core/resolve.ts';
 import { answerMenu } from './core/answer.ts';
 import { promptQueueView, withdrawPrompt } from './core/prompt-queue.ts';
 import { collectStatus, reportStatus, shownRows, statusMarkdown } from './core/status.ts';
+import { accountTasks, taskNames } from './core/task-accounting.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
 import type { Notifier, NotifyResult } from './core/notify.ts';
@@ -888,6 +889,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return;
         }
         for (const l of renderStatusTable(rows)) line(l);
+        const counts = accountTasks(rows);
+        line(`${counts.active.length} aktywne${taskNames(counts.active.map(r => r.task))} · ${counts.working.length} pracuje${taskNames(counts.working.map(r => r.task))} · ${counts.reports.length} do pobrania${taskNames(counts.reports.map(r => r.task))}`);
         for (const l of renderStatusHints(rows)) line(`hint: ${l}`);
         for (const l of await queueStatusLines(ctx, cohort)) line(l);
         if (hiddenCount > 0) line(`${hiddenCount} hidden task${hiddenCount === 1 ? '' : 's'} not shown: agentctl status --all`);
@@ -905,7 +908,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (opts: { json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now(), true);
+        const rows = await collectStatus(ctx, {progress: false, cachedOnly: true, shallowClosed: true});
+        const report = collectLimits(ctx.config, await liveWindows(ctx, rows), ctx.runner.now(), true, rows);
         if (opts.json) return line(JSON.stringify(report, null, 2));
         for (const l of renderLimits(report)) line(l);
       }),

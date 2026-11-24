@@ -18,9 +18,10 @@ import { codexPlanFile, openReader, readPlans, stalePlanLabel } from './usage.ts
 import type { PlanWindowView } from './usage.ts';
 import { readSamples } from './usage-samples.ts';
 import type { UsageSample } from './usage-samples.ts';
-import { isObject, plural } from './util.ts';
+import { isObject } from './util.ts';
 import { agentHomes } from './usage-sources.ts';
 import { windowKind } from './usage-parse.ts';
+import { taskNames } from './task-accounting.ts';
 
 export interface TokenEstimate {
   tokensPerPercent: number;
@@ -69,9 +70,9 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
     await recordStaleCapacity(ctx, plans);
   }
   const samples = readSamples(ctx.config);
-  const loads = collectLimits(ctx.config, opts.live ?? await liveWindows(ctx), now);
   const queue = waiting(readQueue(ctx.config));
   const rows = opts.rows ?? await collectStatus(ctx, { cachedOnly: true, shallowClosed: true, progress: false });
+  const loads = collectLimits(ctx.config, opts.live ?? await liveWindows(ctx, rows), now, false, rows);
   const stats = computeStats(selectHistory(ctx, { since: '7d' }));
   return {
     at: new Date(now).toISOString(),
@@ -94,7 +95,8 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
         provider, estimate: [...windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0]?.estimate ?? null, source: plan.source, ageSeconds: plan.readAt === null ? null : Math.max(0, Math.floor((now - plan.readAt) / 1000)), stale: plan.stale, expired: plan.expired === true, staleDescription: plan.expired && plan.readAt !== null ? stalePlanLabel(now - plan.readAt) : plan.stale && plan.readAt !== null ? `${adapter(provider).displayName}: brak aktywnej sesji od ${((now - plan.readAt) / 3600000).toFixed(1)} h (odczyt z ${new Date(plan.readAt).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})` : null, windows,
         providerHold: load.providerHold ?? null,
         limited: Boolean(load.providerHold) || rows.some((r) => r.agent === provider && r.window === 'alive' && r.state === 'limited') || (windows.length > 0 ? windows.some((w) => w.usedPercent >= 100) : null),
-        slots: { starting: load.starting, active: load.working.length, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
+        slots: { starting: load.starting, active: load.active?.length ?? 0, reportReady: load.reportReady.length, used: load.used, limit: load.limit, reserved: load.reserved, external: load.external.length, free: load.free },
+        taskCounts: { active: load.active ?? [], working: load.working, reports: load.reportReady, reportWindows: load.reportWindows ?? [], slots: load.slotTasks ?? [], queued: load.queuedTasks ?? [] },
         ...(load.chats ? { chats: load.chats } : {}),
         queue: { count: load.queued, next: queue.find((q) => q.agent === provider)?.task ?? null, hold: load.queueHold },
         models: [...new Map(ctx.config.equivalents.flatMap((e) => e[provider] ? [[`${e[provider].model}/${e[provider].effort}`, e[provider]] as const] : [])).values()],
@@ -107,20 +109,24 @@ export type Capacity = Awaited<ReturnType<typeof collectCapacity>>;
 export function capacitySnapshot(report: Capacity, ordered: readonly AgentName[] = []) {
   return report.providers.map((p) => {
     const worst = [...p.windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0];
-    return { provider: p.provider, ...((report.hosts ?? []).length ? {hostSlots: report.hosts!.map(h => ({host: h.host, ...h.providers.find(s => s.agent === p.provider)})).filter(s => s.agent === p.provider)} : {}), ordered: ordered.includes(p.provider), queueHold: p.queue.hold ?? null, providerHold: p.providerHold, remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, expired: p.expired, staleDescription: p.staleDescription, planNote: p.provider === 'glm' && p.ageSeconds === null ? p.note : '', reportReady: p.slots.reportReady, freeSlots: p.slots.free, ...(p.chats ? {globalSlots: {used: p.slots.used, limit: p.slots.limit}, chats: p.chats} : {}), estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
+    return { provider: p.provider, ...((report.hosts ?? []).length ? {hostSlots: report.hosts!.map(h => ({host: h.host, ...h.providers.find(s => s.agent === p.provider)})).filter(s => s.agent === p.provider)} : {}), ordered: ordered.includes(p.provider), queueHold: p.queue.hold ?? null, providerHold: p.providerHold, remainingPercent: worst?.remainingPercent ?? null, resetsInMinutes: worst?.resetsInMinutes ?? null, ageSeconds: p.ageSeconds, stale: p.stale, expired: p.expired, staleDescription: p.staleDescription, planNote: p.provider === 'glm' && p.ageSeconds === null ? p.note : '', reportReady: p.slots.reportReady, taskCounts: p.taskCounts, used: p.slots.used, freeSlots: p.slots.free, ...(p.chats ? {globalSlots: {used: p.slots.used, limit: p.slots.limit}, chats: p.chats} : {}), estimate: worst?.estimate ? { remainingTokens: worst.estimate.remainingTokens, confidence: worst.estimate.confidence } : null };
   });
 }
 export function snapshotLines(snapshot: ReturnType<typeof capacitySnapshot>): string[] {
   return snapshot.flatMap((p) => {
     const reading = p.expired && p.ageSeconds !== null ? stalePlanLabel(p.ageSeconds * 1000)
       : `remaining ${p.remainingPercent === null ? 'n/d' : `${p.remainingPercent}%`}${p.planNote ? ` (${p.planNote})` : ''}, reset ${p.resetsInMinutes ?? 'n/d'} min, age ${p.ageSeconds ?? 'n/d'} s${p.staleDescription ? `, ${p.staleDescription}` : ''}`;
-    return [`capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: ${reading}, free slots ${p.freeSlots ?? 'unbounded'}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.hostSlots?.length ? `; hosts ${p.hostSlots.map(h => `${h.host} ${h.used}/${h.limit ?? 'unbounded'}, free ${h.free ?? 'unbounded'}`).join(' / ')}` : ''}${p.reportReady ? `; ${p.reportReady} ${plural(p.reportReady, 'okno', 'okna', 'okien')} report-ready – close zwolni ${plural(p.reportReady, 'okno', 'okna', 'okien')}` : ''}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`, ...(p.globalSlots ? [`  ${p.provider} global ${p.globalSlots.used}/${p.globalSlots.limit ?? '∞'}`, ...p.chats!.map(chat => `  ${p.provider} ${renderChatLoad(chat)}`)] : [])];
+    const names = p.taskCounts;
+    const occupied = names?.slots.length ? `, used slots ${p.used}${taskNames(names.slots)}` : '';
+    const reports = names?.reports.length ? `; ${names.reports.length} report-ready${taskNames(names.reports)}` : '';
+    const closable = names?.reportWindows.length ? ` – close zwolni ${names.reportWindows.length}${taskNames(names.reportWindows)}` : '';
+    return [`capacity: ${p.provider}${p.ordered ? ' (order)' : ''}: ${reading}, free slots ${p.freeSlots ?? 'unbounded'}${occupied}, queue_hold ${p.queueHold === null ? 'off' : `${p.queueHold}%`}${p.providerHold ? `; ${providerHoldText(p.provider, p.providerHold)}` : ''}${p.hostSlots?.length ? `; hosts ${p.hostSlots.map(h => `${h.host} ${h.used}/${h.limit ?? 'unbounded'}, free ${h.free ?? 'unbounded'}`).join(' / ')}` : ''}${reports}${closable}${p.estimate ? `, estimate.remainingTokens ${p.estimate.remainingTokens} (${p.estimate.confidence})` : ''}`, ...(p.globalSlots ? [`  ${p.provider} global ${p.globalSlots.used}/${p.globalSlots.limit ?? '∞'}`, ...p.chats!.map(chat => `  ${p.provider} ${renderChatLoad(chat)}`)] : [])];
   });
 }
 export function renderCapacity(report: Capacity): string[] {
   return [machineLine(report.machine), diskLine(report.disk), ...(report.hosts ?? []).map(h => `host ${h.host}: ${h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`).join(' · ')} (account limits/holds also apply)`), ...snapshotLines(capacitySnapshot(report)), ...report.providers.flatMap((p) => [
     ...p.windows.map((w) => `${p.provider} ${w.label}: used ${w.usedPercent}%, remaining ${w.remainingPercent}%, reset ${w.resetsInMinutes ?? 'n/d'} min, pace ${w.percentPerHour === null ? 'n/d' : w.percentPerHour.toFixed(2)}%/h, projectedExhaustAt ${w.projectedExhaustAt ?? 'n/d'}, estimate ${w.estimate ? JSON.stringify(w.estimate) : 'n/d'}`),
-    `${p.provider}: slots ${p.slots.active}/${p.slots.limit ?? 'unbounded'}, reserve ${p.slots.reserved}, queue ${p.queue.count} (next ${p.queue.next ?? 'n/d'}, queue_hold ${p.queue.hold == null ? 'off' : `${p.queue.hold}%`}), limited ${p.limited ?? 'n/d'}, source ${p.source}`,
+    `${p.provider}: active ${p.slots.active}${taskNames(p.taskCounts.active)}, working ${p.taskCounts.working.length}${taskNames(p.taskCounts.working)}, slots ${p.slots.used}/${p.slots.limit ?? 'unbounded'}${taskNames(p.taskCounts.slots)}, reserve ${p.slots.reserved}, queue ${p.queue.count}${taskNames(p.taskCounts.queued)} (next ${p.queue.next ?? 'n/d'}, queue_hold ${p.queue.hold == null ? 'off' : `${p.queue.hold}%`}), limited ${p.limited ?? 'n/d'}, source ${p.source}`,
     `${p.provider}: models ${p.models.map((m) => `${m.model}/${m.effort}`).join(', ')}`,
     ...p.stats.map((s) => `${p.provider} ${s.model}/${s.effort} 7d: n=${s.tasks}, median ${s.medianDurationMs ?? 'n/d'} ms, tokens ${s.medianTokens ?? 'n/d'}, ok/partial/fail ${s.ok}/${s.partial}/${s.fail}, unmarked ${s.unmarked}`),
     ...p.hints.map((h) => `${p.provider}: ${h}`), ...(p.note && (p.provider !== 'glm' || p.ageSeconds !== null) ? [`${p.provider}: ${p.note}`] : []),
