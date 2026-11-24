@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Early task exits keep the CLI exit code, pane tail and log path. Watch retries once in the original worktree. Dead tasks can be resumed under the same ID and waiting dependencies show the cause. / Po wczesnym zakończeniu zadania zostają kod wyjścia, końcówka ekranu i ścieżka logu. Watch ponawia start w tym samym worktree. Martwe zadanie można wznowić pod tym samym ID, a zadania zależne pokazują przyczynę oczekiwania.
+- Exact task IDs take precedence across CLI and MCP, including closed tasks and queue entries. `task_spec` also returns queued-only specifications. / Dokładny identyfikator ma pierwszeństwo w CLI i MCP, także dla zamkniętych zadań i wpisów w kolejce. `task_spec` pokazuje też specyfikacje zadań czekających w kolejce.
+- Status, events, capacity, limits and the board share task accounting. Expired readings display their age. Named chats see their effective quota and global headroom. / Status, zdarzenia, pojemność, limity i tablica liczą zadania wspólnie. Nieaktualne odczyty pokazują swój wiek. Nazwany czat widzi własną kwotę i wolne miejsca globalne.
+- Watch records one hold event for a waiting order. Owner reservations appear in status and capacity and can expire at a chosen time. / Watch zapisuje jedno zdarzenie wstrzymania dla czekającego zlecenia. Rezerwacje właściciela widać w statusie i pojemności, można też ustawić ich czas wygaśnięcia.
+- Named chats get scoped events and one count of other chats’ events. GC records show a one-line result. GC accepts space- and comma-separated keep IDs and lists clean dead worktrees with no commits. / Nazwane czaty widzą swoje zdarzenia i jedną liczbę zdarzeń innych czatów. GC zapisuje wynik w jednym wierszu. Listę `--keep` można rozdzielić spacjami lub przecinkami, a podgląd obejmuje czyste worktree martwych zadań bez commitów.
+
 - Limit changes requested by MCP need the owner's approval by default. The board and CLI manage decisions, scheduled profiles and temporary limits, and WALL publishes the resulting ceilings. / Zmiany limitów z MCP domyślnie wymagają zgody właściciela. Tablica i CLI obsługują decyzje, harmonogram profili i limity czasowe, a WALL publikuje wynikowe pułapy.
 - Chat quotas can use percentages of each provider's global limit with absolute overrides. / Kwoty czatów mogą używać udziałów procentowych w globalnych limitach, z opcjonalnymi sztywnymi pułapami.
 
@@ -28,6 +34,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.27.1] - 2026-11-24
+
+Field fixes for launch recovery and operator reads / Poprawki wznowień i widoków operacyjnych. [Release notes (EN)](docs/release-notes/0.27.1.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.1.pl.md).
 
 ## [0.27.0] - 2026-11-22
 
