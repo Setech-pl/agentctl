@@ -1,3 +1,4 @@
+import { expectWindowClosure } from './start-failure.ts';
 import { syncRemoteFiles } from './host-runtime.ts';
 import { readPromptQueue, reportMessageWarning, queueFile as promptQueueFile } from './prompt-queue.ts';
 import { recordJournal } from './journal.ts';
@@ -45,6 +46,7 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   }
   const windows = runner.dryRun ? [window] : await tmux.listWindows();
   if (windows.includes(window)) {
+    if (record?.launchAt) await expectWindowClosure(ctx, record);
     const killed = await tmux.killWindow(window);
     if (killed.code !== 0 && (await tmux.listWindows()).includes(window)) throw new AgentctlError(`cannot close ${taskArg}: ${killed.stderr}`);
     if (killed.code === 0 && record?.host) await syncRemoteFiles(ctx, record);

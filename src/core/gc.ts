@@ -414,6 +414,8 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
               const record = readTaskRecordById(config, item.task);
               if (!record || !record.repos.some(r => same(r.worktree, item.target)) || !deadWorktreeScope(ctx, new Set(await ctx.tmux.listWindows()))(record)) throw new Error('dead task changed since preview; kept');
               if (record.report && fs.existsSync(record.report) && location(record.report).startsWith(`${location(item.target)}${path.sep}`)) throw new Error('dead worktree contains a report; kept');
+              const head = await git(ctx, ['-C', item.target, 'rev-parse', '--abbrev-ref', 'HEAD']);
+              if (head.code !== 0 || PROTECTED.has(head.out)) throw new Error('dead worktree checkout changed or is protected; kept');
             }
             const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
             if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);

@@ -28,7 +28,7 @@ export async function checkLaunchHealth(ctx: Context, notifier: Notifier, self?:
     if ((pane && pane.exitCode === undefined) || starting.has(record.task) || (record.host && ctx.hosts.connection(record.host).unreachable)) continue;
     let cause = readLaunchExit(config, record);
     const early = inLaunchGrace(config, record, runner.now());
-    if (!cause && pane?.exitCode === undefined && (!early || expectedStartClosure(config, record))) continue;
+    if (expectedStartClosure(config, record) || (!cause && pane?.exitCode === undefined && !early)) continue;
     terminal ??= new Set(readJournal(config).filter(event => event.kind === 'launch-failed').map(event => event.changeId));
     if (!pane && terminal.has(`launch-failed:${record.task}:${launchIdentity(record)}`)) continue;
     const release = tryFileLock(`${expectedCloseFile(config, record.window)}.launch.lock`);

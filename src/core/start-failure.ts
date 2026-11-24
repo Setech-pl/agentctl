@@ -38,6 +38,11 @@ export function expectedStartClosure(config: GlobalConfig, record: TaskRecord): 
   } catch { return false; }
 }
 
+export async function expectWindowClosure(ctx: Context, record: TaskRecord): Promise<void> {
+  if (ctx.runner.dryRun) return;
+  await ctx.runner.writeFile(expectedCloseFile(ctx.config, record.window), JSON.stringify({ identity: `${record.attemptId ?? record.started}:${record.windowId ?? ''}`, at: new Date(ctx.runner.now()).toISOString() }));
+}
+
 export function readLaunchExit(config: GlobalConfig, record: TaskRecord): LaunchExit | undefined {
   try {
     const result = JSON.parse(fs.readFileSync(launchExitPath(config, record.window), 'utf8')) as LaunchExit;
@@ -123,6 +128,6 @@ export async function closeFailedStartWindow(ctx: Context, task: string): Promis
   if (!(await ctx.tmux.windows()).some((w) => w.plain === record.window)) return false;
   await saveStartFailureScreen(ctx, record.window, record.windowId);
   // Record the intentional closure first: the missing window must not surface as a false tmux loss (tmux-loss.ts).
-  if (!ctx.runner.dryRun) await ctx.runner.writeFile(expectedCloseFile(ctx.config, record.window), JSON.stringify({ identity: `${record.attemptId ?? record.started}:${record.windowId ?? ''}`, at: new Date(ctx.runner.now()).toISOString() }));
+  await expectWindowClosure(ctx, record);
   return (await ctx.tmux.killWindow(record.window)).code === 0;
 }

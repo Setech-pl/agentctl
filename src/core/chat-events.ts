@@ -180,7 +180,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     reportCount: accounting.reports.length,
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
-  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
+  const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), ...(inScope ? {otherChatEvents: 0} : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
   if (opts.wallIdentity?.startsWith('chat:')) {
     report.wallIdentity = opts.wallIdentity;
     report.wallOpen = [...(opts.wallOpenChannels ?? opts.wallChannels ?? [])].flatMap(c => channelMessages(config, c))
@@ -335,7 +335,7 @@ export function renderEvents(report: EventsReport): string[] {
     ...(report.note ? [report.note] : []),
     ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject} (${m.age})${m.from === report.wallIdentity ? ' (yours)' : ''}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.kind === 'wall' && report.wallIdentity && e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`),
-    ...(report.otherChatEvents ? [`inne czaty: ${report.otherChatEvents} zdarzeń`] : []),
+    ...(report.otherChatEvents !== undefined ? [`inne czaty: ${report.otherChatEvents} zdarzeń`] : []),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,
     ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),

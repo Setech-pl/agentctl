@@ -112,6 +112,20 @@ describe('queue: adding', () => {
     assert.equal(resumed.code, 0, resumed.stderr);
     assert.equal(readTaskRecord(s.config, window)?.repos[0]?.worktree, worktree);
     assert.ok(s.tmux.windows.some(w => w.name === window));
+    const exec = s.runner.exec.bind(s.runner);
+    let observedClose = false;
+    s.runner.exec = async (...args) => {
+      const result = await exec(...args);
+      if (!observedClose && args[0] === 'tmux' && args[1][0] === 'kill-window') {
+        observedClose = true;
+        await watchTick(s.ctx, memory, s.notifier);
+      }
+      return result;
+    };
+    const closed = await runCli(s.config, s.runner, ['close', task, '-y']);
+    assert.equal(closed.code, 0, closed.stderr);
+    assert.equal(observedClose, true);
+    assert.equal(s.tmux.windows.some(w => w.name.endsWith(window)), false, 'an intentional close cannot trigger the launch retry');
   });
 
   it('FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible', async t => {
