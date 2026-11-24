@@ -14,7 +14,7 @@ import { computeStats, selectHistory } from './history.ts';
 import { collectLimits, reservationText } from './limits.ts';
 import { liveWindows } from './plan.ts';
 import { readQueue, waiting } from './queue.ts';
-import { codexPlanFile, openReader, readPlans, stalePlanLabel } from './usage.ts';
+import { codexPlanFile, openReader, planWindowCurrent, readPlans, stalePlanLabel } from './usage.ts';
 import type { PlanWindowView } from './usage.ts';
 import { readSamples } from './usage-samples.ts';
 import type { UsageSample } from './usage-samples.ts';
@@ -107,6 +107,23 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
   };
 }
 export type Capacity = Awaited<ReturnType<typeof collectCapacity>>;
+/** A snapshot can cross a reset while the watcher is paused. Its reading ages even when the snapshot stays on disk. */
+export function ageCapacityReadings(report: Capacity, now: number): Capacity {
+  const elapsed = now - Date.parse(report.at);
+  if (!(elapsed > 0)) return report;
+  return { ...report, providers: report.providers.map(p => {
+    const {ageSeconds} = p;
+    if (ageSeconds === null) return p;
+    const age = ageSeconds * 1000 + elapsed;
+    const windows = p.windows.filter(w => planWindowCurrent(w, age, now)).map(w => ({
+      ...w, resetsInMinutes: w.resetsAt === null ? null : Math.ceil((w.resetsAt - now) / 60_000),
+    }));
+    const expired = p.expired || (p.windows.length > 0 && windows.length === 0);
+    return { ...p, windows, ageSeconds: Math.floor(age / 1000), expired, stale: expired || p.stale,
+      ...(expired ? {staleDescription: stalePlanLabel(age), estimate: null, hints: p.hints.filter(h => !h.includes('usage >=') && !h.includes('projected exhaustion'))} : {}) };
+  }) };
+}
+
 export function capacitySnapshot(report: Capacity, ordered: readonly AgentName[] = []) {
   return report.providers.map((p) => {
     const worst = [...p.windows].sort((a, b) => a.remainingPercent - b.remainingPercent)[0];

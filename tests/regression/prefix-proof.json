@@ -561,12 +561,14 @@
   "FIELD0256-STALE": {
     "rev": "v0.27.0",
     "outcome": "FAILS",
-    "failed": 1,
+    "failed": 2,
     "passed": 0,
     "failing": [
       "FIELD0256-STALE: expired readings are labeled across capacity, limits, board and usage",
+      "FIELD0256-STALE: a cached snapshot drops a reading as its reset passes",
       "capacity: current facts and bounded history",
-      "FIELD0256-STALE: expired readings are labeled across capacity, limits, board and usage"
+      "FIELD0256-STALE: expired readings are labeled across capacity, limits, board and usage",
+      "FIELD0256-STALE: a cached snapshot drops a reading as its reset passes"
     ]
   },
   "FLOW-CLOSE": {

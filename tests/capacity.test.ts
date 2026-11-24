@@ -75,6 +75,22 @@ describe('capacity: current facts and bounded history', () => {
       assert.equal(view.match(/Z\.ai exposes/g)?.length, 1);
     }
   });
+  it('FIELD0256-STALE: a cached snapshot drops a reading as its reset passes', async () => {
+    const t = world('snapshot-reset', 'capacity: {codex_refresh: false}\n');
+    setClaudePlan(t.config.path, NOW, {session: 87, week: 76}, 3_600_000);
+    const file = path.join(path.dirname(t.config.path), 'usage', 'claude-plan.json');
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    data.windows = [{...data.windows[0], resetsAt: (NOW + 1000) / 1000}];
+    fs.writeFileSync(file, JSON.stringify(data));
+    await publishMcpSnapshot(t.ctx);
+    await t.runner.sleep(2000);
+    const deps = {context: () => t.ctx, notify: async () => {}};
+    for (const name of ['capacity', 'limits']) {
+      const result = await MCP_TOOLS.find(tool => tool.name === name)!.run(deps, {});
+      assert.match(result.text, /stale \(odczyt sprzed 1 h\)/, name);
+      assert.doesNotMatch(result.text, /remaining 13%|87%/);
+    }
+  });
   it('missing windows are n/d, unconfigured slots unbounded, no history of closed tasks', async () => {
     const t = world('empty');
     const c = await collectCapacity(t.ctx);

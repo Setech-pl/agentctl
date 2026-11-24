@@ -15,7 +15,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 | FIELD0256-CHAT-USAGE | Named chats lacked a common footer showing their effective quotas and global headroom. | `tests/owner-limits.test.ts` (`^FIELD0256-CHAT-USAGE:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-COUNTS | Capacity and events disagreed on ready reports and stale status listed pulled or closed tasks as active. | `tests/capacity.test.ts` (`^FIELD0256-COUNTS:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-EVENTS | A chat saw unrelated task events and truncated raw JSON GC results. | `tests/a2-wall-events.test.ts` (`^FIELD0256-EVENTS:`)<br>`tests/field0253-gc.test.ts` (`^FIELD0256-GC-EVENT:`) | 0.27.1 | fails on v0.27.0 (2 failing of 2) |
-| FIELD0256-STALE | Expired provider readings still appeared as current percentages. | `tests/capacity.test.ts` (`^FIELD0256-STALE:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
+| FIELD0256-STALE | Expired provider readings still appeared as current percentages. | `tests/capacity.test.ts` (`^FIELD0256-STALE:`) | 0.27.1 | fails on v0.27.0 (2 failing of 2) |
 | FIELD0256-GC-KEEP | GC ignored comma-delimited task IDs in --keep and --force-dirty. | `tests/field0253-gc.test.ts` (`^FIELD0256-GC-KEEP:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-EXACT | An exact task ID outside a command’s eligible set could select a review by prefix. | `tests/queue-mcp.test.ts` (`^FIELD0256-EXACT:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-SPEC | task_spec missed queued-only work and could show the review spec for the exact author ID. | `tests/queue-mcp.test.ts` (`^FIELD0256-SPEC:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |

@@ -55,7 +55,7 @@ function setup(name: string, extraYaml = '') {
 
 describe('mcp: queue read tools', () => {
   it('FIELD0256-EXACT: registry and CLI keep exact task IDs across lifecycle states', async () => {
-    const t = setup('exact-id', 'mcp: {allow: [queue, queue_retry, interrupt]}\n');
+    const t = setup('exact-id', 'mcp: {allow: [queue, queue_retry, interrupt, mark]}\n');
     const id = 'FACADE-AREA-DOCS-2', review = id + '-REVIEW';
     const spec = t.spec(review);
     await t.call('queue', { spec });
@@ -80,6 +80,9 @@ describe('mcp: queue read tools', () => {
     assert.equal((await runCli(t.config, t.runner, ['peek', id])).code, 1);
     assert.equal((await runCli(t.config, t.runner, ['peek', review])).code, 0);
     assert.equal((await t.call('queue_show', { task: review })).isError, undefined);
+    const marked = await runCli(t.config, t.runner, ['mark', id.toLowerCase(), 'ok']);
+    assert.equal(marked.code, 0, marked.stderr);
+    assert.match(marked.stdout, /^FACADE-AREA-DOCS-2: ok/);
   });
 
   it('FIELD0256-SPEC: task_spec reads a queued-only spec by exact ID and unique prefix', async () => {

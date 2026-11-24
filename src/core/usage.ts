@@ -28,6 +28,9 @@ export const PLAN_STALE_MS = 30 * 60_000;
 const MAX_PLAN_AGE_MS = 24 * 3_600_000;
 
 export const stalePlanLabel = (ageMs: number): string => `stale (odczyt sprzed ${Number((ageMs / 3_600_000).toFixed(1))} h)`;
+export function planWindowCurrent(window: Pick<PlanWindowView, 'minutes' | 'resetsAt'>, ageMs: number, now: number): boolean {
+  return ageMs <= Math.min(MAX_PLAN_AGE_MS, (window.minutes ?? 1440) * 60_000) && (window.resetsAt === null || window.resetsAt > now);
+}
 
 // ---- the plan
 
@@ -73,8 +76,8 @@ export function planState(provider: AgentName, snapshot: PlanSnapshot | undefine
   if (!snapshot) return none(missing);
   const age = now - snapshot.at;
   const windows: PlanWindowView[] = snapshot.windows
-    .filter((w) => age <= Math.min(MAX_PLAN_AGE_MS, (w.minutes ?? 1440) * 60_000) && (w.resetsAt === null || w.resetsAt * 1000 > now))
-    .map((w) => ({ kind: w.kind, minutes: w.minutes, label: windowLabel(w), usedPercent: w.usedPercent, resetsAt: w.resetsAt === null ? null : w.resetsAt * 1000 }));
+    .map((w) => ({ kind: w.kind, minutes: w.minutes, label: windowLabel(w), usedPercent: w.usedPercent, resetsAt: w.resetsAt === null ? null : w.resetsAt * 1000 }))
+    .filter(w => planWindowCurrent(w, age, now));
   if (windows.length === 0) return { ...none(`the windows read at ${hhmm(snapshot.at)} have been reset since or expired; no newer reading`), expired: true, stale: true };
   const stale = now - snapshot.at > PLAN_STALE_MS;
   return { provider, available: true, readAt: snapshot.at, planType: snapshot.planType, windows, maxPercent: Math.max(...windows.map((w) => w.usedPercent)), note: stale ? `read ${hhmm(snapshot.at)}: may be out of date` : '', stale };

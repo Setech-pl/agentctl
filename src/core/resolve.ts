@@ -38,7 +38,7 @@ export function matchKnownTask(config: GlobalConfig, input: string, targets: Tas
 
 /** Tasks with a state file plus the windows of the session that have none (orphans); windows "watch", "board" and "manager" are not tasks. */
 export async function listTargets(ctx: Context, windows?: string[]): Promise<TaskTarget[]> {
-  const live = new Set(windows ?? await ctx.tmux.listWindows());
+  const live = new Set(windows ?? (await ctx.tmux.windows()).filter(w => w.exitCode === undefined).map(w => w.plain));
   const targets: TaskTarget[] = [];
   const known = new Set<string>();
   for (const record of listTaskRecords(ctx.config)) {
@@ -84,6 +84,10 @@ export async function resolveRunningTask(ctx: Context, input: string, windows?: 
 
 /** The ID of any task agentctl knows, from what the user typed (case does not matter, a unique prefix is enough). */
 export async function resolveTask(ctx: Context, input: string): Promise<string> {
+  const exact = readTaskRecordById(ctx.config, input.trim());
+  if (exact) return exact.task;
+  const entry = readQueue(ctx.config).find(e => e.task.toLowerCase() === input.trim().toLowerCase());
+  if (entry) return entry.task;
   const match = matchKnownTask(ctx.config, input, await listTargets(ctx));
   if (match.kind === 'one') return match.target.task;
   throw new AgentctlError(match.kind === 'many' ? `"${input}" fits more than one task: ${match.matches.map((m) => m.task).join(', ')}` : `no task "${input}"`, 'See "agentctl status".');

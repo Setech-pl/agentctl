@@ -55,7 +55,7 @@ import { recordJournal, readJournal } from './journal.ts';
 import type { GcPlan } from './gc.ts';
 import { recheckIntegrationGc } from './integration-gc.ts';
 import { applyGc } from './gc.ts';
-import { collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
+import { ageCapacityReadings, collectCapacity as collectCapacityFull, capacitySnapshot, snapshotLines } from './capacity.ts';
 import type { Capacity } from './capacity.ts';
 import { collectGuide } from './guide.ts';
 import fs from 'node:fs';
@@ -365,7 +365,8 @@ async function runStatus(deps: McpDeps, args: { all?: boolean | undefined; cohor
   if (cohort !== undefined) extra.push(`Cohort ${cohort}: only its tasks are listed.`);
   const views = (await queueViews(ctx)).filter((v) => cohort === undefined || cohortEntries([v.entry], cohort).length > 0);
   if (views.length > 0) {
-    extra.push(`Queue (${views.length}): ${views.map((v) => `${v.entry.task}${v.entry.owner ? ` (${v.entry.owner})` : ''} – ${v.condition.text}`).join('; ')}. queue_list has the detail.`);
+    const detail = views.slice(0, 5).map(v => `${v.entry.task}${v.entry.owner ? ` (${v.entry.owner})` : ''} – ${v.condition.text}`);
+    extra.push(`Queue (${views.length}): ${[...detail, ...(views.length > 5 ? ['…'] : [])].join('; ')}. queue_list has the detail.`);
   }
   extra.push(...serverLines(deps, ctx));
   const colliding = shown.filter((r) => r.collide.length > 0);
@@ -442,12 +443,13 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
   // WALL events only of the channels this caller subscribes to; a refused `as` reads as an unknown caller (the agentctl channel).
   let who: WallIdentity;
   try { who = wallIdentity(ctx.config, { as: args.as, client: deps.clientId }); } catch { who = { id: 'unknown', kind: 'unknown' }; }
+  const chat = who.kind === 'chat' ? who.id : args.as?.startsWith('chat:') ? chatOwner(args.as) : undefined;
   const wallChannels = new Set(subscribedChannels(ctx.config, who, shared ?? deps.clientId));
-  const client = who.kind === 'chat' ? `mcp:${who.id}${args.all ? '|all' : ''}` : `mcp:${deps.clientId ?? 'unknown'}:${shared ?? 'default'}`;
-  const session = shared === undefined && who.kind !== 'chat' ? deps.eventsSession : undefined;
+  const client = chat ? `mcp:${chat}${args.all ? '|all' : ''}` : `mcp:${deps.clientId ?? 'unknown'}:${shared ?? 'default'}`;
+  const session = shared === undefined && !chat ? deps.eventsSession : undefined;
   const key = args.cohort === undefined ? client : `${client}|cohort:${cohortKey(args.cohort)}`;
   const sessionCursor = session ? (session.cursors[key] ?? session.markers[key] ?? session.markers.mcp ?? session.initialSince) : undefined;
-  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), ...(who.kind === 'chat' && !args.all ? { chat: who.id } : {}), wallChannels, wallIdentity: who.id, wallOpenChannels: new Set(readableChannels(ctx.config, who)) });
+  const report = await collectEvents(ctx, { client, cursor: args.cursor ?? ((!args.since || args.since === 'last') ? sessionCursor : undefined), limit: args.limit, since: args.since, cohort: args.cohort, keep: Boolean(args.peek), ...(chat && !args.all ? { chat } : {}), wallChannels, wallIdentity: who.id, wallOpenChannels: new Set(readableChannels(ctx.config, who)) });
   if (who.kind === 'unknown') report.note = [report.note, 'unknown chat – only channel agentctl visible; pass as: \"chat:<name>\"'].filter(Boolean).join('\n');
   if (session && !args.peek) session.cursors[key] = report.next_cursor;
   return { text: renderEvents(report).join('\n'), data: report };
@@ -2528,6 +2530,13 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     const now = ctx.runner.now();
     const age = now - snap.at;
     if (!Number.isFinite(age) || snap.version !== 1 || age < 0) return undefined;
+    if (snap.capacity) {
+      snap.capacity = ageCapacityReadings(snap.capacity, now);
+      for (const provider of (snap.capacity as Capacity).providers) {
+        const limits = snap.limits?.providers.find((entry: {agent: string}) => entry.agent === provider.provider);
+        if (limits && provider.expired) limits.plan = provider.staleDescription;
+      }
+    }
     const warning = watchSnapshotWarning(snap.at, now);
     const explicit = args.capacity === true || args.detail === true;
     const disk = snap.disk ?? snap.capacity?.disk;
