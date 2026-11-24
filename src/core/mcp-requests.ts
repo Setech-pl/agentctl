@@ -183,9 +183,10 @@ async function finish(ctx: Context, notifier: Notifier, request: McpRequest, opt
   const reason = (request.error ?? '').split('\n').map((l) => l.trim().replace(/^- /, '')).filter(Boolean).slice(0, 2).join(' ');
   const text = failed
     ? `${request.tool} ${request.label}: nie wykonano – ${reason || 'n/d'} (request ${request.id.slice(0, 8)})`
-    : `${request.tool} ${request.label}: wykonane przez watch – ${(request.result ?? '').split('\n')[0] ?? ''} (request ${request.id.slice(0, 8)})`;
+    : request.tool === 'gc' && request.result?.startsWith('gc') ? request.result
+      : `${request.tool} ${request.label}: wykonane przez watch – ${(request.result ?? '').split('\n')[0] ?? ''} (request ${request.id.slice(0, 8)})`;
   await opts.log?.(`mcp: ${text}`);
-  await recordJournal(ctx, { kind: failed ? 'mcp-failed' : 'mcp-applied', ...(request.task ? { task: request.task } : {}), text });
+  await recordJournal(ctx, { kind: failed ? 'mcp-failed' : 'mcp-applied', ...(request.task ? { task: request.task } : {}), ...(typeof request.args.cohort === 'string' ? { cohort: request.args.cohort } : {}), text });
   if (failed) await notifier.notify('agentctl', text).catch(() => undefined);
   return request;
 }

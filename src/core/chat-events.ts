@@ -1,6 +1,6 @@
 import { channelMessages, wallAge } from './wall.ts';
 import { journalOutputs } from './outputs.ts';
-import { listTaskRecords } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
 import { withFileLock } from './file-lock.ts';
 import fs from 'node:fs';
 import { foldHistory, readHistory } from './history.ts';
@@ -45,6 +45,11 @@ const GC_PREVIEW_DROPPED = { dropped: 'oversized payload; details via gc_preview
  * seamlessly, a cursor past it pointed into the dropped payload and the entry counts as delivered.
  */
 function summarizeLegacyGc(entry: JournalEntry): { entry: JournalEntry; prefix: number } | null {
+  const oldResult = entry.kind === 'mcp-applied' && /^gc (.*?): wykonane przez watch – \{/.exec(entry.text);
+  if (oldResult) {
+    const target = oldResult[1]!.startsWith('cohort ') ? ` ${oldResult[1]}` : '';
+    return { entry: { ...entry, text: `gc${target}: zakończono; szczegóły w historii żądania` }, prefix: 0 };
+  }
   if (entry.gc_preview === undefined) return null;
   const raw = JSON.stringify(entry);
   if (Buffer.byteLength(raw) <= 4000) return null;
@@ -110,6 +115,7 @@ export interface EventsReport {
   note?: string;
   cohort: string | null;
   events: JournalEntry[];
+  otherChatEvents?: number;
   summary: EventsSummary;
   /** Away mode: while on, the phone gets the notifications. */
   away: AwayView;
@@ -119,7 +125,18 @@ export interface EventsReport {
   next_cursor: string;
 }
 
-export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallIdentity?: string; wallOpenChannels?: ReadonlySet<string>; wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
+export function chatEventScope(config: GlobalConfig, chat: string) {
+  const items = [...listArchivedRecords(config), ...listTaskRecords(config), ...readQueue(config)];
+  const tasks = new Set(items.filter(item => item.owner === chat).map(item => item.task));
+  const cohorts = new Set([
+    ...Object.entries(config.quotas?.cohorts ?? {}).filter(([, owner]) => owner === chat).map(([cohort]) => cohort),
+    ...items.filter(item => item.owner === chat && item.cohort).map(item => cohortKey(item.cohort!)),
+  ]);
+  return (item: { task?: string; cohort?: string | null; owner?: string }) =>
+    item.owner === chat || Boolean(item.task && tasks.has(item.task)) || Boolean(item.cohort && cohorts.has(cohortKey(item.cohort)));
+}
+
+export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; chat?: string; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallIdentity?: string; wallOpenChannels?: ReadonlySet<string>; wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
   const { config, runner } = ctx;
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
@@ -141,13 +158,14 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   if (wallStart.index < position.index || (wallStart.index === position.index && wallStart.offset < position.offset)) position = {...wallStart};
   const events: Array<JournalEntry & { fragment?: { offset: number; total: number; encoding: string } }> = [];
   const rows = await collectStatus(ctx, { progress: false, archived: false, cachedOnly: true, shallowClosed: true });
-  const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
+  const inScope = opts.chat ? chatEventScope(config, opts.chat) : undefined;
+  const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (!inScope || inScope(r)) && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
   const alive = open.filter((r) => r.window === 'alive' && !r.finished);
-  const queue = waiting(readQueue(config)).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
+  const queue = waiting(readQueue(config)).filter((e) => (!inScope || inScope(e)) && (cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort))));
   const ratingKey = `${config.path}|${opts.client}`;
   const summary: EventsSummary = {
     active: alive.length,
-    ...(!ratingShown.has(ratingKey) ? { unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length } : {}),
+    ...(!ratingShown.has(ratingKey) ? { unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result && (!inScope || inScope(r))).length } : {}),
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
     needYou: open.filter((r) => r.state === 'limited' || r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting' || (r.reportCandidate && r.report !== 'yes')).map((r) => `${r.task} (${r.state})${r.state === 'limited' ? `: ${r.usage_hint ?? 'limit wyczerpany'}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`),
     queued: queue.length,
@@ -172,6 +190,11 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     const start = event.kind === 'wall' ? wallStart : taskStart;
     if (position.index < start.index) { position = {index: position.index + 1, offset: 0}; continue; }
     if (position.index === start.index) position.offset = Math.max(position.offset, start.offset);
+    if (event.kind !== 'wall' && inScope && (event.task || event.cohort || event.owner?.startsWith('chat:')) && !inScope(event)) {
+      report.otherChatEvents = (report.otherChatEvents ?? 0) + 1;
+      position = { index: position.index + 1, offset: 0 };
+      continue;
+    }
     if (event.kind !== 'wall' && cohort !== null && (!event.cohort || cohortKey(event.cohort) !== cohortKey(cohort))) { position = { index: position.index + 1, offset: 0 }; continue; }
     if (event.kind === 'wall' && opts.wallChannels && !opts.wallChannels.has(event.wall?.channel ?? '') && !(opts.wallIdentity && event.wall?.recipients?.includes(opts.wallIdentity))) { position = { index: position.index + 1, offset: 0 }; continue; }
     if (event.kind === 'wall' && event.wall?.recipients && opts.wallIdentity && !event.wall.recipients.includes(opts.wallIdentity) && !event.wall.recipients.includes(event.wall.channel)) { position = { index: position.index + 1, offset: 0 }; continue; }
@@ -301,6 +324,7 @@ export function renderEvents(report: EventsReport): string[] {
     ...(report.note ? [report.note] : []),
     ...(report.wallOpen ? ['WALL do Ciebie (open)', ...report.wallOpen.map(m => `${m.id}: ${m.subject} (${m.age})${m.from === report.wallIdentity ? ' (yours)' : ''}`), ...(!report.wallOpen.length ? ['brak'] : [])] : []),
     ...report.events.map((e) => `${hhmm(e.at)}  ${KIND_LABEL[e.kind]}${e.task ? `  ${e.task}` : ''}  ${e.verdict ? `${e.verdict}` : e.text}${e.kind === 'wall' && report.wallIdentity && e.wall?.from === report.wallIdentity ? ' (yours)' : ''}${e.phone ? PHONE_MARK : ''}`),
+    ...(report.otherChatEvents ? [`inne czaty: ${report.otherChatEvents} zdarzeń`] : []),
     summaryLine(report.summary),
     `has_more: ${report.has_more}; next_cursor: ${report.next_cursor}`,
     ...(report.away.on ? ['Away włączone: telefon dostaje powiadomienia (📱 przy zdarzeniu = poszło na telefon).'] : []),

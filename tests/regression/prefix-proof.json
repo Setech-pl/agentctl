@@ -469,6 +469,18 @@
       "FIELD0253-LIMITS: watch reports manual and chat changes exactly once with their sources"
     ]
   },
+  "FIELD0256-EVENTS": {
+    "rev": "v0.27.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-EVENTS: chat sees its tasks and cohorts, counts others, and can request all",
+      "FIELD0256-EVENTS: chat sees its tasks and cohorts, counts others, and can request all",
+      "FIELD0256-GC-EVENT: deferred cohort GC publishes one summary",
+      "FIELD0256-GC-EVENT: deferred cohort GC publishes one summary"
+    ]
+  },
   "FIELD0256-EXACT": {
     "rev": "v0.27.0",
     "outcome": "FAILS",

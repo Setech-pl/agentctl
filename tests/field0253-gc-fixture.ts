@@ -2,13 +2,13 @@ import { Context } from '../src/core/context.ts';
 import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
-export function gcFixture(name: string, count: number, dirty: boolean, onGit = () => {}) {
+export function gcFixture(name: string, count: number, dirty: boolean, onGit = () => {}, cohort?: string) {
   const root = scratch.sub(name);
   const config = makeConfig(root, 'mcp: {allow: [gc]}\n');
   const repo = scratch.sub(name + '/repo');
   const trees = Array.from({length: count}, (_, i) => {
     const worktree = scratch.sub(name + '/wt-' + i);
-    seedTask(config, 'GC-' + i, {closed: true, repos: [{path: repo, worktree, base: 'main', branch: 'agent/gc-' + i}]});
+    seedTask(config, 'GC-' + i, {closed: true, cohort, repos: [{path: repo, worktree, base: 'main', branch: 'agent/gc-' + i}]});
     return worktree;
   });
   const gitCalls: string[][] = [];

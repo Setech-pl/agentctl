@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0256-EVENTS | A chat saw unrelated task events and truncated raw JSON GC results. | `tests/a2-wall-events.test.ts` (`^FIELD0256-EVENTS:`)<br>`tests/field0253-gc.test.ts` (`^FIELD0256-GC-EVENT:`) | 0.27.1 | fails on v0.27.0 (2 failing of 2) |
 | FIELD0256-STALE | Expired provider readings still appeared as current percentages. | `tests/capacity.test.ts` (`^FIELD0256-STALE:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-GC-KEEP | GC ignored comma-delimited task IDs in --keep and --force-dirty. | `tests/field0253-gc.test.ts` (`^FIELD0256-GC-KEEP:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-EXACT | An exact task ID outside a command’s eligible set could select a review by prefix. | `tests/queue-mcp.test.ts` (`^FIELD0256-EXACT:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |

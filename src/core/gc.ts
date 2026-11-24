@@ -346,6 +346,12 @@ export interface GcResult {
   freedBytes: number;
 }
 
+export function gcResultLine(result: GcResult, cohort?: string): string {
+  const trees = result.done.filter(item => item.kind === 'worktree').length;
+  const archived = result.done.filter(item => item.kind === 'archive').length;
+  return `gc${cohort ? ` cohort ${cohort}` : ''}: ${trees} worktree usunięto, ${archived} zarchiwizowano, ${(result.freedBytes / 1024 ** 3).toFixed(2)} GiB${result.failed.length ? `, ${result.failed.length} niepowodzeń` : ''}`;
+}
+
 /** Do the plan: worktrees (`git worktree remove`, forced only for explicitly named tasks), cache entries, archive moves, then branches (`git branch -d`, never -D). */
 export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
   if (plan.integration) return applyIntegrationGc(ctx, plan);

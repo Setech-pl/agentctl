@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { applyAcceptedWrites } from '../src/core/queue.ts';
+import { readJournal } from '../src/core/journal.ts';
 import { fakeWatcher, runCli } from './helpers.ts';
 import { gcFixture } from './field0253-gc-fixture.ts';
 
@@ -17,6 +18,25 @@ test('FIELD0256-GC-KEEP: CLI keeps variadic and comma-delimited tasks despite fo
   assert.match(result.stdout, /Skipped \(pinned\): 3,/);
   for (const id of ['GC-0', 'GC-1', 'GC-2']) assert.match(result.stdout, new RegExp(`worktree ${id} .*keep requested`));
   assert.match(result.stdout, /worktree GC-3 .*closed task/);
+});
+
+test('FIELD0256-GC-EVENT: deferred cohort GC publishes one summary', async () => {
+  const { config, ctx } = gcFixture('gc-event', 2, false, undefined, 'Tidy');
+  fakeWatcher(config);
+  const deps = {context: () => ctx, notify: async () => {}};
+  const gc = tool('gc');
+  const pending = await gc.run(deps, {cohort: 'Tidy'});
+  const id = requestId(pending.text);
+  assert.ok(id, pending.text);
+  await applyAcceptedWrites(ctx, notifier, {});
+  const prepared = await gc.run(deps, {request_id: id});
+  const token = /preview_token: (\S+)/.exec(prepared.text)?.[1];
+  assert.ok(token, prepared.text);
+  assert.match((await gc.run(deps, {confirm: true, preview_token: token})).text, /^Accepted/);
+  await applyAcceptedWrites(ctx, notifier, {});
+  const summaries = readJournal(config).filter(e => e.kind === 'mcp-applied' && /^gc\b(?!_)/.test(e.text));
+  assert.equal(summaries.length, 1);
+  assert.match(summaries[0]!.text, /^gc cohort Tidy: 2 worktree usunięto, 2 zarchiwizowano, \d+\.\d+ GiB$/);
 });
 
 test('FIELD0253-GC: the watcher plans 301 worktrees before issuing a bound GC token', async () => {
