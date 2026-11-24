@@ -43,11 +43,11 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | Tool | Kind | Arguments | Purpose |
 |---|---|---|---|
 | `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Status of all agent tasks |
-| `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
+| `events_since` | read | `as?`, `all?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
 | `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
 | `limits` | read | `as?`, `format?`, `detail?` | Limits of simultaneous agents |
 | `set_limits` | write | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Request or change limits |
-| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
+| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `until?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
 | `version` | read | `as?` | Version of this server |
 | `peek` | read | `as?`, `task`, `lines?` | Look into a task window |
 | `list_reports` | read | `as?`, `all?` | List the reports |

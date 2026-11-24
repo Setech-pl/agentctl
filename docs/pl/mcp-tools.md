@@ -41,11 +41,11 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | Tool | Rodzaj | Argumenty | Zastosowanie |
 |---|---|---|---|
 | `status` | odczyt | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
-| `events_since` | odczyt | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
+| `events_since` | odczyt | `as?`, `all?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
 | `gc_preview` | odczyt | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
 | `limits` | odczyt | `as?`, `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
 | `set_limits` | zapis | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Złóż właścicielowi wniosek o zmianę limitów, progu kolejki, kwot lub profilu. Czasowy hold działa bezpośrednio po potwierdzeniu. |
-| `reserve` | zapis | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
+| `reserve` | zapis | `as?`, `claude?`, `codex?`, `note?`, `until?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
 | `version` | odczyt | `as?` | Wersja procesu MCP, skrypt, PID, czas startu i wersja stabilnej kopii na dysku. |
 | `peek` | odczyt | `as?`, `task`, `lines?` | Ostatnie linie okna bez stopki, pytanie, stan kolejki promptów lub zapis błędu startu. |
 | `list_reports` | odczyt | `as?`, `all?` | Lista raportów, rozmiar/czas, źródło i informacja o odebraniu. |

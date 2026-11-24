@@ -77,7 +77,11 @@ test('FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or
     assert.equal(captures, 1, 'watch must reuse the in-flight sweep');
     release();
     for (let i = 0; i < 500 && !memory.statusSweep; i++) await new Promise<void>(resolve => setImmediate(resolve));
-    assert.equal(memory.statusSweep?.rows.length, 1200, 'the original sweep eventually completed');
+    const firstRows = memory.statusSweep?.rows;
+    assert.ok(firstRows, 'the original sweep eventually completed');
+    assert.equal(firstRows.filter(row => row.archived).length, 1199);
+    assert.ok(firstRows.some(row => row.task === 'SLOW'));
+    assert.ok(!firstRows.some(row => row.task === 'WAITING'), 'the original sweep predates the second tick admission');
     await tick();
     const result = snapshot();
     assert.ok(result.rows?.length >= 1200, fs.readFileSync(watchLogPath(ctx), 'utf8').split('\n').slice(-7).join('\n'));

@@ -282,11 +282,11 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | Tool | Kind | Arguments |
 |---|---|---|
 | `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` |
-| `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
+| `events_since` | read | `as?`, `all?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` |
 | `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` |
 | `limits` | read | `as?`, `format?`, `detail?` |
 | `set_limits` | write | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?` |
-| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?` |
+| `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `until?`, `release?`, `confirm?`, `preview_token?` |
 | `version` | read | `as?` |
 | `peek` | read | `as?`, `task`, `lines?` |
 | `list_reports` | read | `as?`, `all?` |
@@ -369,7 +369,7 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `status`: `--detail`, `--json`, `--clip`, `--tmux-line`, `--all`, `--cohort &lt;name&gt;`
 - `limits show`: `--json`
 - `limits set`: `--until &lt;time&gt;`, `-y, --yes`, `--dry-run`
-- `limits reserve`: `--note &lt;text&gt;`
+- `limits reserve`: `--note &lt;text&gt;`, `--until &lt;time&gt;`
 - `events`: `--since &lt;time&gt;`, `--cohort &lt;name&gt;`, `--keep`, `--json`, `--clip`
 - `wall channels`: `--as &lt;who&gt;`, `--json`
 - `wall read`: `--id &lt;id&gt;`, `--since &lt;time&gt;`, `--archive`, `--status &lt;status&gt;`, `--kind &lt;kind&gt;`, `--limit &lt;n&gt;`, `--before &lt;id&gt;`, `--as &lt;who&gt;`, `--json`

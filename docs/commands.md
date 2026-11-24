@@ -52,7 +52,7 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`wall reply`](#agentctl-wall-reply) | Reply to a message in its channel (kind answer by default). An answer to an open question marks it answered. |
 | [`wall status`](#agentctl-wall-status) | Record a new status of a message (the history stays). The owner closes decision-request and contract-change; see who set each status with "wall read --id". |
 | [`usage`](#agentctl-usage) | Token usage of the tasks and the state of the plans: per provider the limit used (5 h and weekly window, with the reset) and the tokens today and in the period, the active tasks with their tokens, the cohorts. What a provider does not tell is n/d. |
-| [`resume`](#agentctl-resume) | After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first. |
+| [`resume`](#agentctl-resume) | Reopen a task with its saved worktrees under the same ID. Takes up the saved conversation when one exists, and resends the original prompt if a dead launch established no session. Keeps the provider, model and effort. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first. |
 | [`up`](#agentctl-up) | Start of the day: make sure the watcher and the board run in the agentctl session (never a second copy; with manager.autostart the manager too), say which tasks can be resumed, and go to the board (attach, or switch inside tmux). Without a terminal it only prints the command to attach. |
 | [`mark`](#agentctl-mark) | Record the result the user judged. Multiple tasks require a preview and confirmation. |
 | [`dataset`](#agentctl-dataset) | Read-only benchmark datasets |
@@ -793,6 +793,7 @@ agentctl limits reserve [options] <places...>
 | Option | Meaning | Notes |
 |---|---|---|
 | `--note <text>` | what the place is for (shown by "limits") |  |
+| `--until <time>` | expire this provider’s reservation at HH:MM, an ISO time, or after a duration (e.g. 3h) |  |
 
 Examples:
 
@@ -1021,7 +1022,7 @@ agentctl usage --clip                  # Markdown table to the clipboard
 
 ## agentctl resume
 
-After a restart (the Mac, the tmux server): make the window again for active tasks that have a worktree and no window, and start the agent in resume mode - Claude with --resume \<session> or --continue, Codex with "resume \<session>" or "resume --last" - with the same model, effort, flags, event hooks and usage tap, without pasting the prompt again. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first.
+Reopen a task with its saved worktrees under the same ID. Takes up the saved conversation when one exists, and resends the original prompt if a dead launch established no session. Keeps the provider, model and effort. Tasks whose report is ready are left alone unless --all. Shows the list and asks y/N first.
 
 ```
 agentctl resume [options] [tasks...]

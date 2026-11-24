@@ -119,6 +119,10 @@
             "minLength": 1,
             "maxLength": 60
           },
+          "all": {
+            "description": "true: include task and cohort events from other chats; WALL subscriptions still apply.",
+            "type": "boolean"
+          },
           "cursor": {
             "type": "string",
             "maxLength": 2048
@@ -560,6 +564,11 @@
             "description": "What the place is for (shown by limits).",
             "type": "string",
             "maxLength": 100
+          },
+          "until": {
+            "description": "Expiration cue: local HH:MM, ISO timestamp or duration (3h).",
+            "type": "string",
+            "maxLength": 40
           },
           "release": {
             "description": "true: give the places back instead of reserving.",
