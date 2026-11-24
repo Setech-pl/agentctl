@@ -25,6 +25,9 @@ import { isObject } from './util.ts';
 const START_SLACK_MS = 60_000;
 /** A reading of the plan older than this is shown with its age; the percentage may have moved since. */
 export const PLAN_STALE_MS = 30 * 60_000;
+const MAX_PLAN_AGE_MS = 24 * 3_600_000;
+
+export const stalePlanLabel = (ageMs: number): string => `stale (odczyt sprzed ${Number((ageMs / 3_600_000).toFixed(1))} h)`;
 
 // ---- the plan
 
@@ -53,6 +56,8 @@ export interface PlanState {
   note: string;
   /** Older than PLAN_STALE_MS. */
   stale: boolean;
+  /** All readings expired by age or reset, and have no current percentages. */
+  expired?: boolean;
   source?: string;
 }
 
@@ -66,10 +71,11 @@ function windowLabel(w: Pick<PlanWindow, 'kind' | 'minutes'>): string {
 export function planState(provider: AgentName, snapshot: PlanSnapshot | undefined, now: number, missing: string): PlanState {
   const none = (note: string): PlanState => ({ provider, available: false, readAt: snapshot?.at ?? null, planType: snapshot?.planType ?? null, windows: [], maxPercent: null, note, stale: false });
   if (!snapshot) return none(missing);
+  const age = now - snapshot.at;
   const windows: PlanWindowView[] = snapshot.windows
-    .filter((w) => w.resetsAt === null || w.resetsAt * 1000 > now)
+    .filter((w) => age <= Math.min(MAX_PLAN_AGE_MS, (w.minutes ?? 1440) * 60_000) && (w.resetsAt === null || w.resetsAt * 1000 > now))
     .map((w) => ({ kind: w.kind, minutes: w.minutes, label: windowLabel(w), usedPercent: w.usedPercent, resetsAt: w.resetsAt === null ? null : w.resetsAt * 1000 }));
-  if (windows.length === 0) return none(`the windows read at ${hhmm(snapshot.at)} have been reset since; no newer reading`);
+  if (windows.length === 0) return { ...none(`the windows read at ${hhmm(snapshot.at)} have been reset since or expired; no newer reading`), expired: true, stale: true };
   const stale = now - snapshot.at > PLAN_STALE_MS;
   return { provider, available: true, readAt: snapshot.at, planType: snapshot.planType, windows, maxPercent: Math.max(...windows.map((w) => w.usedPercent)), note: stale ? `read ${hhmm(snapshot.at)}: may be out of date` : '', stale };
 }
@@ -87,10 +93,16 @@ export function formatReset(ms: number, now: number): string {
 export { claudePlanFile, glmPlanFile, planFileFor, readClaudeSnapshot } from './providers/claude-usage.ts';
 
 /** Both plans. Reads one file for Claude and the tail of the newest Codex logs. */
-export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records: readonly TaskRecord[] = allRecords(config)): ProviderValues<PlanState> {
+export function readPlanStates(config: GlobalConfig, reader: UsageReader, now: number): ProviderValues<PlanState> {
   const ids = activeProviders(config);
   const plans = perProvider(ids, id => adapter(id).usage.readPlan(config, reader, now));
-  for (const id of ids) { const p = plans[id]; p.stale = p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000; }
+  for (const id of ids) { const p = plans[id]; p.stale = p.expired === true || (p.readAt !== null && now - p.readAt > config.capacity.staleMinutes * 60_000); }
+  return plans;
+}
+
+export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records: readonly TaskRecord[] = allRecords(config)): ProviderValues<PlanState> {
+  const ids = activeProviders(config);
+  const plans = readPlanStates(config, reader, now);
   const totals = perProvider(ids, () => 0);
   for (const u of collectTaskUsage(config, reader, records, now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
   recordSamples(config, plans, totals, now);

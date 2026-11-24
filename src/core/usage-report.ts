@@ -7,7 +7,7 @@ import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { allRecords, collectTaskUsage, formatReset, hhmm, openReader, readPlans } from './usage.ts';
+import { allRecords, collectTaskUsage, formatReset, hhmm, openReader, readPlans, stalePlanLabel } from './usage.ts';
 import type { PlanState, TaskUsage } from './usage.ts';
 import type { UsageReader } from './usage-sources.ts';
 import { addTokens, formatTokens, freshTokens, localDay, sumBuckets, zeroTokens } from './usage-parse.ts';
@@ -132,6 +132,7 @@ export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promi
 
 /** "62% ↻ 14:30", or "n/d". */
 export function windowText(state: PlanState, kind: PlanWindow['kind'], now: number): string {
+  if (state.expired && state.readAt !== null) return stalePlanLabel(now - state.readAt);
   const w = state.windows.find((x) => x.kind === kind);
   if (!w) return 'n/d';
   return `${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻ ${formatReset(w.resetsAt, now)}`}`;
@@ -139,6 +140,7 @@ export function windowText(state: PlanState, kind: PlanWindow['kind'], now: numb
 
 /** "5h 62% ↻ 14:30 · week 41% ↻ Sun 18:00", or "n/d (why)". */
 export function planLine(state: PlanState, now: number): string {
+  if (state.expired && state.readAt !== null) return stalePlanLabel(now - state.readAt);
   if (!state.available) return `n/d${state.note ? ` (${state.note})` : ''}`;
   const parts = state.windows.map((w) => `${w.label} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻ ${formatReset(w.resetsAt, now)}`}`);
   return `${parts.join(' · ')}${state.stale && state.readAt !== null ? ` (read ${hhmm(state.readAt)})` : ''}`;
@@ -157,10 +159,14 @@ export function renderUsage(report: UsageReport): string[] {
   const n = report.now;
   const hasWeek = (Object.keys(report.plans) as AgentName[]).some((p) => providerValue(report.plans, p).windows.some((w) => w.kind === 'week'));
   const header = ['PROVIDER', '5H LIMIT', ...(hasWeek ? ['WEEK LIMIT'] : []), 'TODAY', report.since.toUpperCase()];
-  const body = (Object.keys(report.plans) as AgentName[]).map((p) => [p, windowText(providerValue(report.plans, p), 'session', n), ...(hasWeek ? [windowText(providerValue(report.plans, p), 'week', n)] : []), fresh(report.providers[p].today), fresh(report.providers[p].window)]);
+  const body = (Object.keys(report.plans) as AgentName[]).map(p => {
+    const plan = providerValue(report.plans, p);
+    return [p, windowText(plan, 'session', n), ...(hasWeek ? [plan.expired ? '–' : windowText(plan, 'week', n)] : []), fresh(report.providers[p].today), fresh(report.providers[p].window)];
+  });
   lines.push(...table(header, body));
   for (const p of (Object.keys(report.plans) as AgentName[])) {
     const s = providerValue(report.plans, p);
+    if (s.expired) continue;
     const others = s.windows.filter((w) => w.kind === 'other');
     if (others.length > 0) lines.push(`${p}: ${others.map((w) => `${w.label} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻ ${formatReset(w.resetsAt, n)}`}`).join(' · ')}`);
     if (!s.available) lines.push(`${p}: limit n/d – ${s.note}`);
@@ -207,6 +213,10 @@ export function usageMarkdown(report: UsageReport): string {
 }
 
 /** "C 62% · X 18%" for the tmux status line: the highest window of each provider, a provider with no reading left out. */
-export function planStatusLine(plans: ProviderValues<PlanState>): string {
-  return (Object.keys(plans) as AgentName[]).filter(p => providerValue(plans, p).available && providerValue(plans, p).maxPercent !== null).map(p => `${adapter(p).letter} ${Math.round(providerValue(plans, p).maxPercent as number)}%`).join(' · ');
+export function planStatusLine(plans: ProviderValues<PlanState>, now = Date.now()): string {
+  return (Object.keys(plans) as AgentName[]).flatMap(p => {
+    const plan = providerValue(plans, p);
+    if (plan.expired && plan.readAt !== null) return [`${adapter(p).letter} ${stalePlanLabel(now - plan.readAt)}`];
+    return plan.available && plan.maxPercent !== null ? [`${adapter(p).letter} ${Math.round(plan.maxPercent)}%`] : [];
+  }).join(' · ');
 }

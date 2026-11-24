@@ -55,7 +55,7 @@ import type { Result } from './history.ts';
 import { readPlans, sharedReader } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { formatTokens } from './usage-parse.ts';
-import { formatReset } from './usage.ts';
+import { formatReset, stalePlanLabel } from './usage.ts';
 import { awayView, setAway } from './away.ts';
 import type { AwayView } from './away.ts';
 import { MANAGER_STATE_TEXT, managerView } from './manager.ts';
@@ -1214,7 +1214,7 @@ export function updateLimitsPanel(mode: Extract<BoardMode, { kind: 'view' }>, da
 /** The lines of a view: the same text the command prints. */
 export async function loadViewLines(ctx: Context, what: ViewKind): Promise<string[]> {
   if (what === 'capacity') return renderCapacity(await collectCapacity(ctx));
-  if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx)));
+  if (what === 'limits') return renderLimits(collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now(), true));
   if (what === 'hosts') {
     const cache = Object.keys(ctx.config.hosts).length === 0 ? undefined : readHostsCache();
     const health = Object.keys(ctx.config.hosts).map(name => ctx.hosts.connection(name).unreachable ? {name, state: 'unreachable' as const, probedAt: '', detail: ctx.hosts.connection(name).detail} : cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
@@ -1258,6 +1258,7 @@ export function usagePanel(plans: ProviderValues<PlanState> | null, usage: Usage
     // usage.queue_hold of the provider, when one is set (changed live by set_limits / limits set / a hand edit).
     const timedHold = holds[provider] ? `  ${providerHoldText(provider, holds[provider]!)}` : '';
     const hold = usage.queueHold[provider] === undefined ? '' : `  hold ${usage.queueHold[provider]}%`;
+    if (plan.expired && plan.readAt !== null) return { provider, text: `${name} ${stalePlanLabel(now - plan.readAt)}${timedHold}${hold}`, color: 'yellow' };
     if (!plan.available) return { provider, text: `${name} n/d${timedHold}${plan.note ? ` – ${plan.note}` : ''}${hold}` };
     const parts = plan.windows.map((w) => `${w.label} ${usageBar(w.usedPercent)} ${Math.round(w.usedPercent)}%${w.resetsAt === null ? '' : ` ↻${formatReset(w.resetsAt, now)}`}`);
     const worst = plan.maxPercent ?? 0;

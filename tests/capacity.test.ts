@@ -10,7 +10,7 @@ import { openReader, readPlans } from '../src/core/usage.ts';
 import { readSamples, recordSamples, samplesPath } from '../src/core/usage-samples.ts';
 import type { UsageSample } from '../src/core/usage-samples.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
-import { loadViewLines } from '../src/core/board.ts';
+import { loadViewLines, usagePanel } from '../src/core/board.ts';
 import { Context } from '../src/core/context.ts';
 import { acknowledgingRespond, DiskRunner, FakeTmux, makeConfig, runCli, useScratch } from './helpers.ts';
 import { makeWorld, setClaudePlan } from './usage-world.ts';
@@ -60,6 +60,20 @@ describe('capacity: honest trends and estimates', () => {
 });
 
 describe('capacity: current facts and bounded history', () => {
+  it('FIELD0256-STALE: expired readings are labeled across capacity, limits, board and usage', async () => {
+    const t = world('hard-stale', 'providers: [claude, codex, glm]\ncapacity: {codex_refresh: false}\n');
+    setClaudePlan(t.config.path, NOW, { session: 87, week: 76 }, 25 * 3_600_000);
+    const stale = /stale \(odczyt sprzed 25 h\)/;
+    const panel = usagePanel(readPlans(t.config, openReader(t.config), NOW), t.config.usage, NOW).map(row => row.text).join('\n');
+    const capacity = renderCapacity(await collectCapacity(t.ctx, { cachedOnly: true })).join('\n');
+    const limits = (await runCli(t.config, t.runner, ['limits'])).stdout;
+    const usage = (await runCli(t.config, t.runner, ['usage'])).stdout;
+    for (const view of [capacity, limits, panel, usage]) {
+      assert.match(view, stale);
+      assert.doesNotMatch(view, /(?:87|76)%/);
+      assert.equal(view.match(/Z\.ai exposes/g)?.length, 1);
+    }
+  });
   it('missing windows are n/d, unconfigured slots unbounded, no history of closed tasks', async () => {
     const t = world('empty');
     const c = await collectCapacity(t.ctx);

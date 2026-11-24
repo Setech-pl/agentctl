@@ -20,6 +20,8 @@ import { AgentctlError, errorMessage, isObject, Problems } from './util.ts';
 import { OWNER_IDENTITY, postMessage } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
 import path from 'node:path';
+import { openReader, readPlanStates } from './usage.ts';
+import { planLine } from './usage-report.ts';
 
 /*
  * The limits of simultaneous agents per provider and what uses them up: the windows of agentctl, the places the user reserved for agents
@@ -213,6 +215,7 @@ export interface ProviderLoad {
   queueHold: number | null;
   providerHold?: ProviderHold;
   chats?: ChatLoad[];
+  plan?: string;
 }
 
 export interface LimitsReport {
@@ -223,8 +226,9 @@ export interface LimitsReport {
 }
 
 /** `live` is what `liveWindows` returns: windows of agentctl plus the reservations and the external sessions. */
-export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[], now = Date.now()): LimitsReport {
+export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[], now = Date.now(), showPlans = false): LimitsReport {
   const holds = providerHolds(config, now);
+  const plans = showPlans ? readPlanStates(config, openReader(config), now) : undefined;
   const queue = waiting(readQueue(config));
   const reservations = readReservations(config);
   return {
@@ -248,7 +252,8 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
       const chats = config.quotas?.per_host
         ? [undefined, ...Object.keys(config.hosts)].filter(host => !host || config.hosts[host]?.providers.includes(agent)).flatMap(host => chatLoads(config, agent, live, host))
         : chatLoads(config, agent, live);
-      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, ...(chats.length ? { chats } : {}), ...(holds[agent] ? {providerHold: holds[agent]} : {}), free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
+      const plan = plans?.[agent];
+      return { agent, limit, windows, starting, working, reportReady, reserved, reservedNote: reservations[agent]?.note ?? null, external, used, ...(chats.length ? { chats } : {}), ...(plan ? {plan: planLine(plan, now)} : {}), ...(holds[agent] ? {providerHold: holds[agent]} : {}), free: holds[agent] || limit === 'off' ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter((e) => e.agent === agent).length, queueHold: config.usage.queueHold[agent] ?? null };
     }),
   };
 }
@@ -261,6 +266,7 @@ export function renderLimits(report: LimitsReport): string[] {
   const lines = [fmt(header), ...body.map(fmt)];
   for (const p of report.providers) {
     const parts: string[] = [];
+    if (p.plan) parts.push(`plan: ${p.plan}`);
     if (p.windows.length > 0) parts.push(`agentctl: ${p.windows.join(', ')}`);
     if (p.reserved > 0) parts.push(`reserved: ${p.reserved}${p.reservedNote ? ` (${p.reservedNote})` : ''}`);
     for (const e of p.external) parts.push(`external: pid ${e.pid}${e.cwd ? ` in ${e.cwd}` : ''}`);
@@ -277,7 +283,7 @@ export function renderLimits(report: LimitsReport): string[] {
 /** The provider and chat counts for concise MCP responses. */
 export function compactLimits(report: LimitsReport): string {
   return report.providers.flatMap(p => [
-    `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`,
+    `${p.agent}: used=${p.used} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}${p.plan ? `; plan ${p.plan}` : ''}`,
     ...(p.chats ?? []).map(chat => `  ${renderChatLoad(chat)}`),
   ]).join('\n');
 }

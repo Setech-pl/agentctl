@@ -523,7 +523,7 @@ async function runResume(deps: McpDeps, args: { tasks?: string[] | undefined; al
 
 async function runLimits(deps: McpDeps): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
+  const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now(), true);
   const reserved = readReservations(ctx.config);
   return ok(
     `Limits of simultaneous agents per provider. used = windows of agentctl + reserved places + external sessions (counted only if countExternal is true); free = limit - used; queued = tasks waiting for a place of that provider.\n\n${JSON.stringify({ ...report, reservations: reserved }, null, 2)}`,
@@ -2467,7 +2467,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
   const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live});
-  const limits = collectLimits(ctx.config, live, ctx.runner.now());
+  const limits = collectLimits(ctx.config, live, ctx.runner.now(), true);
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
   const doctor: {name: string; status: string; detail: string}[] = [

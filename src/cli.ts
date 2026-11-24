@@ -905,7 +905,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (opts: { json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
-        const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now());
+        const report = collectLimits(ctx.config, await liveWindows(ctx), ctx.runner.now(), true);
         if (opts.json) return line(JSON.stringify(report, null, 2));
         for (const l of renderLimits(report)) line(l);
       }),

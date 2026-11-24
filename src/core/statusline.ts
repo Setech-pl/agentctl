@@ -44,7 +44,7 @@ export async function statusTmuxLine(ctx: Context): Promise<string> {
   let plan = '';
   if (ctx.config.usage.statusLine) {
     const reader = openReader(ctx.config);
-    plan = planStatusLine(readPlans(ctx.config, reader, ctx.runner.now()));
+    plan = planStatusLine(readPlans(ctx.config, reader, ctx.runner.now()), ctx.runner.now());
     reader.save();
   }
   return tmuxLine(shownRows(await collectStatus(ctx, { progress: false }), false), ctx.config.watch.windowIcons, queued, plan, readAway(ctx.config).on);

@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0256-STALE', fixedIn: '0.27.1', symptom: 'Expired provider readings still appeared as current percentages.', scenarios: [s('capacity.test.ts', '^FIELD0256-STALE:')] },
   { id: 'FIELD0256-GC-KEEP', fixedIn: '0.27.1', symptom: 'GC ignored comma-delimited task IDs in --keep and --force-dirty.', scenarios: [s('field0253-gc.test.ts', '^FIELD0256-GC-KEEP:')] },
   { id: 'FIELD0256-EXACT', fixedIn: '0.27.1', symptom: 'An exact task ID outside a command’s eligible set could select a review by prefix.', scenarios: [s('queue-mcp.test.ts', '^FIELD0256-EXACT:')] },
   { id: 'FIELD0256-SPEC', fixedIn: '0.27.1', symptom: 'task_spec missed queued-only work and could show the review spec for the exact author ID.', scenarios: [s('queue-mcp.test.ts', '^FIELD0256-SPEC:')] },
