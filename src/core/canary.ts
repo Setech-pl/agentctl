@@ -7,8 +7,8 @@ import { stringify } from 'yaml';
 import { loadGlobalConfig, type AgentName, type GlobalConfig } from './config.ts';
 import { Context } from './context.ts';
 import { CANARY_PROMPT, CanaryRunner } from './canary-runner.ts';
-import { archiveDir, readTaskRecord, renderTaskMd, taskFile, type TaskRecord } from './taskstore.ts';
-import { readQueue, saveEntry } from './queue.ts';
+import { archiveDir, listTaskRecords, listArchivedRecords, readTaskRecord, renderTaskMd, taskFile, type TaskRecord } from './taskstore.ts';
+import { queueViews, readQueue, saveEntry } from './queue.ts';
 import { sendPrompts } from './send.ts';
 import { runWatch } from './watch.ts';
 import { watchHeartbeatPath, watchSnapshotPath } from './watch-snapshot.ts';
@@ -29,9 +29,16 @@ const fixtureTasks = (scale: boolean) => scale ? 1500 : 12;
 const date = (at: number) => new Date(at).toISOString();
 const successReport = (verdict: string) => `Werdykt: ${verdict}\n\n<!-- agentctl:report-end -->\n`;
 
-export function canaryCacheDir(): string {
+export function canaryCacheDir(forbidden: string[] = []): string {
   const dir = process.env.AGENTCTL_LIVE_CACHE ?? path.join(os.homedir(), '.cache', 'agentctl-canary');
   if (!path.isAbsolute(dir)) throw Error('Canary cache directory must be absolute');
+  const resolve = (target: string): string => {
+    if (fs.existsSync(target)) return fs.realpathSync(target);
+    const parent = path.dirname(target);
+    return parent === target ? target : path.join(resolve(parent), path.basename(target));
+  };
+  const target = resolve(dir);
+  if (forbidden.some(source => insidePath(resolve(source), target))) throw Error('Canary cache must be outside the source state and cache directories');
   fs.mkdirSync(dir, {recursive: true, mode: 0o700});
   return fs.realpathSync(dir);
 }
@@ -131,7 +138,7 @@ export function seedCanaryWall(world: CanaryWorld, times: readonly string[]): vo
   fs.writeFileSync(file, posts.join('\n') + '\n', {mode: 0o600});
 }
 
-async function seedFixture(world: CanaryWorld, scale: boolean) {
+async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) {
   const {config, ctx, runner} = world;
   const count = fixtureTasks(scale);
   const wallCount = scale ? 150 : 0;
@@ -165,7 +172,7 @@ async function seedFixture(world: CanaryWorld, scale: boolean) {
     for (let item = 0; item < depth; item++) {
       const task = `${ID}-${chain}-${item}`, after = item ? `${ID}-${chain}-${item - 1}` : undefined;
       const seq = 900000 + prepared.length;
-      await saveEntry(ctx, {task, status: 'queued', seq, order: seq, owner, priority: 'normal', agent,
+      await saveEntry(ctx, {task, status: 'queued', seq, order: mirror ? -1 : seq, owner, priority: mirror ? 'high' : 'normal', agent,
         model: agent === 'codex' ? 'gpt-5.5' : 'opus', effort: 'high', after: after ? [after] : [],
         queuedAt: date(runner.now()), spec: world.order(task, agent, after)});
       prepared.push({task, ...(after ? {after} : {}), owner, agent});
@@ -216,12 +223,14 @@ export interface CanaryMetrics {
 }
 
 export async function exerciseCanary(world: CanaryWorld, opts: {
-  scale: boolean; minTicks: number; durationMs?: number; signal?: AbortSignal; load?: () => number; sample?: (metrics: CanaryMetrics) => void;
+  scale: boolean; mirror?: boolean; minTicks: number; durationMs?: number; signal?: AbortSignal; load?: () => number; sample?: (metrics: CanaryMetrics) => void;
 }): Promise<CanaryMetrics> {
   const {config, runner, ctx, deps} = world;
-  const shape = await seedFixture(world, opts.scale);
+  const mirrored = opts.mirror ? listTaskRecords(config).length + listArchivedRecords(config).length : 0;
+  const shape = await seedFixture(world, opts.scale, opts.mirror === true);
+  const mirroredReady = new Map<string, number>();
   const begin = runner.now();
-  const metrics: CanaryMetrics = {ticks: 0, tasks: shape.count, worktreeDirs: runner.worktrees.size,
+  const metrics: CanaryMetrics = {ticks: 0, tasks: shape.count + mirrored, worktreeDirs: runner.worktrees.size,
     queued: shape.prepared.length, wall: shape.wallCount, started: 0, maxStartTicks: 0, maxSnapshotAgeMs: 0, maxMcpMs: 0,
     maxSkipped: 0, peakLoad1: 0, minLoad1: Infinity};
   const readyAt = new Map<string, number>(), completed = new Set<string>();
@@ -267,7 +276,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     previousSnapshot = snap.at;
     metrics.maxSnapshotAgeMs = Math.max(metrics.maxSnapshotAgeMs, age);
     assert.ok(age < 60_000 && !snap.degraded, `snapshot age ${age} ms, degraded=${snap.degraded ?? 'no'}`);
-    assert.ok(snap.rows.length >= shape.count, `partial watch snapshot: ${snap.rows.length} < ${shape.count}`);
+    assert.ok(snap.rows.length >= metrics.tasks, `partial watch snapshot: ${snap.rows.length} < ${metrics.tasks}`);
     const heartbeat = JSON.parse(fs.readFileSync(watchHeartbeatPath(config), 'utf8')) as {consecutive?: Record<string, number>};
     metrics.maxSkipped = Math.max(metrics.maxSkipped, ...Object.values(heartbeat.consecutive ?? {}));
     assert.ok(metrics.maxSkipped <= 3, `watch stages skipped: ${JSON.stringify(heartbeat.consecutive)}`);
@@ -337,6 +346,22 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
       fs.writeFileSync(record.report, successReport('PASS'));
       runner.panes.delete(record.window);
     }
+    if (opts.mirror) {
+      const views = (await queueViews(ctx)).filter(view => view.entry.task.startsWith('SHADOW-'));
+      for (const [task, eligible] of mirroredReady) {
+        const launched = runner.launches.get(task.toLowerCase());
+        const view = views.find(item => item.entry.task === task);
+        if (launched !== undefined || view?.condition.kind !== 'ready') mirroredReady.delete(task);
+        else assert.ok(tick < eligible + 1, `${task}: mirror admission missed two ticks`);
+      }
+      for (const view of views) if (view.condition.kind === 'ready' && !mirroredReady.has(view.entry.task)) mirroredReady.set(view.entry.task, tick + 1);
+      // Mirror panes are simulated no-ops so later dependencies can be observed.
+      for (const [window] of runner.launches) if (window.startsWith('shadow-') && runner.panes.has(window)) {
+        const record = readTaskRecord(config, window);
+        if (record) fs.writeFileSync(record.report, successReport('PASS'));
+        runner.panes.delete(window);
+      }
+    }
     runner.tick = tick + 1;
     markEligible(runner.tick);
     opts.sample?.(metrics);
@@ -345,7 +370,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   if (opts.signal?.aborted) throw Error('Canary interrupted');
   assert.equal(metrics.started, shape.prepared.length, `queued tasks remained: ${readQueue(config).map(entry => entry.task).join(', ')}`);
   assert.ok(metrics.maxStartTicks <= 2, 'queue start exceeded two ticks');
-  assert.ok(runner.launches.has(extraTask.toLowerCase()), `confirmed queue order never started: ${JSON.stringify(readSnapshot(config).queue.find(entry => entry.task === extraTask))}`);
+  assert.ok(runner.launches.has(extraTask.toLowerCase()) || opts.mirror && readQueue(config).some(entry => entry.task === extraTask && entry.status === 'queued'), `confirmed queue order never started: ${JSON.stringify(readSnapshot(config).queue.find(entry => entry.task === extraTask))}`);
   if (!opts.load) metrics.minLoad1 = 0;
   return metrics;
 }

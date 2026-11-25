@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
 ## [Unreleased]
+- `agentctl canary --from <home> --minutes 30` replays a sanitized state inventory in a private fake-provider sandbox.
+
 - Release includes a production-shape gate with a fake-agent watcher under CPU and filesystem contention, an admission deadline, MCP read budgets, and queue/close/GC confirmation checks. Disk and provider limits are visible in the board header.
 
 - Release gate results seal the candidate SHA and source/fixture contents at every step, and fail if those inputs change.

@@ -1480,6 +1480,22 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     );
 
   program
+    .command('canary')
+    .description('Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux.')
+    .requiredOption('--from <home>', 'source AGENTCTL_HOME')
+    .option('--minutes <minutes>', 'minimum number of minutes to observe', '30')
+    .action(guarded(async (opts: { from: string; minutes: string }) => {
+      const minutes = Number(opts.minutes);
+      if (!Number.isFinite(minutes) || minutes <= 0) throw new AgentctlError('--minutes must be positive');
+      const interrupt = deps.interruptSignal?.();
+      try {
+        const { shadowCanary } = await import('./core/canary-mirror.ts');
+        const result = await shadowCanary(opts.from, minutes, line, interrupt?.signal);
+        line(JSON.stringify(result, null, 2));
+      } finally { interrupt?.dispose(); }
+    }));
+
+  program
     .command('watch')
     .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died.')
     .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
