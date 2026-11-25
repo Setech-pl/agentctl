@@ -221,7 +221,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       if (diagnosticTimer !== undefined) timers.clear(diagnosticTimer);
       diagnosticTimer = undefined;
       const now = ctx.runner.now(), at = watchSnapshotTime(ctx.config);
-      const warning = watchStepWarning(ctx.config) ?? (at === undefined ? undefined : watchSnapshotWarning(at, now));
+      const warning = watchStepWarning(ctx.config, now) ?? (at === undefined ? undefined : watchSnapshotWarning(at, now));
       const label = warning ?? (at === undefined ? '' : `Stan watch sprzed ${Math.max(0, Math.floor((now - at) / 1000))} s`);
       if (label !== diagnostics) {
         diagnostics = label;

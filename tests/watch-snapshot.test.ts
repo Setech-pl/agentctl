@@ -118,3 +118,18 @@ it('SNAP0247: a stuck statfs falls back to df and keeps worktree sizes independe
     assert.equal(signal.measuring, true);
   } finally { stat.resolve(diskStats(1)); await pending; }
 });
+
+it('W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval', async () => {
+  const config = makeConfig(scratch.sub('recent-admission-snapshot'), 'watch: {interval: 2}\n');
+  const tmux = new FakeTmux();
+  const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  await publishMcpSnapshot(ctx);
+  await runner.sleep(20_000);
+  const deps = {context: () => ctx, notify: async () => {}};
+  for (const name of ['queue_list', 'limits']) {
+    const result = await MCP_TOOLS.find(tool => tool.name === name)!.run(deps, {});
+    assert.match(result.text, /Watch snapshot age: 20.0 s/, name);
+    assert.doesNotMatch(result.text, /fallback/i, name);
+  }
+});

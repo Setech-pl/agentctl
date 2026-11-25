@@ -302,7 +302,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     else observed = rows;
   });
   stage('task delivery and reports', async signal => {
-    if (!observed) return;
+    if (!observed) throw Error('status collection incomplete');
     let allRows = observed;
     if (await autoClosePulled(ctx, allRows)) allRows = await collect();
     let changed = false;
@@ -402,7 +402,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     let published = false;
     stage('snapshot preparation', async signal => {
       const rows = allRows();
-      if (!rows) return;
+      if (!rows) throw Error('status collection incomplete');
       await publishMcpSnapshot(ctx, rows, undefined, signal);
       published = !signal.aborted;
     }, 'task delivery and reports');

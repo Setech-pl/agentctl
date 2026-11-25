@@ -11,7 +11,8 @@ import { announceBlocked, planQueueAdd, queueTick, queueViews, QueueMemory, read
 import { splitSpecs } from '../src/core/spec.ts';
 import { collectStatus } from '../src/core/status.ts';
 import * as usage from '../src/core/usage.ts';
-import { WatchMemory, watchTick } from '../src/core/watch.ts';
+import { runWatch, WatchMemory, watchTick } from '../src/core/watch.ts';
+import { channelMessages } from '../src/core/wall.ts';
 import { WatchSteps } from '../src/core/watch-steps.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
@@ -48,6 +49,23 @@ test('W110-A: repeated misses are promoted and a ten-minute stall requests a res
   assert.deepEqual(steps.stalled?.(runner.now()), [name]);
   await steps.run(ctx, path.join(config.cache, 'watch.log'), name, async () => {});
   assert.deepEqual(steps.stalled?.(time + 600_001), []);
+});
+
+test('W110-A: the running loop reports the stuck stage to the owner and asks its supervisor to restart', async () => {
+  const {ctx, config, tmux, runner} = world('stage-restart');
+  const pane = tmux.add('stalled-pane', 'Working (esc to interrupt)');
+  seedTask(config, 'STALLED-PANE', {windowId: pane.id});
+  const execute = runner.exec.bind(runner);
+  runner.exec = (cmd, args, opts) => cmd === 'tmux' && args.includes('capture-pane') && args.includes(pane.id)
+    ? Promise.reject(Error('fixture tmux IPC unavailable')) : execute(cmd, args, opts);
+  await assert.rejects(runWatch(ctx, notifier, {
+    maxTicks: 2, insideTmux: false,
+    onTick: tick => tick === 1 ? runner.sleep(600_001) : undefined,
+    onStall: () => { throw Error('supervisor restart requested'); },
+  }), /supervisor restart requested/);
+  assert.ok(readJournal(config).some(event => event.kind === 'watch-stage-restarted' && event.text.includes('status collection')));
+  const message = channelMessages(config, 'agentctl').find(item => item.subject.includes('wznowił pętlę'));
+  assert.equal(message?.to, 'owner');
 });
 
 test('W110-B: complete report and an idle pane with an update footer become report-ready', async () => {

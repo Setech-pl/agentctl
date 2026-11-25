@@ -1518,11 +1518,13 @@
   "W110-A": {
     "rev": "v0.27.1",
     "outcome": "FAILS",
-    "failed": 1,
+    "failed": 2,
     "passed": 0,
     "failing": [
       "W110-A: repeated misses are promoted and a ten-minute stall requests a restart",
-      "W110-A: repeated misses are promoted and a ten-minute stall requests a restart"
+      "W110-A: the running loop reports the stuck stage to the owner and asks its supervisor to restart",
+      "W110-A: repeated misses are promoted and a ten-minute stall requests a restart",
+      "W110-A: the running loop reports the stuck stage to the owner and asks its supervisor to restart"
     ]
   },
   "W110-B": {
@@ -1603,6 +1605,16 @@
     "failing": [
       "W110-I: short-window samples expire after two windows and disappear from the plan",
       "W110-I: short-window samples expire after two windows and disappear from the plan"
+    ]
+  },
+  "W110-MCP-AGE": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval",
+      "W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval"
     ]
   },
   "WALL-1-f1": {

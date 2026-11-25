@@ -144,13 +144,21 @@ async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) 
   const wallCount = scale ? 150 : 0;
   if (scale) seedCanaryWall(world, Array.from({length: wallCount}, (_, i) => date(Date.UTC(2025, 10, 25, 12, 0, i))));
   for (let i = 0; i < count; i++) {
-    const task = `${ID}-ROW-${i}`, archived = i >= 10 && i % 5 !== 0;
+    const task = `${ID}-ROW-${i}`, archived = i >= (scale ? 16 : 10) && i % 5 !== 0;
     const record = fixtureRecord(world, task, i === 6 ? 'codex' : 'claude');
     if (i < 6) {
       const screen = ['Working (esc to interrupt)', '❯ ', 'Quick safety check', 'Enter to select · Esc to cancel', 'Usage limit reached', 'Update available! Run: brew upgrade claude-code'][i];
       record.windowId = runner.addPane(record.window, record.agent, screen).id;
     } else if (i === 6) {
       record.windowId = runner.addPane(record.window, 'codex', 'Working (esc to interrupt)').id;
+    } else if (i === 7) {
+      record.agent = 'unknown';
+    } else if (scale && i === 11) {
+      record.windowId = runner.addPane(record.window, record.agent, '1 shell still running').id;
+    } else if (scale && i === 12) {
+      record.windowId = runner.addPane(record.window, record.agent, '⏺ Fixture\n⎿ API Error: 529 Overloaded').id;
+    } else if (scale && i === 13) {
+      record.supersededBy = `${ID}-ROW-1`;
     } else if (i >= 9) {
       if (i % 7 === 0) record.cancelled = true;
       else record.closed = true;
@@ -163,6 +171,7 @@ async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) 
     if (i === 9 || i === 10) record.cohort = GC_COHORT;
     seedCanaryRecord(world, record, archived, i === 5 || archived && i % 10 === 1 ? 'PASS' : undefined);
   }
+  if (scale) runner.addPane('canary-orphan', 'claude').role = 'task';
   await touchCohort(ctx, GC_COHORT);
   const prepared: {task: string; after?: string; owner: string; agent: 'claude' | 'codex'}[] = [];
   const chains = scale ? 8 : 1, depth = scale ? 5 : 1;
@@ -399,12 +408,12 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   return metrics;
 }
 
-export async function runIsolatedCanary<T>(root: string, out: (line: string) => void, action: (world: CanaryWorld) => Promise<T>, slowMs = 0): Promise<T> {
+export async function runIsolatedCanary<T>(root: string, out: (line: string) => void, action: (world: CanaryWorld) => Promise<T>, slowMs = 0, interval = 1): Promise<T> {
   const sandbox = fs.mkdtempSync(path.join(root, 'canary-'));
   const previousKimi = process.env.KIMI_CODE_HOME;
   process.env.KIMI_CODE_HOME = path.join(sandbox, 'kimi');
   try {
-    const world = createCanaryWorld(sandbox, out, slowMs);
+    const world = createCanaryWorld(sandbox, out, slowMs, interval);
     const restore = useCanaryFilesystem(world, slowMs);
     try { return await action(world); }
     finally { restore(); }

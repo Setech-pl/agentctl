@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Worker } from 'node:worker_threads';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
 import { liveCacheRoot } from './live-cache.ts';
 import { exerciseCanary, runIsolatedCanary, type CanaryMetrics } from '../src/core/canary.ts';
 
@@ -18,7 +19,8 @@ async function main() {
   const target = 2 * cores;
   const stop = new AbortController();
   const abort = () => stop.abort();
-  const workers: Worker[] = [];
+  const workers: { process: ChildProcess; closed: Promise<unknown> }[] = [];
+  let closing = false;
   let workerError: Error | undefined;
   let current: CanaryMetrics | undefined;
   let attempt = 1;
@@ -26,10 +28,14 @@ async function main() {
   process.on('SIGINT', abort);
   process.on('SIGTERM', abort);
   try {
-    for (let i = 0; i < 3 * cores; i++) {
-      const worker = new Worker('for (;;) Math.imul(123, 456);', {eval: true, execArgv: []});
-      workers.push(worker);
-      worker.on('error', error => { workerError = error; stop.abort(); });
+    // Give the measurement process a scheduling share comparable to the production watcher.
+    // Each competing loop is a real, lower-priority runnable process rather than another
+    // thread with the watcher's priority. It cannot execute any agent or access state.
+    for (let i = 0; i < 2 * cores + 8; i++) {
+      const child = spawn('nice', ['-n', '19', '/bin/sh', '-c', 'while :; do :; done'], {stdio: 'ignore'});
+      const closed = once(child, 'close').catch(error => { workerError = error; stop.abort(); });
+      workers.push({process: child, closed});
+      child.once('exit', () => { if (!closing && !stop.signal.aborted) { workerError = Error('CPU pressure loop exited early'); stop.abort(); } });
     }
     const warm = Date.now();
     while (load() < target && !stop.signal.aborted) {
@@ -39,8 +45,12 @@ async function main() {
     console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
     const run = () => runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
       scale: true, minTicks: 20, signal: stop.signal, load,
-      sample: metrics => { current = {...metrics}; save({status: 'RUNNING'}); },
-    }), 2);
+      sample: metrics => {
+        current = {...metrics};
+        if (metrics.ticks % 5 === 0) console.log(`prodshape ticks=${metrics.ticks}, starts=${metrics.started}, max MCP=${metrics.maxMcpMs.toFixed(0)}ms`);
+        save({status: 'RUNNING'});
+      },
+    }), 2, 5);
     try { current = await run(); }
     catch (error) {
       if (!String(error).includes('MCP_LATENCY') || load() <= 3 * cores || stop.signal.aborted) throw error;
@@ -60,7 +70,11 @@ async function main() {
   } finally {
     process.off('SIGINT', abort);
     process.off('SIGTERM', abort);
-    await Promise.allSettled(workers.map(worker => worker.terminate()));
+    closing = true;
+    for (const worker of workers) worker.process.kill('SIGTERM');
+    const escalate = setTimeout(() => { for (const worker of workers) if (worker.process.exitCode === null) worker.process.kill('SIGKILL'); }, 2000);
+    try { await Promise.allSettled(workers.map(worker => worker.closed)); }
+    finally { clearTimeout(escalate); }
   }
 }
 

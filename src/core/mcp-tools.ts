@@ -2555,7 +2555,10 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
       return ok([note, diskLine(freshDisk), ...((explicit || name === 'capacity') && capacity
         ? [`Capacity from snapshot (${capacityAt}):`, ...snapshotLines(capacity)] : []), fallback, ...(name === 'status' ? reservationLines(ctx.config, now) : [])].filter(Boolean).join('\n'));
     }
-    if (snap.degraded || (age >= 2 * ctx.config.watch.interval * 1000 && !(name === 'capacity' || name === 'status' && explicit))
+    // A healthy, complete scheduling snapshot still describes the last tick when its
+    // nominal interval was missed. Config, reservations and holds are checked separately.
+    const readAgeLimit = ['limits', 'queue_list'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
+    if (snap.degraded || (age >= readAgeLimit && !(name === 'capacity' || name === 'status' && explicit))
       || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
       || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now))
       || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;

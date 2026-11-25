@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'W110-MCP-AGE', fixedIn: '0.27.2', symptom: 'Queue and limits discarded a healthy snapshot just after a nominal tick was missed.', scenarios: [s('watch-snapshot.test.ts', '^W110-MCP-AGE:')] },
   { id: 'UPGRADE0272', fixedIn: '0.27.2', symptom: 'A clone upgrade could leave a failing candidate installed instead of restoring the previous stable copy.', scenarios: [s('update.test.ts', '^a failed post-upgrade check')] },
   { id: 'W102-VOLUME', fixedIn: '0.27.2', symptom: 'State and external worktree disks shared the same start floor.', scenarios: [s('disk0248.test.ts', '^W102-VOLUME:')] },
   { id: 'W110-A', fixedIn: '0.27.2', symptom: 'Watch stages could starve indefinitely after timing out.', scenarios: [s('field0272.test.ts', '^W110-A:')] },

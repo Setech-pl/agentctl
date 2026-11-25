@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - `agentctl canary --from <home> --minutes 30` replays a sanitized state inventory in a private fake-provider sandbox.
 
 - Release includes a production-shape gate with a fake-agent watcher under CPU and filesystem contention, an admission deadline, MCP read budgets, and queue/close/GC confirmation checks. Disk and provider limits are visible in the board header.
+- A missed nominal watch interval keeps full queue and limit data available from a recent complete snapshot.
 
 - Release gate results seal the candidate SHA and source/fixture contents at every step, and fail if those inputs change.
 
