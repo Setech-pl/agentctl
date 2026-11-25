@@ -1480,6 +1480,25 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     );
 
   program
+    .command('upgrade-health', {hidden: true})
+    .requiredOption('--expect <version>', 'expected candidate version')
+    .requiredOption('--since <ms>', 'earliest valid watch launch time in Unix milliseconds')
+    .action(guarded(async (opts: { expect: string; since: string }) => {
+      const since = Number(opts.since);
+      if (!Number.isSafeInteger(since) || since <= 0) throw new AgentctlError('Invalid watch launch timestamp');
+      const { verifyUpgrade } = await import('./core/upgrade-health.ts');
+      // A blocked watch or read cannot keep the stable updater waiting indefinitely.
+      const timeout = setTimeout(() => {
+        deps.stderr('Upgrade health check exceeded 3 minutes.\n');
+        process.exit(1);
+      }, Math.max(0, since + 180_000 - Date.now()));
+      try {
+        const diagnosis = await verifyUpgrade(contextFor(false, {migrate: false, silent: true}), opts.expect, since);
+        line(JSON.stringify(diagnosis));
+      } finally { clearTimeout(timeout); }
+    }));
+
+  program
     .command('canary')
     .description('Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux.')
     .requiredOption('--from <home>', 'source AGENTCTL_HOME')
@@ -1519,7 +1538,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           });
           if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
         } catch (e) {
-          if (e instanceof WatchRestart) { process.exitCode = WATCH_RESTART_CODE; return; }
+          if (e instanceof WatchRestart) { exitCode = WATCH_RESTART_CODE; return; }
           await (await makeNotifier(ctx)).notify('agentctl', `watch failed: ${errorMessage(e).split('\n')[0]}; restart: agentctl watch --tmux --restart`).catch(() => undefined);
           throw e;
         } finally {

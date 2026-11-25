@@ -20,14 +20,25 @@ interface Run {
  * Run the script with fake git, npm and tmux in front of PATH: they only log their arguments (and fake a few answers),
  * so no real git, npm or tmux is involved. A `worktree add` creates the stable dir with a fake bin/agentctl.ts.
  */
-function runUpdate(name: string, args: string[], env: Record<string, string> = {}, opts: { stableExists?: boolean; dirty?: boolean; windows?: string; doctorRc?: number; script?: string } = {}): Run & { dir: string; stable: string } {
+function runUpdate(name: string, args: string[], env: Record<string, string> = {}, opts: { stableExists?: boolean; dirty?: boolean; windows?: string; doctorRc?: number; healthRc?: number; mutateConfig?: boolean; script?: string } = {}): Run & { dir: string; stable: string } {
   const dir = scratch.sub(name);
   const bin = path.join(dir, 'fakebin');
   const log = path.join(dir, 'calls.log');
   fs.mkdirSync(bin, { recursive: true });
   fs.symlinkSync(process.execPath, path.join(bin, 'node'));
   const stable = path.join(dir, 'stable');
-  const fakeAgentctl = (_target: string): string => `#!/bin/sh\necho "agentctl $*" >> ${log}\nexit ${opts.doctorRc ?? 0}\n`;
+  const config = path.join(dir, 'home/.agentctl/config.yaml');
+  const fakeAgentctl = `#!/bin/sh
+echo "agentctl $*" >> "${log}"
+case "$1" in
+  doctor) exit ${opts.doctorRc ?? 0} ;;
+  upgrade-health)
+    ${opts.mutateConfig ? `printf 'changed by candidate\n' > "${config}"` : ':'}
+    ${opts.healthRc ? 'echo "watch snapshot stale" >&2' : ':'}
+    exit ${opts.healthRc ?? 0} ;;
+esac
+exit 0
+`;
   const write = (file: string, text: string): void => {
     fs.writeFileSync(file, text);
     fs.chmodSync(file, 0o755);
@@ -37,10 +48,11 @@ function runUpdate(name: string, args: string[], env: Record<string, string> = {
     `#!/bin/sh
 echo "git $*" >> ${log}
 case "$*" in
-  *"worktree add"*) mkdir -p "$6/dist/bin" ; cp ${path.join(dir, 'fake-agentctl')} "$6/dist/bin/agentctl.js" ;;
+  *"worktree add"*) mkdir -p "$6/dist/bin" ; cp ${path.join(dir, 'fake-agentctl')} "$6/dist/bin/agentctl.js"; cp ${path.join(dir, 'fake-package.json')} "$6/package.json" ;;
   *"status --porcelain"*) ${opts.dirty ? 'echo " M src/cli.ts"' : 'true'} ;;
   *"checkout "*) case "$*" in *"checkout --detach "*) true ;; *) echo "already used by worktree" >&2; exit 128 ;; esac ;;
   *"log -1"*) echo "abc1234 Some commit title" ;;
+  *"rev-parse HEAD"*) echo "0123456789012345678901234567890123456789" ;;
 esac
 exit 0
 `,
@@ -57,10 +69,14 @@ esac
 exit 0
 `,
   );
-  write(path.join(dir, 'fake-agentctl'), fakeAgentctl(stable));
+  write(path.join(dir, 'fake-agentctl'), fakeAgentctl);
+  fs.writeFileSync(path.join(dir, 'fake-package.json'), '{"version":"0.27.2"}');
+  fs.mkdirSync(path.dirname(config), {recursive: true});
+  fs.writeFileSync(config, 'original config\n');
   if (opts.stableExists) {
     fs.mkdirSync(path.join(stable, 'dist', 'bin'), { recursive: true });
-    write(path.join(stable, 'dist', 'bin', 'agentctl.js'), fakeAgentctl(stable));
+    write(path.join(stable, 'dist', 'bin', 'agentctl.js'), fakeAgentctl);
+    fs.copyFileSync(path.join(dir, 'fake-package.json'), path.join(stable, 'package.json'));
   }
   const r = spawnSync('bash', [opts.script ?? SCRIPT, ...args], {
     encoding: 'utf8',
@@ -139,6 +155,7 @@ describe('agentctl-update: --dry-run', () => {
       `+ (cd ${r.stable} && npm link)`,
       `+ ${r.stable}/dist/bin/agentctl.js doctor`,
       `+ ${r.stable}/dist/bin/agentctl.js watch --tmux --restart`,
+      `+ ${r.stable}/dist/bin/agentctl.js upgrade-health --expect candidate-version --since upgrade-start-ms`,
       `+ ${r.stable}/dist/bin/agentctl.js mcp check`,
     ]);
     assert.equal(fs.existsSync(r.stable), false);
@@ -153,14 +170,14 @@ describe('agentctl-update: --dry-run', () => {
     assert.match(r.stdout, /^previous: abc1234 Some commit title$/m);
   });
 
-  it('--no-watch and --no-link drop their steps; without a "watch" window nothing is restarted', () => {
+  it('--no-watch and --no-link drop their steps; the default starts a missing watcher', () => {
     const r = runUpdate('dr3', ['--dry-run', '--no-watch', '--no-link']);
     assert.doesNotMatch(r.stdout, /^\+ .*(npm link|kill-window|watch --tmux)/m);
     assert.match(r.stdout, /--no-link: npm link skipped/);
     assert.match(r.stdout, /^watch restarted: no \(--no-watch\)$/m);
     const noWindow = runUpdate('dr3b', ['--dry-run'], {}, { windows: 'nc-1\\n' });
     assert.doesNotMatch(noWindow.stdout, /kill-window/);
-    assert.match(noWindow.stdout, /^watch restarted: no \(no window "watch" in session "agentctl"\)$/m);
+    assert.match(noWindow.stdout, /^watch restarted: yes \(dry run: would be\)$/m);
   });
 });
 
@@ -169,7 +186,7 @@ describe('agentctl-update: a real run against mocked git, npm and tmux', () => {
     const r = runUpdate('rn1', []);
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(
-      r.calls.filter((c) => !c.includes(' log -1 ')),
+      r.calls.filter((c) => !c.includes(' log -1 ')).map(c => c.replace(/ --since \d+$/, ' --since <ms>')),
       [
         `git -C ${r.dir}/repo fetch origin`,
         `git -C ${r.dir}/repo worktree add --detach ${r.stable} origin/main`,
@@ -178,6 +195,7 @@ describe('agentctl-update: a real run against mocked git, npm and tmux', () => {
         `npm link (cwd ${fs.realpathSync(r.stable)})`,
         'agentctl doctor',
         'agentctl watch --tmux --restart',
+        'agentctl upgrade-health --expect 0.27.2 --since <ms>',
         'agentctl mcp check',
       ],
     );
@@ -205,7 +223,38 @@ describe('agentctl-update: a real run against mocked git, npm and tmux', () => {
     const r = runUpdate('rn4', [], {}, { stableExists: true, doctorRc: 1 });
     assert.equal(r.code, 1);
     assert.ok(!r.calls.some((c) => c.startsWith('tmux kill-window')), r.calls.join('\n'));
-    assert.match(r.stdout, /^watch restarted: no \(doctor failed/m);
+    assert.match(r.stderr, /agentctl doctor failed.*\nagentctl-update: restored previous stable copy/);
+  });
+});
+
+describe('agentctl-update: release safety', () => {
+  it('a failed post-upgrade check restores the previous SHA and config, restarts both roles, and notifies the owner', () => {
+    const windows = '@7\twatch\twatch\n@8\tboard\tboard\n';
+    const run = runUpdate('auto-rollback', ['--ref', 'v0.27.2', '--no-link'], {}, {stableExists: true, healthRc: 1, mutateConfig: true, windows});
+    assert.equal(run.code, 1);
+    assert.match(run.stderr, /watch snapshot stale/);
+    assert.match(run.stderr, /restored previous stable copy/);
+    assert.equal(fs.readFileSync(path.join(run.dir, 'home/.agentctl/config.yaml'), 'utf8'), 'original config\n');
+    assert.equal(run.calls.filter(c => c === 'agentctl watch --tmux --restart').length, 2);
+    assert.equal(run.calls.filter(c => c === 'agentctl board --tmux --restart').length, 2);
+    assert.ok(run.calls.some(c => c === `git -C ${run.stable} checkout --detach 0123456789012345678901234567890123456789`));
+    assert.ok(run.calls.some(c => c.startsWith('agentctl wall post agentctl --kind info --to owner')));
+  });
+
+  it('--no-rollback leaves the failed candidate in place and reports its retained backup', () => {
+    const run = runUpdate('no-rollback', ['--no-link', '--no-rollback'], {}, {stableExists: true, healthRc: 1, mutateConfig: true});
+    assert.equal(run.code, 1);
+    assert.match(run.stderr, /--no-rollback; retained backup:/);
+    assert.equal(fs.readFileSync(path.join(run.dir, 'home/.agentctl/config.yaml'), 'utf8'), 'changed by candidate\n');
+    assert.equal(run.calls.filter(c => c === 'agentctl watch --tmux --restart').length, 1);
+  });
+
+  it('after a successful upgrade the previous detached copy and config remain available', () => {
+    const run = runUpdate('backup-kept', ['--no-link'], {}, {stableExists: true});
+    assert.equal(run.code, 0, run.stderr);
+    const previous = fs.readlinkSync(run.stable + '.previous');
+    assert.ok(fs.existsSync(path.join(previous, 'dist/bin/agentctl.js')));
+    assert.equal(fs.readFileSync(path.join(previous, '../config.yaml'), 'utf8'), 'original config\n');
   });
 });
 

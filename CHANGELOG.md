@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
 ## [Unreleased]
+- Stable clone upgrades verify the installed version, watch progress, queue admission, MCP reads and the board. A failed check restores the previous runtime and configuration by default and posts an owner WALL info.
+
 - `agentctl canary --from <home> --minutes 30` replays a sanitized state inventory in a private fake-provider sandbox.
 
 - Release includes a production-shape gate with a fake-agent watcher under CPU and filesystem contention, an admission deadline, MCP read budgets, and queue/close/GC confirmation checks. Disk and provider limits are visible in the board header.

@@ -19,7 +19,7 @@ import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
 import { WatchSteps } from './watch-steps.ts';
-import { watchSnapshotPath } from './watch-snapshot.ts';
+import { watchSnapshotPath, watchProgressPath } from './watch-snapshot.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
 import { taskLock, withFileLock } from './file-lock.ts';
 import type { BudgetClock } from './response-budget.ts';
@@ -498,6 +498,7 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
 
 async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): Promise<void> {
   let memory = new WatchMemory();
+  const startedAt = ctx.runner.now(), version = packageVersion();
   const store = opts.configStore ?? new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path)), ctx.config);
   let current = notifier;
   const { interval, waitingAfter } = ctx.config.watch;
@@ -526,6 +527,11 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
       if (opts.signal?.aborted) break;
       await reload();
       await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal });
+      if (!ctx.runner.dryRun && !opts.signal?.aborted) {
+        try {
+          atomicWriteFile(watchProgressPath(ctx.config), JSON.stringify({version, pid: process.pid, tick: tick + 1, startedAt, at: ctx.runner.now()}));
+        } catch (error) { ctx.out(`watch progress: ${errorMessage(error)}`); }
+      }
       await opts.onTick?.(tick + 1, memory);
       const stalled = memory.steps.stalled(ctx.runner.now());
       if (stalled.length) {

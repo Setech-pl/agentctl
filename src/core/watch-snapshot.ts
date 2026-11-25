@@ -7,11 +7,23 @@ export const WATCH_STALE_MS = 120_000;
 export const watchSnapshotPath = (config: GlobalConfig): string => path.join(config.stateDir, 'mcp-state-snapshot.json');
 export const watchHeartbeatPath = (config: GlobalConfig): string => path.join(config.stateDir, 'watch-heartbeat.json');
 
-export function watchStepWarning(config: GlobalConfig): string | undefined {
+export const watchProgressPath = (config: GlobalConfig): string => path.join(config.stateDir, 'watch-progress.json');
+export interface WatchProgress { version: string; pid: number; tick: number; startedAt: number; at: number }
+
+export function readWatchProgress(config: GlobalConfig): WatchProgress | undefined {
+  try {
+    const value = JSON.parse(fs.readFileSync(watchProgressPath(config), 'utf8'));
+    if (typeof value.version === 'string' && Number.isSafeInteger(value.pid) && Number.isSafeInteger(value.tick)
+      && Number.isFinite(value.startedAt) && Number.isFinite(value.at)) return value;
+  } catch { /* watch has not yet published progress */ }
+  return undefined;
+}
+
+export function watchStepWarning(config: GlobalConfig, now = Date.now()): string | undefined {
   try {
     const heartbeat = JSON.parse(fs.readFileSync(watchHeartbeatPath(config), 'utf8'));
     const skipped = Object.entries(heartbeat.skipped ?? {}).flatMap(([step, since]) =>
-      typeof since === 'number' && Number.isFinite(since) ? [`${step} od ${new Date(since).toISOString()}`] : []);
+      typeof since === 'number' && Number.isFinite(since) ? [`${step} od ${new Date(since).toISOString()} (${Math.max(0, Math.floor((now - since) / 1000))} s)`] : []);
     if (skipped.length) return `Watch: pominięty etap – ${skipped.join(', ')}.`;
   } catch { /* missing, legacy or in the middle of a heartbeat write */ }
 }

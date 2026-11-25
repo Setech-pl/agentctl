@@ -189,11 +189,35 @@ export async function canaryRead(deps: McpDeps, name: string, args: Record<strin
   assert.ok(tool, `Missing MCP tool ${name}`);
   const start = performance.now();
   const result = await tool.run(deps, args);
-  const ms = performance.now() - start;
   assert.ok(!result.isError, `${name}: ${result.text.slice(0, 500)}`);
+  type Page = { response_id: string; next_response_offset: number; response_offset: number; has_more: boolean; fragment: string };
+  const page = (text: string): Page | undefined => {
+    try {
+      const value = JSON.parse(text);
+      return value?.truncated === true && typeof value.response_id === 'string' && typeof value.fragment === 'string' ? value : undefined;
+    } catch { return undefined; }
+  };
+  const first = page(result.text);
+  let text = result.text;
+  if (first) {
+    const continuation = MCP_TOOLS.find(t => t.name === 'response_page')!;
+    let current = first;
+    const fragments = [first.fragment];
+    while (current.has_more) {
+      assert.ok(performance.now() - start < limit, `MCP_LATENCY ${name}: paging exceeded budget`);
+      const next = await continuation.run(deps, {response_id: current.response_id, response_offset: current.next_response_offset});
+      const parsed = page(next.text);
+      assert.ok(!next.isError && parsed && parsed.response_offset === current.next_response_offset
+        && parsed.next_response_offset > parsed.response_offset && fragments.length < 8192, `${name}: invalid continuation`);
+      fragments.push(parsed.fragment);
+      current = parsed;
+    }
+    text = fragments.join('');
+  }
+  const ms = performance.now() - start;
   assert.ok(ms < limit, `MCP_LATENCY ${name}: ${ms.toFixed(1)} ms`);
-  assert.doesNotMatch(result.text, badRead, `${name}: fallback response`);
-  return {text: result.text, ms};
+  assert.doesNotMatch(text, badRead, `${name}: fallback response`);
+  return {text, ms};
 }
 
 export async function renderCanaryHeader(config: GlobalConfig, disk: DiskReport): Promise<string> {

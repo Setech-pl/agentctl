@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| UPGRADE0272 | A clone upgrade could leave a failing candidate installed instead of restoring the previous stable copy. | `tests/update.test.ts` (`^a failed post-upgrade check`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | W102-VOLUME | State and external worktree disks shared the same start floor. | `tests/disk0248.test.ts` (`^W102-VOLUME:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | W110-A | Watch stages could starve indefinitely after timing out. | `tests/field0272.test.ts` (`^W110-A:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | W110-B | A finished task with a complete report could remain working. | `tests/field0272.test.ts` (`^W110-B:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
