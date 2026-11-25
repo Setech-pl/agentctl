@@ -9,7 +9,9 @@ const root = path.resolve(import.meta.dirname, '..');
 const bt = String.fromCharCode(96);
 const code = (s: string) => bt + s + bt;
 const pl: Record<string, string> = {
- hosts: 'Zdrowie hostów SSH: połączenie, GPU, dysk, tmux, CLI i klony; host: w spec uruchamia zadanie zdalnie z lokalną kopią raportu.',
+ hosts: 'Stan hostów, wybór miejsca, dostępność właściciela i rezerwacje perf.',
+ hosts_pause: 'Zarezerwuj host dla właściciela, opcjonalnie do określonej godziny.',
+ hosts_resume: 'Zwolnij ręczną rezerwację hosta.',
  status: 'Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika.',
  events_since: 'Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor.',
  gc_preview: 'Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania.',

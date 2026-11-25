@@ -1,5 +1,8 @@
+import { HostUnreachable } from './host-runner.ts';
+import { choosePlacement } from './placement.ts';
+import { perfExpired, perfScheduleHold } from './perf-queue.ts';
+import { refreshHostHealth } from './disk.ts';
 import { checkHostLimit } from './host-limits.ts';
-import { collectMachine } from './machine.ts';
 import { readReservations, reservationText } from './limits.ts';
 import type { Reservations } from './limits.ts';
 import { peakHold } from './peak.ts';
@@ -66,6 +69,14 @@ export interface QueueConfirmation { token: string; key: string; tool: string; t
 export interface QueueEntry {
   owner?: string;
   host?: string;
+  placement?: 'auto';
+  placementReason?: string;
+  perf?: boolean;
+  startAfter?: string;
+  dailyAt?: string;
+  onPass?: string;
+  perfWaitSince?: string;
+  reuseWorktree?: string;
   /** Durable idempotency identity installed with the queue entry. */
   confirmation?: QueueConfirmation;
   autoReview?: AutoReviewSource;
@@ -254,7 +265,7 @@ function inQueueError(spec: { task: string }, entry: QueueEntry): AgentctlError 
 
 /** The checks of a queue add against the other entries: not in the queue yet, the batch plan (`specs`: already planned by the preview), `after`. */
 async function validateQueueAdd(ctx: Context, raws: RawSpec[], entries: QueueEntry[], opts: { agent?: AgentName; owner?: string; specs?: ResolvedSpec[] }): Promise<QueueAddItem[]> {
-  const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
+  const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config, owner: opts.owner }));
   for (const spec of resolved) {
     const inQueue = entries.find((e) => e.task === spec.task);
     if (inQueue) {
@@ -320,13 +331,16 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
 }
 
 /** Write the entries (one per spec). Returns them in the order they were added. */
-export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; autoReview?: AutoReviewSource; confirmation?: QueueConfirmation; direct?: { noAgent: boolean }; /** Validated accepted entries, one per item: their file, place and confirmation stay. */ accepted?: QueueEntry[] } = {}): Promise<QueueEntry[]> {
-  for (const { spec } of items) checkOwnLinkTargets(spec);
+export async function commitQueueAdd(ctx: Context, items: QueueAddItem[], opts: { agent?: AgentName; reuse?: boolean; noAgent?: boolean; autoReview?: AutoReviewSource; confirmation?: QueueConfirmation; direct?: { noAgent: boolean }; /** Validated accepted entries, one per item: their file, place and confirmation stay. */ accepted?: QueueEntry[] } = {}): Promise<QueueEntry[]> {
+  for (const { spec } of items) {
+    if (spec.perf && (opts.noAgent || opts.direct?.noAgent)) throw new AgentctlError(`${spec.task}: class: perf requires an agent`);
+    checkOwnLinkTargets(spec);
+  }
   return withAcceptLock(ctx, () => commitQueueAddLocked(ctx, items, opts));
 }
 /** A link into the task's own worktree cannot exist before the start made it (the same exception `new` makes); every other target must exist. */
 function checkOwnLinkTargets(spec: ResolvedSpec): void {
-  if (spec.host) return;
+  if (spec.host || spec.placement) return;
   checkLinkTargets(spec.links.filter((l) => !spec.repos.some((r) => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
 }
 async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: Parameters<typeof commitQueueAdd>[2] & object): Promise<QueueEntry[]> {
@@ -347,13 +361,17 @@ async function commitQueueAddLocked(ctx: Context, items: QueueAddItem[], opts: P
       ...(owner ? { owner } : {}),
       ...(opts.reuse ? { reuse: true } : {}),
       ...(opts.autoReview ? { autoReview: opts.autoReview } : {}),
-      ...(opts.direct ? { direct: true, ...(opts.direct.noAgent ? { noAgent: true } : {}) } : {}),
+      ...(opts.direct && !spec.perf ? { direct: true } : {}),
+      ...(opts.noAgent || opts.direct?.noAgent ? { noAgent: true } : {}),
       ...(opts.direct && author ? { directAuthor: author.task, directAuthorOrder: { agent: author.agent, model: author.model } } : {}),
       order: kept?.order ?? seq,
       priority: opts.direct ? 'high' : spec.priority,
       status: 'queued',
       queuedAt: kept?.queuedAt ?? new Date(runner.now()).toISOString(),
       host: spec.host,
+      ...(spec.reuseWorktree ? { reuseWorktree: spec.reuseWorktree } : {}),
+      ...(spec.placement ? { placement: spec.placement } : {}),
+      ...(spec.perf ? { perf: true, startAfter: spec.perf.startAfter, dailyAt: spec.perf.at, onPass: spec.perf.onPass } : {}),
       agent: spec.agent,
       model: spec.model,
       effort: spec.effort,
@@ -397,12 +415,6 @@ export function durableQueueCondition(config: GlobalConfig, entry: QueueEntry, n
   if ((entry.status === 'queued' || entry.status === 'accepted') && now - Date.parse(entry.queuedAt) >= interval && config.queue.enabled && (lastTick === undefined || now - lastTick > 2 * interval)) return 'WSTRZYMANE: opóźnienie watch';
   if (entry.status === 'queued' && entry.holdReason) return `WSTRZYMANE: ${entry.holdReason}`;
   return entry.status === 'queued' ? 'registered' : entry.status;
-}
-
-function queueLoadHold(config: GlobalConfig): string | undefined {
-  if (config.capacity.loadThreshold === undefined) return undefined;
-  const machine = collectMachine(config);
-  return machine.overloaded ? `obciążenie (load1 ${machine.loadAverage[0]!.toFixed(1)} > ${machine.threshold})` : undefined;
 }
 
 function providerSlotWait(config: GlobalConfig, agent: AgentName, used: number, reservations: Reservations): string | undefined {
@@ -563,15 +575,15 @@ export async function validateAccepted(ctx: Context, notifier: Notifier, opts: Q
         const raws = fresh.map((e) => splitSpecs(e.spec, `queue entry ${e.task}`)[0] as RawSpec);
         const agent = first.agentOverride ? { agent: first.agentOverride } : {};
         let items: QueueAddItem[];
-        if (first.direct) {
+        if (first.direct && !raws.some(raw => raw.header.class === 'perf')) {
           const knownAuthors = new Map(others.filter((e) => e.direct).map((e) => [e.task, { agent: e.agent, model: e.model }]));
           // A confirmed start waits for a free window of its provider like every direct start; a full provider is not a reason to fail it.
-          const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
+          const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config, owner: first.owner }));
           const specs = await planBatch(ctx, resolved, { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true, afterRows: await queueDependencyRows(ctx, resolved) });
           for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
           items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
         } else {
-          items = await validateQueueAdd(ctx, raws, others, agent);
+          items = await validateQueueAdd(ctx, raws, others, { ...agent, owner: first.owner });
           for (const { spec } of items) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
         }
         await commitQueueAdd(ctx, items, { ...agent, ...(first.reuse ? { reuse: true } : {}), ...(first.direct ? { direct: { noAgent: Boolean(first.noAgent) } } : {}), accepted: fresh });
@@ -676,7 +688,7 @@ export async function unblockEntry(ctx: Context, input: string, opts: { dropAfte
       const fresh = findEntry(ctx.config, entry.task);
       if (!fresh.volumeBlock) throw new AgentctlError(`${fresh.task} is not volume-blocked`);
       const spec = resolveSpec(splitSpecs(fresh.spec)[0]!, { config: ctx.config });
-      const missing = spec.host ? undefined : missingWorktreeVolume(spec.repos);
+      const missing = spec.host || spec.placement ? undefined : missingWorktreeVolume(spec.repos);
       if (missing) throw new WorktreeVolumeError(missing, fresh.task);
       const { volumeBlock: _volume, startingPid: _pid, startingAt: _start, ...rest } = fresh;
       const updated: QueueEntry = { ...rest, status: 'queued', reuse: true };
@@ -802,6 +814,11 @@ export async function retryEntry(ctx: Context, input: string): Promise<QueueEntr
 async function retryEntryLocked(ctx: Context, input: string): Promise<QueueEntry> {
   const original = findEntry(ctx.config, input);
   let entry = original;
+  if (entry.status === 'queued' && perfExpired(ctx.config, entry, ctx.runner.now())) {
+    const { perfWaitSince: _wait, holdNotified: _hold, holdReason: _reason, ...again } = entry;
+    await writeEntry(ctx, again);
+    return again;
+  }
   if (entry.status !== 'failed') throw new AgentctlError(`${entry.task} is ${entry.status}, not failed`);
   // An old-format automatic review is rebuilt BEFORE any residue check: the residue it complains about is the author's checkout it must not use.
   if (entry.unvalidated) {
@@ -901,7 +918,26 @@ export async function blockEntryReview(ctx: Context, entry: QueueEntry, error: R
  * For every entry: what it waits for. Entries are walked in turn order, each one that will start in the next tick uses up a window of its
  * provider, so the answer matches what `watch` does. `inflight` are the tasks this very process is starting.
  */
-export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; owner?: string; host?: string; agent?: AgentName; counted?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
+function queuePlacement(config: GlobalConfig, entry: QueueEntry, live: Parameters<typeof choosePlacement>[2], entries: QueueEntry[], rows: StatusRow[], now: number) {
+  const reserving = entries.filter(e => e.perf && e.status === 'queued' && !perfExpired(config, e, now) && !perfScheduleHold(e, rows, now)
+    && !unmetAfter(effectiveAfter(config, e, rows, now), rows, e.afterVerdicts).length
+    && !globalQuotaWait(config, e.agent, live.filter(slot => slot.agent === e.agent && slot.counted !== false).length)
+    && e.host && !choosePlacement(config, e, [], now).hold);
+  if (entry.perf) {
+    const first = reserving.find(e => e.host === entry.host);
+    if (first && first.task !== entry.task) return { hold: `[${entry.host}] czeka na perf ${first.task}` };
+  }
+  const slots = entry.perf ? live : [...live, ...reserving.map(e => ({host: e.host, agent: e.agent, perf: true, counted: false}))];
+  try { return choosePlacement(config, entry, slots, now); }
+  catch { return { host: entry.host, reason: `[${entry.host ?? 'local'}] walidacja spec przy starcie` }; }
+}
+
+export function waitingPerfReservation(config: GlobalConfig, host: string, now: number): string | undefined {
+  return readQueue(config).find(entry => entry.host === host && entry.perf &&
+    entry.status === 'queued' && entry.perfWaitSince && !perfExpired(config, entry, now))?.task;
+}
+
+export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live: { window?: string; owner?: string; host?: string; agent?: AgentName; counted?: boolean; perf?: boolean; reportReady?: boolean }[], rows: StatusRow[] = [], nowMs: number = Date.now()): QueueView[] {
   const redact = secretRedactor([config, process.env, ...queueDiagnosticSources(entries)]);
   const failed = new Set(entries.filter((e) => e.status === 'failed').map((e) => e.task));
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -912,7 +948,6 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
   const cancelled = cancelledTasks(rows);
   // `usage.queue_hold`: a provider whose plan is above the limit starts nothing (off by default).
   const holds = queueHolds(config, nowMs);
-  const loadHold = queueLoadHold(config);
   const reservations = readReservations(config, nowMs);
   const heavy = heavyBudget(config, entries, live);
   const parallelFull = entries.filter(e => e.status === 'starting').length >= config.queue.parallelStarts;
@@ -926,13 +961,15 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     if (entry.status === 'starting') return { position: null, entry, condition: { kind: 'starting', text: entry.direct || readSetupProgress(config, entry.task, queueDiagnosticSources(entries)) ? startProgressText(readSetupProgress(config, entry.task, queueDiagnosticSources(entries)), nowMs) : 'starting' }, since: entry.startingAt ?? entry.queuedAt };
     position++;
     const repos = entryWorktrees(config, entry);
-    const mount = entry.volumeBlock ?? (entry.host ? undefined : missingWorktreeVolume(repos));
+    const mount = entry.volumeBlock ?? (entry.host || entry.placement ? undefined : missingWorktreeVolume(repos));
     if (mount) return { position, entry, condition: { kind: 'blocked', text: volumeBlockText(mount, entry.task) }, since: entry.queuedAt };
     const peak = entryPeakHold(config, entry, nowMs);
     if (peak) return {position, entry, condition: {kind: 'hold', text: peak}, since: entry.queuedAt};
-    const diskHold = taskDiskStartHold(config, entry.host, repos, nowMs);
-    if (diskHold) return {position, entry, condition: {kind: 'hold', text: diskHold}, since: entry.queuedAt};
-    if (loadHold) return {position, entry, condition: {kind: 'hold', text: loadHold}, since: entry.queuedAt};
+    const scheduled = perfScheduleHold(entry, rows, nowMs);
+    if (scheduled || perfExpired(config, entry, nowMs)) return { position, entry, condition: { kind: 'hold', text: `[${entry.host}] ${scheduled ?? 'perf: przekroczono wait_max (queue retry)'}` }, since: entry.queuedAt };
+    const placement = queuePlacement(config, entry, hostSlots, entries, rows, nowMs);
+    if (placement.hold) return { position, entry, condition: { kind: /host .* limit reached/.test(placement.hold) ? 'slot' : 'hold', text: placement.hold }, since: entry.queuedAt };
+    entry = { ...entry, host: placement.host, placementReason: placement.reason };
     if (parallelFull) return {position, entry, condition: {kind: 'slot', text: 'czeka na równoległy start'}, since: entry.queuedAt};
     if (setups >= config.queue.maxParallelSetups) return {position, entry, condition: {kind: 'slot', text: `czeka na setup: ${setups}/${config.queue.maxParallelSetups}`}, since: entry.queuedAt};
     const heavyReason = heavyWait(config, isHeavy(entry), heavy.size);
@@ -943,8 +980,6 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
     }
     const author = directAuthorState(config, entry, entries);
     if (author.waiting || author.failed) return { position, entry, condition: { kind: 'after', text: author.waiting ?? author.failed! }, since: entry.queuedAt };
-    const hostProblem = checkHostLimit(config, entry, hostSlots);
-    if (hostProblem) return { position, entry, condition: { kind: 'slot', text: hostProblem }, since: entry.queuedAt };
     if (holds[entry.agent]) return { position, entry, condition: {kind: 'hold', text: holds[entry.agent]!}, since: entry.queuedAt };
     if (entry.direct && !(entry.retryAt && Date.parse(entry.retryAt) > nowMs) && (config.quotas || !overProviderLimit(config.limits[entry.agent], used[entry.agent]))) {
       if (!config.quotas) {
@@ -977,7 +1012,7 @@ export function describeQueue(config: GlobalConfig, entries: QueueEntry[], live:
       setups++;
       if (isHeavy(entry)) heavy.add(entry.task);
     }
-    return { position, entry, condition: { kind: 'ready', text: 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
+    return { position, entry, condition: { kind: 'ready', text: entry.placement ? `${placement.reason} – start przy najbliższym ticku watch` : 'wolne miejsce – start przy najbliższym ticku watch' }, since: entry.queuedAt };
   });
   if (config.quotas) {
     const ready = new Map(views.filter(view => view.condition.kind === 'ready').map(view => [view.entry, view]));
@@ -1021,6 +1056,8 @@ export function verdictClock(config: Pick<GlobalConfig, 'reportSettleS'>, nowMs:
 /** Queue reads load only explicitly named dependencies, never every report or task record. */
 export async function queueDependencyRows(ctx: Context, entries: readonly (Pick<QueueEntry, 'after' | 'autoReview'> & { reviewOf?: string; reviewOfAll?: string[] })[]): Promise<StatusRow[]> {
   const ids = new Set(entries.flatMap(e => [...e.after, ...(e.reviewOfAll ?? (e.reviewOf ? [e.reviewOf] : [])), ...(e.autoReview ? [e.autoReview.author] : [])]));
+  const integration = entries.some(e => 'onPass' in e && e.onPass || 'perf' in e && typeof e.perf === 'object' && e.perf && 'onPass' in e.perf && e.perf.onPass);
+  if (integration) for (const record of [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]) if (record.integration) ids.add(record.task);
   if (!ids.size) return [];
   const current: TaskRecord[] = [], archived: TaskRecord[] = [];
   for (const task of ids) {
@@ -1106,7 +1143,7 @@ async function recordUndispatchedOrders(ctx: Context, live: Awaited<ReturnType<t
 /** What `watch` remembers about the starts it has begun. */
 export class QueueMemory {
   /** Tasks being started by this process: their agent counts against the provider limit before the window exists. */
-  readonly inflight = new Map<string, { agent: AgentName; host?: string; owner?: string; promise: Promise<void> }>();
+  readonly inflight = new Map<string, { agent: AgentName; host?: string; owner?: string; perf?: boolean; promise: Promise<void> }>();
   /** Tasks the plan holds back (`usage.queue_hold`) and the reason last said, so that the log says it once. */
   readonly held = new Map<string, string>();
 
@@ -1166,7 +1203,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   await validateAccepted(ctx, notifier, opts);
   await applyAcceptedWrites(ctx, notifier, opts);
   for (const entry of waiting(readQueue(config))) {
-    if (entry.host || entry.volumeBlock) continue;
+    if (entry.host || entry.placement || entry.volumeBlock) continue;
     const mount = missingWorktreeVolume(entryWorktrees(config, entry));
     if (mount) await blockEntryVolume(ctx, entry, mount, notifier, opts.self);
   }
@@ -1191,7 +1228,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   for (const entry of entries) {
     if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
     if (entry.startingPid) { try { process.kill(entry.startingPid, 0); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
-    if (!entry.host && !records.has(entry.task)) {
+    if (!entry.host && !entry.placement && !records.has(entry.task)) {
       const repos = entryWorktrees(config, entry);
       const mount = missingWorktreeVolume(repos) ?? await interruptedWorktreeVolume(ctx.runner, repos).catch(() => undefined);
       if (mount) {
@@ -1214,12 +1251,15 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     await recordHeldOrders(ctx, new Map(waiting(entries).filter(e => !e.holdNotified).map(entry => [entry.seq, 'queue paused (agentctl queue resume)'])));
     return [];
   }
-  const live = await liveWindows(ctx);
+  if (entries.some(e => e.placement || e.perf || e.host && config.disk.minFreeStartGb > 0) || config.localHost) {
+    void refreshHostHealth(ctx, true).catch(error => opts.log?.(`host health: ${errorMessage(error)}`));
+  }
+  const live = await liveWindows(ctx, undefined, undefined, true);
   const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
   for (const w of live) if (w.agent && w.counted !== false) used[w.agent]++;
   // A start in progress whose window is not up yet already holds its place.
-  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host, owner: i.owner }); }
+  for (const [task, i] of memory.inflight) if (!live.some((w) => w.window === task.toLowerCase())) { used[i.agent]++; live.push({ window: task.toLowerCase(), agent: i.agent, host: i.host, owner: i.owner, perf: i.perf }); }
 
   // A block that the author's corrected report lifted is said before the released task starts (P94).
   await announceReleased(ctx, notifier, rows, opts).catch((e: unknown) => opts.log?.(`queue: ${errorMessage(e)}`));
@@ -1228,13 +1268,13 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const holds = queueHolds(config, ctx.runner.now());
   const stillHeld = new Set<string>();
   const candidates: QueueEntry[] = [];
-  const loadHold = queueLoadHold(config);
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
-    && !chatQuotaWait(config, entry, live) && !checkHostLimit(config, entry, live);
+    && (Boolean(entry.placement) || !chatQuotaWait(config, entry, live));
   const start = async (entry: QueueEntry): Promise<void> => {
-    if (!await beginStart(ctx, memory, notifier, entry, opts)) return;
+    const started = await beginStart(ctx, memory, notifier, entry, { ...opts, rows });
+    if (!started) return;
     used[entry.agent]++;
-    live.push({ window: windowName(entry.task), agent: entry.agent, host: entry.host, owner: entry.owner });
+    live.push({ window: windowName(entry.task), agent: entry.agent, host: started.host, owner: entry.owner, perf: entry.perf });
     began.push(entry.task);
   };
   const consider = async (entry: QueueEntry): Promise<void> => {
@@ -1244,16 +1284,21 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   };
   for (const entry of waiting(entries)) {
     if (entry.volumeBlock) continue;
-    if (loadHold) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     const author = directAuthorState(config, entry, readQueue(config));
     if (author.failed) { await failEntry(ctx, entry, author.failed, notifier, opts, true); continue; }
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
-    if (checkHostLimit(config, entry, live)) continue;
     if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
-    if (taskDiskStartHold(config, entry.host, entryWorktrees(config, entry), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
+    if (setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
+    if (perfScheduleHold(entry, rows, ctx.runner.now()) || perfExpired(config, entry, ctx.runner.now())) continue;
+    if (entry.perf && !entry.perfWaitSince && !unmetAfter(effectiveAfter(config, entry, rows, ctx.runner.now()), rows, entry.afterVerdicts).length && live.some(slot => slot.agent && slot.host === entry.host && !slot.reportReady)) {
+      await withStartLock(ctx, async () => {
+        const fresh = readQueue(config).find(e => e.seq === entry.seq && e.status === 'queued');
+        if (fresh && !fresh.perfWaitSince) await writeEntry(ctx, { ...fresh, perfWaitSince: new Date(ctx.runner.now()).toISOString() });
+      });
+    }
     if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
     if (entry.reviewBlock?.retryOnUpdate) {
       try {
@@ -1352,22 +1397,27 @@ export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: {
   return updated;
 }
 
-async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
+async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<QueueEntry | undefined> {
   const { config } = ctx;
   let entry = initial;
   let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
-    if (fresh.volumeBlock || queueLoadHold(config) || entryPeakHold(config, fresh, ctx.runner.now()) || taskDiskStartHold(config, fresh.host, entryWorktrees(config, fresh), ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
-    const slots = await liveWindows(ctx);
-    if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), slots).size)) return false;
-    if (config.quotas) {
-      const used = slots.filter(slot => slot.agent === fresh.agent && slot.counted !== false).length;
-      if (globalQuotaWait(config, fresh.agent, used) || chatQuotaWait(config, fresh, slots) || checkHostLimit(config, fresh, slots)) return false;
-    }
-    await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(ctx.runner.now()).toISOString() });
-    if (config.quotas && !fresh.noAgent) {
+    const now = ctx.runner.now();
+    const entries = readQueue(config);
+    if (fresh.volumeBlock || entryPeakHold(config, fresh, now) || setupSlots(config, entries) >= config.queue.maxParallelSetups) return false;
+    const slots = await liveWindows(ctx, undefined, undefined, true);
+    if (heavyWait(config, isHeavy(fresh), heavyBudget(config, entries, slots).size)) return false;
+    if (perfScheduleHold(fresh, opts.rows ?? [], now) || perfExpired(config, fresh, now)) return false;
+    const placement = queuePlacement(config, fresh, slots, entries, opts.rows ?? [], now);
+    if (placement.hold) return false;
+    const showHost = fresh.placement || fresh.host || config.localHost || splitSpecs(fresh.spec)[0]?.header.host === 'local';
+    fresh = { ...fresh, host: placement.host, placementReason: showHost ? placement.reason : undefined };
+    const used = slots.filter(slot => slot.agent === fresh.agent && slot.counted !== false).length;
+    if (globalQuotaWait(config, fresh.agent, used) || chatQuotaWait(config, fresh, slots)) return false;
+    await writeEntry(ctx, { ...fresh, status: 'starting', startingPid: process.pid, startingAt: new Date(now).toISOString() });
+    if (!fresh.noAgent) {
       try {
-        [reservation] = await reserveStarts(ctx, [{ task: fresh.task, window: windowName(fresh.task), agent: fresh.agent, host: fresh.host, owner: fresh.owner }]);
+        [reservation] = await reserveStarts(ctx, [{ task: fresh.task, window: windowName(fresh.task), agent: fresh.agent, host: fresh.host, owner: fresh.owner, perf: fresh.perf, reuseWorktree: fresh.reuseWorktree }]);
       } catch (error) {
         await writeEntry(ctx, fresh);
         throw error;
@@ -1402,7 +1452,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       }
     });
   });
-  if (!claimed) return false;
+  if (!claimed) return undefined;
   const starting: QueueEntry = { ...entry, status: 'starting', startingAt: new Date(ctx.runner.now()).toISOString() };
   const log: string[] = [];
   const startCtx = new ContextClass(ctx.runner, config, (l) => void log.push(l));
@@ -1410,7 +1460,8 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
     try {
       await opts.log?.(`queue: starting ${entry.task} (${entry.agent})`);
       const raws = splitSpecs(entry.spec, `queue entry ${entry.task}`);
-      const spec = resolveSpec(raws[0] as RawSpec, { config });
+      const spec = resolveSpec(raws[0] as RawSpec, { config, placedHost: entry.host ?? 'local', owner: entry.owner, hostProvider: entry.agent });
+      spec.placementReason = entry.placementReason;
       if (entry.owner || config.quotas) spec.owner = entry.owner ?? DEFAULT_OWNER;
       // The review invariant (own report, own checkout) is checked by the door every agent window goes through (window-guard).
       if (entry.autoReview) spec.autoReview = entry.autoReview;
@@ -1441,11 +1492,15 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       await opts.log?.(`queue: ${entry.task} started`);
       const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;
       await notifyPlain(ctx, notifier, entry.task, done, opts.self);
-      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text: `${done} (${entry.agent})`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
+      await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text: `${done} (${entry.agent}) ${entry.placementReason ?? ''}`.trim(), ...(entry.cohort ? { cohort: entry.cohort } : {}) });
     } catch (e) {
       if (e instanceof LaunchExited) {
         await dropEntry(ctx, starting);
         await opts.log?.(`queue: ${entry.task}: ${e.message.split('\n')[0]}`);
+        return;
+      }
+      if (e instanceof HostUnreachable && entry.placement && !readTaskRecord(config, windowName(entry.task))) {
+        await writeEntry(ctx, { ...entry, status: 'queued', host: undefined, retryAt: new Date(ctx.runner.now() + 30_000).toISOString(), error: e.message });
         return;
       }
       if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
@@ -1479,8 +1534,8 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       }
     }
   };
-  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, owner: entry.owner, promise: run() });
-  return true;
+  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, owner: entry.owner, perf: entry.perf, promise: run() });
+  return entry;
 }
 
 /** The failed start's window stayed open (`start_failure.keep_window`): say so, with the file that holds its last screen. */

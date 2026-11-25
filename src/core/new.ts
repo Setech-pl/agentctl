@@ -1,3 +1,7 @@
+import { waitingPerfReservation } from './queue.ts';
+import { resolveBorrowedWorktree } from './borrow-worktree.ts';
+import { hostAvailability } from './host-availability.ts';
+import { readHostsCache } from './hosts.ts';
 import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { providerHolds, providerHoldText } from './provider-hold.ts';
@@ -143,21 +147,32 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
+  if (!ctx.runner.dryRun && requested.some(spec => spec.placement || spec.perf && !opts.trackStart)) throw new AgentctlError('host: auto and class: perf use the watch queue; submit with agentctl queue');
   if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
   const admission = await withStartLock(ctx, async () => {
-    const specs = await planBatch(ctx, requested, opts);
+    const specs = (await planBatch(ctx, requested, opts)).map(spec => resolveBorrowedWorktree(ctx, spec));
     for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
     for (const spec of specs) {const hold = providerHolds(ctx.config, ctx.runner.now())[spec.agent]; if (hold) throw new AgentctlError(`provider hold: ${providerHoldText(spec.agent, hold)}`, 'Queue the task or wait for the provider reset.');}
     for (const spec of specs) { const held = peakHold(ctx.config, spec, ctx.runner.now()); if (held) throw new AgentctlError(held, 'Add this task to the queue; it will start after peak.'); }
     for (const spec of specs) {
       if (!spec.host) assertWorktreeVolumes(spec.repos, spec.task, true);
+      const name = spec.host ?? 'local';
+      const perf = spec.host && !spec.perf ? waitingPerfReservation(ctx.config, spec.host, ctx.runner.now()) : undefined;
+      if (perf) throw new AgentctlError(`host ${name} limit reached: exclusive perf reservation (${perf})`);
+      const health = readHostsCache()?.hosts.find(h => h.name === name);
+      const held = hostAvailability(ctx.config, name, health, ctx.runner.now());
+      if (held) throw new AgentctlError(`host ${name} limit reached: ${held}`);
+    }
+    return { specs, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs.map(s => ({ ...s, perf: Boolean(s.perf) }))) };
+  });
+  try {
+    for (const spec of admission.specs) {
       const held = await freshTaskDiskStartHold(ctx, spec.host, spec.repos);
       if (held?.startsWith('volume missing: ')) throw new WorktreeVolumeError(held.slice(16), spec.task, true);
       if (held) throw new AgentctlError(held, 'Free disk space before starting setup.');
     }
-    return { specs, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) };
-  });
-  try { return await startTasks(ctx, admission.specs, opts, true); }
+    return await startTasks(ctx, admission.specs, opts, true);
+  }
   finally { await releaseStarts(ctx, admission.ids); }
 }
 
@@ -186,7 +201,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   const prepared = new Map<string, ResolvedSpec['repos']>();
   let sessionUp = await tmux.hasSession();
   for (const [index, original] of specs.entries()) {
-    let spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse) : original;
+    let spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse || Boolean(original.reuseWorktree)) : original;
     if (spec.reviewMode) {
       const repos = await readonlyReviewRepos(ctx, spec);
       const evidence = readonlyReviewEvidence(ctx, spec.window);
@@ -206,7 +221,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     spec = await assertReviewBase(ctx, spec);
     if (spec.reviewFreshness) ctx.info(`${spec.task}: ${spec.reviewFreshness}`);
     const taskStartedMs = runner.now();
-    const primary = spec.repos[0]!.worktree;
+    const primary = spec.remoteCwd ?? spec.repos[0]!.worktree;
 
     const startedAt = new Date(taskStartedMs).toISOString();
     const track = opts.trackStart && !runner.dryRun
@@ -218,7 +233,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     try {
       for (const repo of spec.host || spec.reviewMode ? [] : spec.repos) {
         if (!runner.dryRun) assertWorktreeVolumes([repo], spec.task);
-        if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
+        if (spec.reuseWorktree && !fs.existsSync(repo.worktree) && !runner.dryRun) throw new AgentctlError(`missing borrowed worktree ${repo.worktree}`);
+        if ((opts.reuse || spec.reuseWorktree) && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
         else {
           await addWorktree(runner, repo, config.git.timeoutS);
           ctx.info(`${spec.task}: worktree ${repo.worktree}`);
@@ -273,6 +289,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       record.session = `agentctl-${spec.host}`;
       record.remoteReport = spec.remoteReport;
       record.remoteDir = spec.remoteDir;
+      record.remoteCwd = spec.remoteCwd;
     }
     // `wall:` – the open WALL messages as they are at this start (read-only data in the prompt); a WALL that cannot be read never stops a start.
     let wallContext: string | undefined;
@@ -308,10 +325,11 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     const commandLine = await writeLaunchScript(execution, spec.remoteDir ?? taskDir(config, spec.window), buildAgentArgv({ ...spec, command: providerCommand(config, spec.agent) }, settings, remoteArgs ?? wiring?.args), launchEnv, !spec.host);
     // 5. window + agent
     const opened = await openAgentWindow(ctx, { ...guardRequest(spec), cwd: primary, env: {}, origin: opts.origin ?? (spec.autoReview ? 'start' : 'new'), sessionUp: spec.host ? await taskTmux.hasSession() : sessionUp });
+    if (opened.code === 0 && spec.host) await ctx.hosts.windows().catch(() => []);
     if (opened.code !== 0) throw new AgentctlError(`${spec.task}: tmux could not make the window: ${opened.stderr.trim() || `exit ${opened.code}`}`);
     if (!spec.host) sessionUp = true;
 
-    if (spec.owner && !opts.trackStart) await recordJournal(ctx, {kind: 'task-start', task: spec.task, owner: spec.owner, text: `${spec.task}: uruchomiono (${spec.agent})`});
+    if (spec.owner && !opts.trackStart) await recordJournal(ctx, {kind: 'task-start', task: spec.task, owner: spec.owner, text: `${spec.task}: uruchomiono (${spec.agent}) [${spec.host ?? 'local'}]`});
     if (wiring) ctx.info(`${spec.task}: ${wiring.note}`);
     const remote = spec.remoteControl === true;
     // Remote Control asks once to be switched on; like the folder trust that is a dialog for the human.

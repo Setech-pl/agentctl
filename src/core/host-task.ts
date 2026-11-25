@@ -1,3 +1,5 @@
+import { stagePerfArtifacts } from './perf-transfer.ts';
+import { fetchMacBase } from './host-branches.ts';
 import { fillTaskLinkTargets, projectDefaultLinkPolicy } from './links.ts';
 import { parseKimiConfigText, kimiConfigProblem, configuredModel } from './providers/kimi-config.ts';
 import { matrixKimiModels } from './matrix.ts';
@@ -52,7 +54,12 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
   for (const [index, raw] of spec.repos.entries()) {
     let repo = { ...raw, path: remotePath(raw.path, home), worktree: remotePath(raw.worktree, home, root) };
     if (repo.worktree === repo.path || repo.worktree === root || !repo.worktree.startsWith(`${root}/`)) throw new AgentctlError(`${spec.task}: remote worktree must be a separate directory inside hosts.${spec.host}.work_dir (${root})`);
-    await runner.checked('git', ['-C', repo.path, 'fetch', '--prune', 'origin'], { timeoutMs: ctx.config.git.timeoutS * 1000 });
+    const origin = await runner.exec('git', ['-C', repo.path, 'fetch', '--prune', 'origin'], {
+      timeoutMs: Math.min(ctx.config.git.timeoutS * 1000, 30_000),
+      env: { GIT_TERMINAL_PROMPT: '0' },
+    });
+    if (origin.code !== 0) ctx.info(`[${spec.host}] ${repo.name ?? repo.path}: origin unavailable; checking existing and Mac refs`);
+    repo = await fetchMacBase(ctx, spec.host!, repo);
     repo = (await resolveTaskBases(ctx, { ...spec, repos: [repo] })).repos[0]!;
     const branch = repo.branch ? await runner.exec('git', ['-C', repo.path, 'show-ref', '--verify', '--quiet', `refs/heads/${repo.branch}`], { readOnly: true, dryResult: { code: 1 } }) : { code: 1 };
     if (branch.code !== 0) {
@@ -65,6 +72,7 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
       const head = await runner.exec('git', ['-C', repo.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { readOnly: true });
       if (!reuse || !list.stdout.split('\n').includes(`worktree ${repo.worktree}`) || (repo.branch ? head.stdout.trim() !== repo.branch : head.code === 0)) throw new AgentctlError(`${spec.task}: remote worktree ${repo.worktree} already exists or does not match the requested registered checkout; inspect it before --reuse`);
     } else {
+      if (spec.reuseWorktree) throw new AgentctlError(`missing borrowed worktree ${repo.worktree}`);
       await runner.mkdir(path.posix.dirname(repo.worktree));
       await runner.checked('git', ['-C', repo.path, 'worktree', 'add', ...(repo.branch ? branch.code === 0 ? [repo.worktree, repo.branch] : ['-b', repo.branch, repo.worktree, repo.base ?? 'HEAD'] : ['--detach', repo.worktree, repo.base ?? 'HEAD'])], { timeoutMs: ctx.config.git.timeoutS * 1000 });
     }
@@ -99,10 +107,11 @@ export async function prepareRemoteTask(ctx: Context, spec: ResolvedSpec, reuse 
     });
     return {...link, to: remotePath(fillPlaceholders(target, {task: spec.task, cache: path.posix.join(root, 'reports')}).replaceAll('{worktree}', repos[0]!.worktree), home, repos[0]!.worktree)};
   });
-  links.push(...projectDefaultLinkPolicy(filledDefaults, ctx.config, repos, repos[0]!.path, runner.now(), intentional, spec.host).links);
+  if (repos.length) links.push(...projectDefaultLinkPolicy(filledDefaults, ctx.config, repos, repos[0]!.path, runner.now(), intentional, spec.host).links);
   await runner.mkdir(dir);
   await runner.mkdir(path.posix.dirname(report));
-  return { ...spec, repos, env: Object.fromEntries(Object.entries({ ...host.env, ...projectEnv, ...spec.env }).map(([k, v]) => [k, v === '~' || v.startsWith('~/') ? remotePath(v, home) : v])), links: links.map(l => ({ from: l.from, to: remotePath(l.to, home, repos[0]!.worktree) })), remoteReport: report, remoteDir: dir };
+  const remoteCwd = spec.perf ? await stagePerfArtifacts(ctx, { ...spec, remoteDir: dir }) : undefined;
+  return { ...spec, repos, ...(remoteCwd ? { remoteCwd } : {}), env: Object.fromEntries(Object.entries({ ...host.env, ...projectEnv, ...spec.env }).map(([k, v]) => [k, v === '~' || v.startsWith('~/') ? remotePath(v, home) : v])), links: links.map(l => ({ from: l.from, to: remotePath(l.to, home, repos[0]!.worktree) })), remoteReport: report, remoteDir: dir };
 }
 
 /** Task-owned settings merge with the owner's settings; repeated installs overwrite only our own files. */
@@ -120,7 +129,11 @@ export async function installRemoteHooks(ctx: Context, spec: Pick<ResolvedSpec, 
     // Preserve an owner's notify just as local wiring does.
     const source = await runner.exec('sh', ['-c', 'f="${CODEX_HOME:-$HOME/.codex}/config.toml"; if [ -f "$f" ]; then cat "$f"; fi'], { readOnly: true });
     const forward = parseTomlNotify(source.stdout);
-    return ['-c', `notify=${tomlArray(['node', script, 'event', ...(forward ? ['--forward', JSON.stringify(forward)] : [])])}`];
+    const cwd = record.remoteCwd ?? record.repos[0]?.worktree;
+    // Codex splits override keys on dots. Pass the project path as a key inside a TOML table value.
+    const trust = cwd && ctx.config.hosts[spec.host!]?.trustWorkDir
+      ? ['-c', `projects={${JSON.stringify(cwd)}={trust_level="trusted"}}`] : [];
+    return [...trust, '-c', `notify=${tomlArray(['node', script, 'event', ...(forward ? ['--forward', JSON.stringify(forward)] : [])])}`];
   }
   return [];
 }

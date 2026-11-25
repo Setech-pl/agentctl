@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Mac and PC dispatch now supports automatic SSH placement, per-host health and capacity, owner reservations and fetch-only branch sync. / Dyspozytor Mac + PC automatycznie wybiera host po SSH, sprawdza jego stan i limity, respektuje rezerwacje właściciela i synchronizuje gałęzie przez fetch.
+- `class: perf` reserves a worker and transfers bounded builds and measurement results. / `class: perf` rezerwuje host i przesyła buildy oraz wyniki pomiarów z limitem rozmiaru.
+
 - Early task exits keep the CLI exit code, pane tail and log path. Watch retries once in the original worktree. Dead tasks can be resumed under the same ID and waiting dependencies show the cause. / Po wczesnym zakończeniu zadania zostają kod wyjścia, końcówka ekranu i ścieżka logu. Watch ponawia start w tym samym worktree. Martwe zadanie można wznowić pod tym samym ID, a zadania zależne pokazują przyczynę oczekiwania.
 - Exact task IDs take precedence across CLI and MCP, including closed tasks and queue entries. `task_spec` also returns queued-only specifications. / Dokładny identyfikator ma pierwszeństwo w CLI i MCP, także dla zamkniętych zadań i wpisów w kolejce. `task_spec` pokazuje też specyfikacje zadań czekających w kolejce.
 - Status, events, capacity, limits and the board share task accounting. Expired readings display their age. Named chats see their effective quota and global headroom. / Status, zdarzenia, pojemność, limity i tablica liczą zadania wspólnie. Nieaktualne odczyty pokazują swój wiek. Nazwany czat widzi własną kwotę i wolne miejsca globalne.

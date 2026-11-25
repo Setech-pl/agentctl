@@ -1,3 +1,5 @@
+import { reconcileHostYield } from './host-yield.ts';
+import { remoteAttachHint } from './host-runtime.ts';
 import { attentionTick } from './attention.ts';
 import { maintainWall } from './wall.ts';
 import { watchIntegrationGc } from './integration-gc.ts';
@@ -166,7 +168,8 @@ async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): P
   const kind = e.from === 'host-unreachable' && e.to !== 'host-unreachable' ? 'host-recovered' : JOURNALED[e.to];
   if (!kind || row.tmuxLost || (kind === 'dead' && row.launchExit)) return;
   const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null) : undefined;
-  await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
+  const attach = kind === 'needs-trust' && row.host ? remoteAttachHint(ctx.config, {host: row.host, window: row.windowName}) : undefined;
+  await recordJournal(ctx, { kind, task: row.task, text: [e.notification ?? e.to, attach].filter(Boolean).join(' · '), ...(verdict ? { verdict } : {}) });
 }
 
 export function watchLogPath(ctx: Context): string {
@@ -256,6 +259,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await step('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
   await step('launch health', signal => checkLaunchHealth(ctx, notifier, options.self, signal));
   // Admission observes slots and named dependencies. Full status and report processing are optional for it.
+  void reconcileHostYield(ctx).catch(error => startLog(`host yield: ${error instanceof Error ? error.message : String(error)}`));
   await step('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }));
   await step('WALL maintenance', () => maintainWall(ctx));
   await step('limit requests', () => maintainLimitRequests(ctx));

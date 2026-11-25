@@ -162,3 +162,71 @@ Zachowanie 0.22.5–0.22.8 obejmuje także hosty: pin/unpin i GC `--keep TASK`, 
 Podgląd kolejki korzysta z pomiaru zdrowia hosta nie starszego niż 60 sekund dla jego `work_dir`; brak/stary/nieznany pomiar blokuje start. Przed zmianami worktree/setup start bezpośredni i z kolejki odczytuje świeże liczniki systemu plików hosta (najbliższego istniejącego rodzica, jeśli work_dir jest nowy). Dyspozytor nie sprawdza zdalnej ścieżki lokalnie. Harmonogram szczytu i globalne blokady działają przed zdalnym setupem; działające zadania i jawne wznowienie właściciela zachowują opisane reguły. Przewinięcie menu nie unieważnia tokena answer przy niezmienionym pytaniu i wybranej opcji. Snapshot status/capacity zachowuje host i zapisany pomiar jego dysku, bez SSH i skanowania zadań.
 
 Zdalne linki domyślne projektu mają tę samą kontrolę zamkniętych zadań i wyłączenie przez `links: []` co lokalne; `{worktree:repo}` wskazuje repo ze specyfikacji.
+
+## Dwie maszyny: Mac + PC/WSL
+
+Na Macu działa jeden dyspozytor, watch, tablica, WALL i MCP dla wszystkich czatów. PC uruchamia zadania i ich drzewa robocze w Ubuntu WSL. Na Macu:
+
+```sh
+cd ~
+agentctl hosts add pc --ssh krzet@192.168.2.64 --port 2222
+agentctl hosts doctor pc
+```
+
+W WSL uruchom sshd, zainstaluj tmux, Git, Node i rsync, utwórz `work_dir`, sklonuj repozytoria i zaloguj Claude oraz Codex. Doctor sprawdza BatchMode, nieinteraktywny PATH, dyski WSL i Windows, PowerShell, Windows Node oraz Chrome/Edge. W Windows wykonaj polecenia portproxy i zapory podane przez doctor. Odśwież portproxy po zmianie adresu WSL. Do pobierania z Maca włącz na nim Zdalne logowanie oraz sprawdź połączenie SSH z WSL w BatchMode. Użyj rsync 3 po obu stronach.
+
+```yaml
+placement: {default: auto, prefer: [pc, local], failover_after: 10m}
+hosts:
+  local:
+    repos: {hems: ~/Projects/hems}
+  pc:
+    ssh: krzet@192.168.2.64
+    port: 2222
+    work_dir: ~/agentctl-work
+    repos: {hems: ~/src/hems}
+    providers: [claude, codex]
+    limits: {claude: 1, codex: 1}
+    max_total: 2
+    load_threshold: 25
+    sync: fetch-back
+    mac_ssh: owner@macbook.local
+    trust_work_dir: true
+    availability:
+      windows: ["mon 01:00-08:00", "tue 01:00-08:00", "wed 01:00-08:00", "thu 01:00-08:00", "fri 01:00-08:00", "sat 01:00-08:00", "sun 01:00-08:00"]
+      processes: [ComfyUI, ExampleGame.exe]
+      gpu_busy_pct: 70
+      yield: stop-new
+perf: {wait_max: 30m, max_artifact_mb: 2048}
+```
+
+- `host: auto` sprawdza globalne miejsce na koncie, limity hosta, klon, zainstalowany i zalogowany CLI, próbkę z ostatniej minuty, dysk, obciążenie i dostępność. Preferuje host powiązanego worktree, potem wybiera najmniej zajęty host i rozstrzyga remis przez `placement.prefer`. Przy niedostępnym PC kolejka czeka na lokalny start do upływu `failover_after`. Uruchomione zadanie zostaje na swoim hoście.
+- Bez pola `host` pierwszeństwo ma `placement.chats` (np. `{"chat:mac-tools": local}`), potem `placement.cohorts`, potem `placement.default` (początkowo `local`). Przypnij `pc` do Windows/GPU i `local` do Keychain. `reuse_worktree: TASK` wymaga zamknięcia zadania źródłowego i korzysta z jego hosta oraz katalogu.
+- Watch pobiera gałąź zadania na Maca przy raporcie i zamknięciu. Rozbieżna lub aktualnie używana gałąź Maca zostaje zachowana, a gałąź PC jest w `refs/remotes/pc/<gałąź>`. Zdarzenie wskazuje konflikt. Opcjonalne `fetch_remote: pc` wskazuje istniejący remote Git. `mac_ssh` pozwala PC pobrać bazę z Maca, także przy `base_task`. `sync: off` wyłącza oba kierunki.
+- `agentctl hosts pause pc --until 18:00` (również ISO lub `3h`) rezerwuje PC. `agentctl hosts resume pc` zwalnia ręczną rezerwację. Klawisz `H` i numer hosta przełączają rezerwację na tablicy. W MCP dodaj `hosts_pause` i `hosts_resume` do `mcp.allow` i użyj podglądu oraz potwierdzenia. Mac ma tę samą politykę pod `hosts.local.availability`. Okna używają czasu lokalnego Maca. `stop-new` zostawia pracujące zadania, a `pause-all` wstrzymuje ich drzewa procesów i wznawia po zwolnieniu hosta.
+- Po sprawdzeniu katalogu włącz `trust_work_dir: true` dla Codexa. Dla Claude zdarzenie `needs-trust` podaje polecenie SSH/tmux potrzebne do potwierdzenia w oknie.
+
+### Pomiary wydajności Windows
+
+```sh
+cd ~
+agentctl queue ~/specs/PERF-HEMS.md
+```
+
+```yaml
+---
+task: PERF-HEMS
+agent: codex
+class: perf
+host: pc
+repos: []
+at: "03:00"
+on_pass: HEMS-INTEGRATE-*
+artifacts: [{from_task: HEMS-BUILD, path: dist, dest: dist}]
+results: results
+---
+Uruchom pomiar HEMS w Windows przez ~/src/hems/scripts/perf/win/measure.ps1 na przesłanym dist/.
+Zapisz wyniki w results/ oraz werdykt wydajności w raporcie.
+```
+
+Zlecenie czeka na najbliższą 03:00 czasu Maca oraz raport integracji z werdyktem PASS dla wskazanej kohorty lub wzorca zadania. `start_after` przyjmuje datę ISO. Gotowy perf rezerwuje cały PC do końca pomiaru. Po `perf.wait_max` zlecenie jest wstrzymane do `agentctl queue retry PERF-HEMS`. Rsync z weryfikacją sum kontrolnych przenosi katalog z buildem, z worktree zadania Maca lub ze ścieżki absolutnej. Wyniki trafiają do `PERF-HEMS.results/` obok raportu, po czym PC usuwa przesłany build. Dyspozytor transportuje wyniki, a zadanie ocenia regresję.

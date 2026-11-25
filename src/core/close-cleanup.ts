@@ -33,7 +33,7 @@ function candidates(root: string, patterns: string[], device: number): string[] 
 
 export async function cleanupClosedWorktrees(ctx: Context, record: TaskRecord): Promise<void> {
   const { config, runner } = ctx;
-  if (runner.dryRun || record.reviewMode) return;
+  if (runner.dryRun || record.reviewMode || record.reuseWorktree) return;
   if (record.host) {
     if (record.repos.some(repo => repo.remoteCloseCleanup ?? Boolean(config.closeCleanup?.length))) {
       const text = `${record.task}: close.cleanup unsupported on SSH host ${record.host}`;

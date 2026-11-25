@@ -1,6 +1,6 @@
 import { planRemoteGc } from './host-gc.ts';
 import { readHostsCache, writeHostsCache } from './hosts.ts';
-import { probeHosts } from './host-health.ts';
+import { probeHosts, probeLocalHost } from './host-health.ts';
 import { readQueue } from './queue.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import fs from 'node:fs';
@@ -269,11 +269,16 @@ export async function confirmDiskStart(ctx: Context, yes = false): Promise<boole
 const hostRefreshing = new Set<string>();
 const hostRefreshed = new Map<string, number>();
 /** Watch owns host probes; UI reads only their bounded cache. */
-export async function refreshHostHealth(ctx: Context): Promise<void> {
-  if (ctx.runner.dryRun || !Object.keys(ctx.config.hosts).length || hostRefreshing.has(ctx.config.path) || ctx.runner.now() - (hostRefreshed.get(ctx.config.path) ?? -Infinity) < 60_000) return;
-  hostRefreshing.add(ctx.config.path); hostRefreshed.set(ctx.config.path, ctx.runner.now());
+export async function refreshHostHealth(ctx: Context, forceSample = false): Promise<void> {
+  if (ctx.runner.dryRun || (!forceSample && !Object.keys(ctx.config.hosts).length && !ctx.config.localHost && ctx.config.placement.default !== 'auto') || hostRefreshing.has(ctx.config.path) || ctx.runner.now() - (hostRefreshed.get(ctx.config.path) ?? -Infinity) < 30_000) return;
+  const now = ctx.runner.now();
+  const recent = readHostsCache()?.hosts ?? [];
+  if (['local', ...Object.keys(ctx.config.hosts)].every(name => recent.some(sample => sample.name === name && now - Date.parse(sample.probedAt) < 30_000))) return;
+  hostRefreshing.add(ctx.config.path);
+  hostRefreshed.set(ctx.config.path, now);
   try {
-    await writeHostsCache(ctx.runner, await probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { timeoutMs: 5000 }));
+    const [local, remote] = await Promise.all([probeLocalHost(ctx.runner, ctx.config), probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { timeoutMs: 5000 })]);
+    await writeHostsCache(ctx.runner, [local, ...remote]);
     await planRemoteGc(ctx, {}, 7 * 86400_000);
   }
   finally { hostRefreshing.delete(ctx.config.path); }

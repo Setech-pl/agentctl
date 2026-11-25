@@ -195,6 +195,10 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `guide` | `guide` |  |
 | `capacity` | `capacity` |  |
 | `hosts` | `hosts` |  |
+| `hosts add` | — | Owner terminal writes the SSH endpoint to the dispatcher configuration. |
+| `hosts doctor` | — | Owner terminal diagnoses SSH and prints machine setup commands. |
+| `hosts pause` | `hosts_pause` |  |
+| `hosts resume` | `hosts_resume` |  |
 | `consult` | `consult` |  |
 | `new` | `new` |  |
 | `queue` | `queue` |  |
@@ -322,6 +326,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 | `equivalents` | read | `as?` |
 | `config_show` | read | `as?` |
 | `hosts` | read | `as?`, `refresh?` |
+| `hosts_pause` | write | `as?`, `host?`, `until?`, `confirm?`, `preview_token?` |
+| `hosts_resume` | write | `as?`, `host?`, `confirm?`, `preview_token?` |
 | `manager_status` | read | `as?` |
 | `away_status` | read | `as?` |
 | `report` | read | `as?`, `task` |
@@ -355,6 +361,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `guide`: `--project &lt;repo&gt;`, `--lang &lt;lang&gt;`, `--clip`, `--json`
 - `capacity`: `--json`, `--clip`
 - `hosts`: `--json`, `--refresh`, `--clip`
+- `hosts add`: `--ssh &lt;user@host&gt;`, `--port &lt;port&gt;`
+- `hosts pause`: `--until &lt;time&gt;`
 - `consult`: `--confirm`
 - `new`: `--dry-run`, `--json`, `--reuse`, `--agent &lt;agent&gt;`, `--no-switch`, `--no-agent`, `--no-wait-trust`, `--clip`, `-y, --yes`, `--cohort &lt;name&gt;`
 - `queue`: `--clip`, `--agent &lt;agent&gt;`, `-y, --yes`, `--json`, `--cohort &lt;name&gt;`

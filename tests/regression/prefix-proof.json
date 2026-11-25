@@ -880,6 +880,26 @@
       "MCP-WRITE-PREVIEW: every registered write previews without changing state or sending keys"
     ]
   },
+  "NODES0262-BASE": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NODES0262-BASE: a Mac-only base is fetched into the worker before its worktree is created",
+      "NODES0262-BASE: a Mac-only base is fetched into the worker before its worktree is created"
+    ]
+  },
+  "NODES0262-PLACEMENT": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NODES0262-PLACEMENT: production shape routes an automatic order to the WSL worker and a pinned order to the dispatcher",
+      "NODES0262-PLACEMENT: production shape routes an automatic order to the WSL worker and a pinned order to the dispatcher"
+    ]
+  },
   "NOTIFY0251-DURABLE": {
     "rev": "v0.25.0",
     "outcome": "FAILS",

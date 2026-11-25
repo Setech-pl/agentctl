@@ -13,6 +13,10 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`guide`](#agentctl-guide) | Read the dispatcher guide and optional project overlay. |
 | [`capacity`](#agentctl-capacity) | Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection. |
 | [`hosts`](#agentctl-hosts) | Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: \<name>" starts its worktree, setup and agent there. |
+| [`hosts add`](#agentctl-hosts-add) |  |
+| [`hosts doctor`](#agentctl-hosts-doctor) |  |
+| [`hosts pause`](#agentctl-hosts-pause) |  |
+| [`hosts resume`](#agentctl-hosts-resume) |  |
 | [`consult`](#agentctl-consult) | Preview a high-cost Delphi consultation; --confirm registers it for watch. |
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
@@ -155,8 +159,10 @@ agentctl capacity --clip
 
 Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: \<name>" starts its worktree, setup and agent there.
 
+Subcommands: `hosts add`, `hosts doctor`, `hosts pause`, `hosts resume`.
+
 ```
-agentctl hosts [options]
+agentctl hosts [options] [command]
 ```
 
 | Option | Meaning | Notes |
@@ -171,6 +177,55 @@ Examples:
 agentctl hosts                          # reachability, GPU, disk, tmux, provider CLIs, repos
 agentctl hosts --refresh --json          # probe every host now, machine-readable
 ```
+
+## agentctl hosts add
+
+```
+agentctl hosts add [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` |  |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--ssh <user@host>` |  | required |
+| `--port <port>` | SSH port | default `22` |
+
+## agentctl hosts doctor
+
+```
+agentctl hosts doctor [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` |  |
+
+## agentctl hosts pause
+
+```
+agentctl hosts pause [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` |  |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--until <time>` | HH:MM, ISO date or duration (e.g. 3h) |  |
+
+## agentctl hosts resume
+
+```
+agentctl hosts resume [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` |  |
 
 ## agentctl consult
 

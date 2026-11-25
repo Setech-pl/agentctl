@@ -171,3 +171,7 @@ Rzeczywisty model/effort Kimi 2.5.0 pochodzi z pasywnego `llm.request.modelAlias
 ## CONSULT: tylko kosztowne decyzje
 
 Używaj `consult` do architektury, wspólnych kontraktów NC/HEMS i wyboru dostawcy, gdy niezależne argumenty wielu dostawców uzasadniają koszt `panel × rundy + synteza`. Przeczytaj spec CONSULT w README, podaj repozytoria oraz aktywnych i włączonych dostawców (co najmniej dwóch różnych w panelu), pokaż właścicielowi podgląd kosztu/użycia i dopiero po zgodzie potwierdź token. `mcp.allow` musi zawierać `consult`; watch ma działać, postęp widać w kohorcie oraz CONSULT round-done/synthesis-ready w `events_since`. Pierwsza runda jest niezależna; kolejne pokazują anonimowe odpowiedzi z oznaczeniem „yours”; synteza waży argumenty bez głosowania. Mapa autorów jest dopiero dla właściciela po syntezie; anonimizacja i hooki Git nie stanowią izolacji systemowej. Nie zamawiaj konsultacji do rutynowej implementacji.
+
+### Wybór hosta Mac + PC
+
+Zwykłe zadania zlecaj z `host: auto`. Przypnij `host: pc` do Windows lub GPU, a `host: local` do narzędzi macOS, np. Keychain. Narzędzie `hosts` pokazuje sloty, dostępność właściciela i rezerwacje perf. Zobacz [instrukcję dla dwóch maszyn](pl/hosts.md#dwie-maszyny-mac--pcwsl).

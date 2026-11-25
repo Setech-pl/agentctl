@@ -26,6 +26,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'NODES0262-PLACEMENT', fixedIn: '0.27.3', symptom: 'A free worker could not accept an automatic order from the Mac dispatcher.', scenarios: [s('host-tasks.test.ts', '^NODES0262-PLACEMENT:')] },
+  { id: 'NODES0262-BASE', fixedIn: '0.27.3', symptom: 'A task ordered on the PC could not check out a base branch that existed only on the Mac.', scenarios: [s('host-tasks.test.ts', '^NODES0262-BASE:')] },
   { id: 'FIELD0256-LAUNCH', fixedIn: '0.27.1', symptom: 'A window could exit at launch without evidence, a retry, or a usable recovery and dependency state.', scenarios: [s('queue.test.ts', '^FIELD0256-LAUNCH:'), s('field0253-gc.test.ts', '^FIELD0256-DEAD-GC:')] },
   { id: 'FIELD0256-HOLD', fixedIn: '0.27.1', symptom: 'Registered orders stayed idle without a hold event or a visible owner reservation reason.', scenarios: [s('queue.test.ts', '^FIELD0256-HOLD:')] },
   { id: 'FIELD0256-CHAT-USAGE', fixedIn: '0.27.1', symptom: 'Named chats lacked a common footer showing their effective quotas and global headroom.', scenarios: [s('owner-limits.test.ts', '^FIELD0256-CHAT-USAGE:')] },

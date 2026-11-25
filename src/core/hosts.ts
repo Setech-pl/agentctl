@@ -6,6 +6,8 @@ import type { ProviderId } from './providers/types.ts';
 import { checkKeys, parseEnv } from './config.ts';
 import type { AgentName } from './config.ts';
 import { Problems, expandHome, isObject } from './util.ts';
+import { parseAvailability } from './host-availability.ts';
+import type { Availability } from './host-availability.ts';
 import type { Runner } from './runner.ts';
 
 /*
@@ -25,7 +27,7 @@ export interface HostConfig {
   identityFile?: string;
   /** Directory on the host that owns the task work and that disk health reports on. */
   workDir: string;
-  /** Repository name (as the specs name it) -> clone path on the host. Clones are synced through GitHub; agentctl fetches, never pushes. */
+  /** Repository name (as the specs name it) -> clone path on the host. Tasks use their host's clone; optional fetch-only sync copies task refs to the dispatcher. */
   repos: Record<string, string>;
   /** Provider CLIs installed on this host. */
   providers: ProviderId[];
@@ -33,9 +35,108 @@ export interface HostConfig {
   limits?: Partial<Record<AgentName, number>>;
   /** Extra environment for remote commands (in addition to the provider account limit). */
   env?: Record<string, string>;
+  maxTotal?: number;
+  loadThreshold?: number;
+  availability?: Availability;
+  sync?: 'fetch-back' | 'off';
+  macSsh?: string;
+  fetchRemote?: string;
+  trustWorkDir?: boolean;
 }
 
-export const HOST_KEYS = ['ssh', 'port', 'identity_file', 'work_dir', 'repos', 'providers', 'limits', 'env'];
+export type LocalHostConfig = Pick<HostConfig, 'limits' | 'maxTotal' | 'loadThreshold' | 'availability'> & { repos?: Record<string, string> };
+
+export interface PlacementConfig {
+  default: 'auto' | 'local';
+  prefer: string[];
+  failoverAfterMs: number;
+  chats: Record<string, 'auto' | 'local'>;
+  cohorts: Record<string, 'auto' | 'local'>;
+}
+
+export interface PerfConfig { waitMaxMs: number; maxArtifactBytes: number }
+
+export function positive(raw: unknown, where: string, p: Problems, integer = true): number | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0 && (!integer || Number.isInteger(raw))) return raw;
+  p.add(`${where} must be a positive ${integer ? 'integer' : 'number'}`);
+}
+
+function duration(raw: unknown, where: string, p: Problems, fallback: number): number {
+  if (raw === undefined) return fallback;
+  if (typeof raw === 'number') return (positive(raw, where, p) ?? fallback / 1000) * 1000;
+  const match = typeof raw === 'string' && /^(\d+)(s|m|h)$/.exec(raw);
+  if (match && Number(match[1]) > 0) return Number(match[1]) * (match[2] === 'h' ? 3600_000 : match[2] === 'm' ? 60_000 : 1000);
+  p.add(`${where} must be seconds or a duration like 10m`);
+  return fallback;
+}
+
+export function parsePlacement(raw: unknown, p: Problems): PlacementConfig {
+  const placement: PlacementConfig = { default: 'local', prefer: ['local'], failoverAfterMs: 600_000, chats: {}, cohorts: {} };
+  if (raw === undefined) return placement;
+  if (!isObject(raw)) { p.add('config.placement must be a mapping'); return placement; }
+  checkKeys(raw, ['default', 'prefer', 'failover_after', 'chats', 'cohorts'], 'config.placement', p);
+  if (raw.default === 'auto' || raw.default === 'local') placement.default = raw.default;
+  else if (raw.default !== undefined) p.add('config.placement.default must be auto or local');
+  const prefer = typeof raw.prefer === 'string' ? [raw.prefer] : raw.prefer;
+  if (Array.isArray(prefer) && prefer.every(name => typeof name === 'string' && HOST_NAME.test(name))) placement.prefer = prefer;
+  else if (prefer !== undefined) p.add('config.placement.prefer must be a host name or list of host names');
+  placement.failoverAfterMs = duration(raw.failover_after, 'config.placement.failover_after', p, 600_000);
+  for (const key of ['chats', 'cohorts'] as const) {
+    const mapping = raw[key];
+    if (mapping === undefined) continue;
+    if (!isObject(mapping)) { p.add(`config.placement.${key} must be a mapping`); continue; }
+    for (const [name, mode] of Object.entries(mapping)) {
+      if (mode === 'auto' || mode === 'local') placement[key][name.normalize('NFC').toLowerCase()] = mode;
+      else p.add(`config.placement.${key}.${name} must be auto or local`);
+    }
+  }
+  return placement;
+}
+
+export function parsePerf(raw: unknown, p: Problems): PerfConfig {
+  if (raw !== undefined && !isObject(raw)) p.add('config.perf must be a mapping');
+  const value = isObject(raw) ? raw : {};
+  checkKeys(value, ['wait_max', 'max_artifact_mb'], 'config.perf', p);
+  return { waitMaxMs: duration(value.wait_max, 'config.perf.wait_max', p, 1800_000), maxArtifactBytes: (positive(value.max_artifact_mb, 'config.perf.max_artifact_mb', p) ?? 2048) * 1024 ** 2 };
+}
+
+function parseHostPolicy(raw: Record<string, unknown>, where: string, p: Problems): LocalHostConfig {
+  const limits: NonNullable<HostConfig['limits']> = {};
+  if (raw.limits !== undefined && raw.limits !== null) {
+    if (!isObject(raw.limits)) p.add(`${where}.limits must be a mapping like {claude: 1}`);
+    else {
+      checkKeys(raw.limits, [...PROVIDER_IDS], `${where}.limits`, p);
+      for (const [id, rawLimit] of Object.entries(raw.limits)) {
+        const limit = positive(rawLimit, `${where}.limits.${id}`, p);
+        if (limit !== undefined) limits[id as AgentName] = limit;
+      }
+    }
+  }
+  const maxTotal = positive(raw.max_total, `${where}.max_total`, p);
+  const loadThreshold = positive(raw.load_threshold, `${where}.load_threshold`, p, false);
+  const availability = parseAvailability(raw.availability, `${where}.availability`, p);
+  return { ...(Object.keys(limits).length ? { limits } : {}), ...(maxTotal ? { maxTotal } : {}), ...(loadThreshold ? { loadThreshold } : {}), ...(availability ? { availability } : {}) };
+}
+
+export function parseLocalHost(raw: unknown, p: Problems): LocalHostConfig | undefined {
+  const local = isObject(raw) ? raw.local : undefined;
+  if (local === undefined) return undefined;
+  if (!isObject(local)) { p.add('config.hosts.local must be a mapping'); return undefined; }
+  checkKeys(local, ['limits', 'max_total', 'load_threshold', 'availability', 'repos'], 'config.hosts.local', p);
+  return { ...parseHostPolicy(local, 'config.hosts.local', p), repos: parseRepoPaths(local.repos ?? {}, 'config.hosts.local', p) };
+}
+
+function parseRepoPaths(raw: unknown, where: string, p: Problems): Record<string, string> {
+  if (!isObject(raw)) { p.add(`${where}.repos must map repository names to clone paths`); return {}; }
+  return Object.fromEntries(Object.entries(raw).flatMap(([name, dir]) => {
+    if (name.trim() && typeof dir === 'string' && dir.trim()) return [[name, dir.trim()]];
+    p.add(`${where}.repos must map repository names to non-empty clone paths`);
+    return [];
+  }));
+}
+
+export const HOST_KEYS = ['ssh', 'port', 'identity_file', 'work_dir', 'repos', 'providers', 'limits', 'env', 'max_total', 'load_threshold', 'availability', 'sync', 'mac_ssh', 'fetch_remote', 'trust_work_dir'];
 export const HOST_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 
 function parseHostName(name: string, p: Problems): void {
@@ -45,7 +146,7 @@ function parseHostName(name: string, p: Problems): void {
 function parseSshTarget(v: unknown, where: string, p: Problems): string | undefined {
   if (typeof v !== 'string' || v.trim() === '') { p.add(`${where} must be "user@host" (the host may be a name or an IP)`); return undefined; }
   const target = v.trim();
-  if (/\s/.test(target) || (target.match(/@/g) ?? []).length !== 1 || target.startsWith('@') || target.endsWith('@')) {
+  if (!/^[a-zA-Z0-9_.][a-zA-Z0-9_.-]*@(?:[a-zA-Z0-9][a-zA-Z0-9_.-]*|\[[a-fA-F0-9:]+\])$/.test(target)) {
     p.add(`${where} must be exactly "user@host", without spaces`);
     return undefined;
   }
@@ -61,15 +162,15 @@ export function parseHosts(v: unknown, p: Problems): Record<string, HostConfig> 
   }
   const hosts: Record<string, HostConfig> = {};
   for (const [name, raw] of Object.entries(v)) {
+    if (name === 'local') continue;
     const where = `config.hosts.${name}`;
+    if (name === 'auto') p.add('config.hosts.auto is reserved for placement');
     parseHostName(name, p);
     if (!isObject(raw)) { p.add(`${where} must be a mapping with ssh, work_dir, repos and providers`); continue; }
     checkKeys(raw, HOST_KEYS, where, p);
     const ssh = parseSshTarget(raw.ssh, `${where}.ssh`, p);
     if (raw.work_dir === undefined || typeof raw.work_dir !== 'string' || raw.work_dir.trim() === '') p.add(`${where}.work_dir must be a non-empty path on the host`);
-    if (!isObject(raw.repos) || Object.entries(raw.repos).some(([repo, dir]) => repo.trim() === '' || typeof dir !== 'string' || dir.trim() === '')) {
-      p.add(`${where}.repos must map repository names to remote clone paths, e.g. {app: ~/src/app}`);
-    }
+    const repos = parseRepoPaths(raw.repos, where, p);
     let port = 22;
     if (raw.port !== undefined) {
       if (typeof raw.port === 'number' && Number.isInteger(raw.port) && raw.port >= 1 && raw.port <= 65535) port = raw.port;
@@ -89,19 +190,13 @@ export function parseHosts(v: unknown, p: Problems): Record<string, HostConfig> 
         else providers.push(id as ProviderId);
       }
     }
-    let limits: HostConfig['limits'];
-    if (raw.limits !== undefined && raw.limits !== null) {
-      if (!isObject(raw.limits)) p.add(`${where}.limits must be a mapping like {claude: 1}`);
-      else {
-        checkKeys(raw.limits, [...PROVIDER_IDS], `${where}.limits`, p);
-        const parsed: Partial<Record<AgentName, number>> = {};
-        for (const [id, n] of Object.entries(raw.limits)) {
-          if (typeof n === 'number' && Number.isInteger(n) && n >= 1) parsed[id as AgentName] = n;
-          else p.add(`${where}.limits.${id} must be a positive integer`);
-        }
-        if (Object.keys(parsed).length > 0) limits = parsed;
-      }
-    }
+    const policy = parseHostPolicy(raw, where, p);
+    if (raw.sync !== undefined && raw.sync !== 'off' && raw.sync !== 'fetch-back') p.add(`${where}.sync must be fetch-back or off`);
+    const macSsh = typeof raw.mac_ssh === 'string' && /^[a-zA-Z0-9_.-]+@[a-zA-Z0-9_.-]+(?::[0-9]+)?$/.test(raw.mac_ssh) ? raw.mac_ssh : undefined;
+    if (raw.mac_ssh !== undefined && !macSsh) p.add(`${where}.mac_ssh must be user@mac[:port]`);
+    const fetchRemote = typeof raw.fetch_remote === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(raw.fetch_remote) ? raw.fetch_remote : undefined;
+    if (raw.fetch_remote !== undefined && !fetchRemote) p.add(`${where}.fetch_remote must be a Git remote name`);
+    if (raw.trust_work_dir !== undefined && typeof raw.trust_work_dir !== 'boolean') p.add(`${where}.trust_work_dir must be boolean`);
     const env = parseEnv(raw.env, `${where}.env`, p);
     if (ssh && typeof raw.work_dir === 'string' && raw.work_dir.trim() !== '' && isObject(raw.repos)) {
       hosts[name] = {
@@ -109,9 +204,13 @@ export function parseHosts(v: unknown, p: Problems): Record<string, HostConfig> 
         port,
         ...(identityFile ? { identityFile } : {}),
         workDir: raw.work_dir.trim(),
-        repos: Object.fromEntries(Object.entries(raw.repos as Record<string, unknown>).map(([repo, dir]) => [repo, (dir as string).trim()])),
+        repos,
         providers,
-        ...(limits ? { limits } : {}),
+        ...policy,
+        ...(raw.sync === 'off' || raw.sync === 'fetch-back' ? { sync: raw.sync } : {}),
+        ...(macSsh ? { macSsh } : {}),
+        ...(fetchRemote ? { fetchRemote } : {}),
+        ...(raw.trust_work_dir === true ? { trustWorkDir: true } : {}),
         ...(Object.keys(env).length > 0 ? { env } : {}),
       };
     }
@@ -138,6 +237,7 @@ export interface HostGpu {
   name: string;
   totalMiB: number;
   usedMiB: number;
+  utilizationPct?: number;
 }
 
 export interface HostCli {
@@ -167,6 +267,13 @@ export interface HostHealth {
   detail?: string;
   disk?: { workDir: string; freeKb: number; totalKb: number };
   gpu?: HostGpu | null;
+  rootDisk?: { freeKb: number; totalKb: number };
+  load?: number;
+  cpus?: number;
+  memoryFreeKb?: number;
+  processes?: string[];
+  diagnostics?: Record<string, string>;
+  offlineSince?: string;
   tmux?: { present: boolean; version?: string };
   clis?: HostCli[];
   repos?: HostRepo[];
@@ -206,6 +313,12 @@ export function readHostsCache(env: NodeJS.ProcessEnv = process.env, now: number
 
 export async function writeHostsCache(runner: Runner, hosts: HostHealth[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   await runner.mkdir(path.dirname(hostsCachePath(env)));
+  const previous = readHostsCache(env, runner.now());
+  for (const host of hosts) {
+    if (host.state === 'reachable') continue;
+    const last = previous?.hosts.find(item => item.name === host.name);
+    host.offlineSince = last?.state !== 'reachable' ? last?.offlineSince ?? last?.probedAt ?? host.probedAt : host.probedAt;
+  }
   await runner.writeFile(hostsCachePath(env), JSON.stringify({ writtenAt: new Date().toISOString(), hosts }, null, 2));
 }
 

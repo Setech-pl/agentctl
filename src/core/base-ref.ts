@@ -16,7 +16,7 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
     const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
     const source = records.find(r => r.task === match[1]);
     if (!source) throw new AgentctlError(`${spec.task}: base ${raw}: no task ${match[1]}; start blocked`);
-    const candidates = source.repos.filter(r => !match[2] || path.basename(r.path) === match[2]);
+    const candidates = source.repos.filter(r => !match[2] || (r.name ?? path.basename(r.path)) === match[2]);
     if (candidates.length !== 1) throw new AgentctlError(`${spec.task}: base ${raw}: repository missing or ambiguous; use @TASK:repo-name; start blocked`);
     const selected = candidates[0]!;
     const data = await readOutputs(ctx, source);
@@ -36,7 +36,7 @@ export async function resolveTaskBases(ctx: Context, spec: ResolvedSpec): Promis
       // A review's own checkout is detached: without commits in its outputs it stands for the branch it reviewed.
       if (!branch && source.reviewOf) branch = outputAuthor(ctx, source)?.repos.find(a => a.path === selected.path)?.branch;
       if (!branch) throw new AgentctlError(`${spec.task}: base ${raw}: ${source.task} has no commits in its outputs and no branch (a detached review checkout); name the commit in outputs.commits; start blocked`);
-      ref = `refs/heads/${branch}`;
+      ref = repo.fetchedBase ?? `refs/heads/${branch}`;
     }
     const result = await (spec.host ? ctx.hosts.forHost(spec.host) : ctx.runner).exec('git', ['-C', repo.path, 'rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], { readOnly: true });
     if (result.code !== 0 || !/^[a-f0-9]{40}$/i.test(result.stdout.trim())) throw new AgentctlError(`${spec.task}: base ${raw}: commit ${ref} does not exist in ${repo.path}; start blocked`);

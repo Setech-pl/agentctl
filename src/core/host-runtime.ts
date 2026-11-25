@@ -1,3 +1,8 @@
+import { createHash } from 'node:crypto';
+import { withFileLock } from './file-lock.ts';
+import { mirrorPerfResults } from './perf-transfer.ts';
+import { recordJournal } from './journal.ts';
+import { fetchRemoteBranches } from './host-branches.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { checkReportPath } from './report-path.ts';
 import { remoteMirrorScript } from './host-mirror.ts';
@@ -149,8 +154,44 @@ export function remoteAttachHint(config: GlobalConfig, record: Pick<TaskRecord, 
   return `${firstConnectCommand(host).replace(/^ssh /, 'ssh -t ')} ${shellQuote(`tmux attach -t =agentctl-${record.host}:${id ?? record.window}`)}`;
 }
 
+async function syncRemoteReport(ctx: Context, record: TaskRecord, text: string | undefined, closing: boolean): Promise<boolean> {
+  const state = path.join(ctx.config.stateDir, record.window, 'remote-transfers.json');
+  return withFileLock(`${state}.lock`, async () => {
+    if (typeof text !== 'string') {
+      if (closing) await fetchRemoteBranches(ctx, record);
+      return false;
+    }
+    checkReportPath(ctx.config, record, record.report);
+    let previous: string | undefined;
+    try { previous = fs.readFileSync(record.report, 'utf8'); } catch { /* first report */ }
+    const hash = createHash('sha256').update(text).digest('hex');
+    let receipt: { hash?: string; branch?: boolean; perf?: boolean; retryAt?: number } = {};
+    try { receipt = JSON.parse(fs.readFileSync(state, 'utf8')); } catch { /* first transfer */ }
+    if (receipt.hash !== hash) receipt = { hash };
+    const isComplete = !record.attemptId || text.includes(`<!-- agentctl:attempt ${record.attemptId} -->`) && /<!-- agentctl:report-end -->\s*$/.test(text);
+    const now = ctx.runner.now();
+    if (closing || isComplete && (receipt.retryAt ?? 0) <= now && (!receipt.branch || record.perf && !receipt.perf)) {
+      if (closing || !receipt.branch) receipt.branch = await fetchRemoteBranches(ctx, record);
+      if (record.perf && isComplete && !receipt.perf) {
+        try {
+          await mirrorPerfResults(ctx, record);
+          receipt.perf = true;
+        } catch (error) {
+          await recordJournal(ctx, { kind: 'perf-transfer', task: record.task, text: `[${record.host}] transfer wyników perf: ${error instanceof Error ? error.message : String(error)}` });
+        }
+      }
+      receipt.retryAt = now + 30_000;
+      await ctx.runner.writeFile(state, JSON.stringify(receipt));
+    }
+    if (previous === text) return false;
+    await ctx.runner.mkdir(path.dirname(record.report));
+    await ctx.runner.writeFile(record.report, text);
+    return true;
+  });
+}
+
 /** Canonical report mirror and hook receipts. Missing files are normal; SSH loss is never a missing window. */
-export async function syncRemoteFiles(ctx: Context, record: TaskRecord): Promise<boolean> {
+export async function syncRemoteFiles(ctx: Context, record: TaskRecord, closing = false): Promise<boolean> {
   if (!record.host || !record.remoteReport || !record.remoteDir || ctx.runner.dryRun || cachedRequest()) return false;
   const connection = ctx.hosts.connection(record.host);
   if (connection.unreachable && ctx.runner.now() < connection.retryAt) return false;
@@ -160,13 +201,7 @@ export async function syncRemoteFiles(ctx: Context, record: TaskRecord): Promise
   try {
     const r = await remote.checked('node', ['-e', script], { readOnly: true });
     const data = JSON.parse(r.stdout) as { report?: string; receipt?: string; transcript?: string; wire?: string };
-    let changed = false;
-    if (typeof data.report === 'string') {
-      checkReportPath(ctx.config, record, record.report);
-      let previous: string | undefined;
-      try { previous = fs.readFileSync(record.report, 'utf8'); } catch { /* no mirror */ }
-      if (previous !== data.report) { await ctx.runner.mkdir(path.dirname(record.report)); await ctx.runner.writeFile(record.report, data.report); changed = true; }
-    }
+    const changed = typeof data.report === 'string' || closing ? await syncRemoteReport(ctx, record, data.report, closing) : false;
     if (typeof data.receipt === 'string') {
       const receipt = JSON.parse(data.receipt);
       if (receipt.attempt === record.attemptId) {

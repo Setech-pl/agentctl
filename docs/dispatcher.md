@@ -171,3 +171,7 @@ Kimi 2.5.0 effective model/effort comes from passive `llm.request.modelAlias/thi
 ## CONSULT: high-cost decisions only
 
 Use `consult` for architecture, shared NC/HEMS contracts and provider choice when independent multi-provider reasoning justifies `panel × rounds + synthesis` tasks. Read the README CONSULT spec, explicitly name repositories, use only active/enabled providers (at least two distinct on the panel), and show the cost/usage preview to the owner before confirming its token. `mcp.allow` must include `consult`; keep watch running and follow cohort status plus CONSULT round-done/synthesis-ready in `events_since`. Round-one answers are blind; later answers are anonymised and mark “yours”; synthesis weighs reasoning without majority voting. The identity map is owner-only after synthesis; anonymisation and task-scoped Git hooks are best effort, not filesystem isolation. Do not use consultations for routine implementation.
+
+### Mac + PC placement
+
+Order routine work with `host: auto`. Pin `host: pc` for Windows or GPU work and `host: local` for Mac-only tools such as Keychain. Read `hosts` for active slots, owner availability, and exclusive perf reservations. See the [two-machine setup](en/hosts.md#two-machines-mac--pcwsl).

@@ -31,6 +31,7 @@ export function findAuthor(task: string, batch: ResolvedSpec[], config: GlobalCo
 }
 
 export interface LiveWindow {
+  perf?: boolean;
   owner?: string;
   host?: string;
   window: string;

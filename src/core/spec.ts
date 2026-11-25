@@ -1,3 +1,5 @@
+import { parsePerfSpec } from './perf-spec.ts';
+import type { PerfSpec } from './perf-spec.ts';
 import { chatOwner, taskOwner } from './chat-quotas.ts';
 import { mapEffort } from './equivalents.ts';
 import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
@@ -36,6 +38,7 @@ export interface RawSpec {
 
 export interface ResolvedRepo {
   name?: string;
+  localPath?: string;
   setupExplicit?: boolean;
   path: string;
   worktree: string;
@@ -44,6 +47,7 @@ export interface ResolvedRepo {
   remoteCloseCleanup?: boolean;
   base?: string;
   baseTask?: string;
+  fetchedBase?: string;
   branch?: string;
   /** Shell commands for this repository's worktree: the spec's `repos[].setup`, else the repository's own .agentctl.yaml (the first repository also takes the spec/global `setup`). */
   setup?: string[];
@@ -111,8 +115,13 @@ export interface ResolvedSpec {
   wall?: string[];
   /** Run on a configured host through SSH; report is the local mirror path. */
   host?: string;
+  placement?: 'auto';
+  placementReason?: string;
+  perf?: PerfSpec;
+  reuseWorktree?: string;
   remoteReport?: string;
   remoteDir?: string;
+  remoteCwd?: string;
   /** The order as written in the spec; agent/model/effort above are the effective values. */
   requested: Order;
   /** Why the effective order differs from the requested one. */
@@ -198,6 +207,9 @@ export function splitSpecs(text: string, source = 'spec'): RawSpec[] {
 }
 
 export interface ResolveContext {
+  placedHost?: string;
+  hostProvider?: AgentName;
+  owner?: string;
   config: GlobalConfig;
   /** Project layer lookup; defaults to reading `<repo>/.agentctl.yaml`. */
   loadProject?: (repoPath: string) => Layer | undefined;
@@ -208,8 +220,8 @@ export interface ResolveContext {
 /** Task IDs whose window name is one agentctl uses for itself (`watch`, `board`, `manager`). */
 export const RESERVED_TASK_IDS = ['WATCH', 'BOARD', 'MANAGER'];
 
-export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'merge_base_check', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'owner', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok'];
-export const REPO_KEYS = ['path', 'worktree', 'base', 'branch', 'setup'];
+export const SPEC_KEYS = ['task', 'agent', 'class', 'model', 'effort', 'repos', 'links', 'setup', 'env', 'review_of', 'review', 'merge_base_check', 'report', 'pin', 'remote_control', 'weight', 'priority', 'after', 'after_verdict', 'touches', 'cohort', 'owner', 'wall', 'read_only', 'host', 'integration', 'keep_cache', 'peak_ok', 'base_task', 'reuse_worktree', 'artifacts', 'results', 'start_after', 'at', 'on_pass'];
+export const REPO_KEYS = ['path', 'worktree', 'base', 'base_task', 'branch', 'setup'];
 
 function label(raw: RawSpec): string {
   const task = raw.header.task;
@@ -245,10 +257,25 @@ export function resolveSendSpec(raw: RawSpec): { task: string; window: string; p
   return { task: task as string, window: windowName(task as string), prompt: raw.prompt };
 }
 
+export function localRepoPath(config: GlobalConfig, value: string): string {
+  return resolvePath(config.localHost?.repos?.[path.basename(value)] ?? value);
+}
+
+export function specHost(raw: RawSpec, config: GlobalConfig, ownerOverride?: string): string {
+  const h = raw.header;
+  if (typeof h.host === 'string' && h.host.trim()) return h.host.trim();
+  const cohort = typeof h.cohort === 'string' ? h.cohort.normalize('NFC').toLowerCase() : '';
+  const owner = ownerOverride ?? (h.owner === undefined ? taskOwner(config, typeof h.cohort === 'string' ? h.cohort : undefined) : chatOwner(h.owner));
+  return (owner && config.placement.chats[owner.toLowerCase()]) || config.placement.cohorts[cohort] || config.placement.default;
+}
+
 /** Validate a raw spec and merge global config < project config < spec. */
 export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const { config } = ctx;
-  const loadProject = raw.header.host ? () => undefined : ctx.loadProject ?? loadProjectConfig;
+  const requestedHost = specHost(raw, config, ctx.owner);
+  const effectiveHost = requestedHost === 'auto' ? ctx.placedHost : requestedHost;
+  const remoteName = effectiveHost && effectiveHost !== 'local' ? effectiveHost : undefined;
+  const loadProject = remoteName ? () => undefined : ctx.loadProject ?? loadProjectConfig;
   const p = new Problems();
   const h = raw.header;
   const where = 'spec';
@@ -263,8 +290,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const specEffort = parseEnumValue(h.effort, EFFORTS, 'effort', p);
   let specClass: string | undefined;
   if (h.class !== undefined && h.class !== null) {
-    if (typeof h.class === 'string' && matrixClass(h.class)) specClass = h.class;
-    else p.add(`unknown class ${JSON.stringify(h.class)}: class must be one of: ${classNames().join(', ')}`);
+    if (typeof h.class === 'string' && (h.class === 'perf' || matrixClass(h.class))) specClass = h.class;
+    else p.add(`unknown class ${JSON.stringify(h.class)}: class must be one of: ${[...classNames(), 'perf'].join(', ')}`);
   }
   let specModel: string | undefined;
   if (h.model !== undefined && h.model !== null) {
@@ -272,9 +299,14 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     else p.add('model must be a non-empty string (or omit it for the agent default)');
   }
 
+  const perf = parsePerfSpec(h, specClass === 'perf', p);
+  if (perf && !remoteName) p.add('class: perf needs an explicit remote host');
+  if (h.base_task !== undefined && (typeof h.base_task !== 'string' || !TASK_ID.test(h.base_task) || h.base_task === task)) p.add('base_task must name another task');
+  if (h.reuse_worktree !== undefined && (typeof h.reuse_worktree !== 'string' || !TASK_ID.test(h.reuse_worktree) || h.reuse_worktree === task)) p.add('reuse_worktree must name another task');
+
   // Repos
   const rawRepos: { path: string; worktree?: string; base?: string; branch?: string; setup?: string[] }[] = [];
-  if (!Array.isArray(h.repos) || h.repos.length === 0) {
+  if (!Array.isArray(h.repos) || h.repos.length === 0 && !perf) {
     p.add('"repos" must list at least one repository: repos: [{path: ~/code/app, worktree: ~/wt/app-task}]');
   } else {
     h.repos.forEach((entry: unknown, i: number) => {
@@ -293,6 +325,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
         if (Array.isArray(entry.setup) && entry.setup.every((c: unknown) => typeof c === 'string' && c.trim() !== '')) repo.setup = entry.setup as string[];
         else p.add(`${at}.setup must be a list of non-empty shell commands`);
       }
+      const baseTask = entry.base_task ?? h.base_task;
+      if (entry.base_task !== undefined && (typeof entry.base_task !== 'string' || !TASK_ID.test(entry.base_task) || entry.base_task === task)) p.add(`${at}.base_task must name another task`);
+      if (repo.base && entry.base_task !== undefined) p.add(`${at}: use either base or base_task`);
+      if (!repo.base && typeof baseTask === 'string') repo.base = `@${baseTask}:${path.basename(repo.path)}`;
       rawRepos.push(repo);
     });
   }
@@ -375,7 +411,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     if (problem) p.add(problem);
     else cohort = (h.cohort as string).normalize('NFC');
   }
-  const owner = h.owner === undefined ? taskOwner(config, cohort) : chatOwner(h.owner);
+  const owner = ctx.owner ?? (h.owner === undefined ? taskOwner(config, cohort) : chatOwner(h.owner));
   if (h.owner !== undefined && !owner) p.add('owner must be chat:<name>, a chat name or default');
   const wall = resolveSpecWall(config.wall, task, h.wall, p);
   const weight = parseEnumValue(h.weight, ['normal', 'heavy'] as const, 'weight', p) ?? 'normal';
@@ -387,7 +423,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   let project: Layer | undefined;
   if (firstRepo) {
     try {
-      project = loadProject(resolvePath(firstRepo.path));
+      project = loadProject(localRepoPath(config, firstRepo.path));
     } catch (e) {
       if (e instanceof AgentctlError) p.add(e.message);
       else throw e;
@@ -397,12 +433,12 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const inheritedReview = { ...config.review, ...project?.review };
   const reviewMode = isObject(h.review) ? parseEnumValue(h.review.mode, ['readonly-on-author'] as const, 'spec.review.mode', p) : undefined;
   const mergeBaseCheck = parseEnumValue(h.merge_base_check, ['warn', 'block', 'candidate'] as const, 'spec.merge_base_check', p);
-  if (mergeBaseCheck && (!reviewOf || h.host)) p.add('merge_base_check requires a local task with review_of');
+  if (mergeBaseCheck && (!reviewOf || remoteName)) p.add('merge_base_check requires a local task with review_of');
   if (mergeBaseCheck === 'candidate' && (reviewMode || reviewOfList.length !== 1 || h.read_only === true)) p.add('merge_base_check candidate requires one reviewed task and a separate worktree');
   if (reviewMode) {
     checkKeys(h.review as Record<string, unknown>, ['mode'], 'spec.review', p);
     if (reviewOfList.length !== 1 || reviewOf === task) p.add('review.mode readonly-on-author requires review_of naming one other task');
-    if (h.host) p.add('review.mode readonly-on-author requires a local task');
+    if (remoteName) p.add('review.mode readonly-on-author requires a local task');
     if (h.read_only === true || setupFromTask) p.add('review.mode readonly-on-author cannot be combined with read_only or setup.from_task');
   }
   const explicitReview = h.review !== undefined && !reviewMode ? parseReview(h.review, 'spec.review', p) : undefined;
@@ -441,15 +477,10 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   if (agent && !isActive(config, agent)) p.add(`provider ${agent} is not enabled; add it to providers: [claude, codex, kimi] in ${config.path}`);
   // Remote host: the name must be configured and the effective provider must be installed there.
   // `new` refuses at start with a clear message, so specs can be written already.
-  let host: string | undefined;
-  if (h.host !== undefined && h.host !== null) {
-    if (typeof h.host !== 'string' || h.host.trim() === '') p.add('host must be the name of a host from the hosts: section of the config');
-    else if (!config.hosts[h.host.trim()]) p.add(`unknown host "${h.host.trim()}": add it under hosts: in ${config.path} (agentctl hosts lists them)`);
-    else {
-      host = h.host.trim();
-      if (agent && !config.hosts[host]!.providers.includes(agent)) p.add(`host "${host}" has no ${agent} CLI (its providers: ${config.hosts[host]!.providers.join(', ')}); drop host: or pick another agent/host`);
-    }
-  }
+  const host = remoteName;
+  if (h.host !== undefined && h.host !== null && (typeof h.host !== 'string' || !h.host.trim())) p.add('host must be auto, local or a configured host');
+  if (host && !Object.hasOwn(config.hosts, host)) p.add(`unknown host "${host}": add it under hosts: in ${config.path} (agentctl hosts lists them)`);
+  else if (host && agent && !config.hosts[host]!.providers.includes(ctx.hostProvider ?? agent)) p.add(`host "${host}" has no ${ctx.hostProvider ?? agent} CLI`);
   if (specRemote === true && agent && !remote) p.add(`remote_control: true works for Claude only (${provider(agent).displayName} has no Remote Control); drop the key or use agent: claude`);
   if (agent && remote && (specRemote === true || (specRemote === undefined && remoteDefault))) {
     const flags = config.agents[agent].flags;
@@ -468,7 +499,8 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   for (const repo of rawRepos) {
     const remoteHost = host ? config.hosts[host] : undefined;
     const repoName = path.basename(repo.path);
-    const repoPath = remoteHost ? remoteHost.repos[repoName] ?? repo.path : resolvePath(repo.path);
+    const localPath = localRepoPath(config, repo.path);
+    const repoPath = remoteHost ? remoteHost.repos[repoName] ?? repo.path : localPath;
     if (remoteHost && !remoteHost.repos[repoName]) p.add(`host ${host}: no configured clone for repository ${repoName}`);
     let projectOfRepo: Layer | undefined = project;
     if (repo !== firstRepo) {
@@ -479,19 +511,19 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
         else throw e;
       }
     }
-    const root = projectOfRepo?.worktreeRoot ?? config.worktreeRoot;
+    const root = projectOfRepo?.worktreeRoot ?? config.worktreeRoot ?? (requestedHost === 'auto' ? path.join(config.cache, 'worktrees') : undefined);
     let worktree: string | undefined;
-    if (remoteHost) worktree = repo.worktree ?? path.posix.join(remoteHost.workDir, `${repoName}-${windowName(taskId)}`);
+    if (remoteHost) worktree = (requestedHost === 'auto' ? undefined : repo.worktree) ?? path.posix.join(remoteHost.workDir, `${repoName}-${windowName(taskId)}`);
     else if (repo.worktree) worktree = pathOf(repo.worktree);
     else if (root) worktree = path.join(pathOf(root), `${path.basename(repoPath)}-${windowName(taskId)}`);
-    else if (reviewMode) worktree = repoPath; // Resolved from the author's record at start.
+    else if (reviewMode || h.reuse_worktree) worktree = repoPath; // Resolved from the author's record at start.
     else {
       p.add(
         `repos: no worktree for ${repo.path}: set "worktree" in the spec or "worktree_root" in ${repoPath}/.agentctl.yaml or ${config.path}`,
       );
       continue;
     }
-    const resolved: ResolvedRepo = { path: repoPath, worktree, ...(remoteHost ? { name: repoName, setupExplicit: repo.setup !== undefined || repo === firstRepo && specSetup !== undefined } : {}) };
+    const resolved: ResolvedRepo = { path: repoPath, worktree, ...(path.basename(repoPath) !== repoName ? { name: repoName } : {}), ...(remoteHost ? { name: repoName, localPath, setupExplicit: repo.setup !== undefined || repo === firstRepo && specSetup !== undefined } : {}) };
     const settings = projectOfRepo?.worktreeRoot ? projectOfRepo : config;
     const mount = settings.worktreeMount && (remoteHost ? fill(settings.worktreeMount) : pathOf(settings.worktreeMount));
     if (mount && !repo.worktree && !remoteHost && !insidePath(mount, worktree)) p.add(`worktrees.mount ${mount} must contain worktree root ${path.dirname(worktree)}`);
@@ -507,7 +539,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   }
   for (let i = 0; i < repos.length; i++) {
     const r = repos[i] as ResolvedRepo;
-    if (!reviewMode && r.worktree === r.path) p.add(`repos[${i}]: the worktree must differ from the repository itself (${r.path})`);
+    if (!reviewMode && !h.reuse_worktree && r.worktree === r.path) p.add(`repos[${i}]: the worktree must differ from the repository itself (${r.path})`);
   }
   p.throwIfAny(`${label(raw)} is invalid:`, 'Run "agentctl spec example" to see the format.');
 
@@ -524,7 +556,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const linkByFrom = new Map<string, Link>();
   const projectLinkByFrom = new Map<string, Link>();
   const intentionalWorktrees = new Set<string>();
-  for (const link of [...(Array.isArray(h.links) && h.links.length === 0 ? [] : [...(host ? [] : config.links), ...(project?.links ?? [])]), ...specLinks]) {
+  for (const link of repos.length ? [...(Array.isArray(h.links) && h.links.length === 0 ? [] : [...(host ? [] : config.links), ...(project?.links ?? [])]), ...specLinks] : []) {
     const inherited = project?.links?.includes(link) === true;
     const target = host ? fill(link.to) : pathOf(fillTaskLinkTargets(fill(link.to, inherited), config, {allowMissingClosed: inherited}));
     const expanded = fill(link.from);
@@ -539,7 +571,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     else projectLinkByFrom.delete(from);
   }
 
-  const projectDefaults = projectDefaultLinkPolicy([...projectLinkByFrom.values()], config, repos, repos[0]!.path, ctx.now, intentionalWorktrees);
+  const projectDefaults = projectDefaultLinkPolicy([...projectLinkByFrom.values()], config, repos, repos[0]?.path ?? config.cache, ctx.now, intentionalWorktrees);
   for (const [from, link] of projectLinkByFrom) if (!projectDefaults.links.includes(link)) linkByFrom.delete(from);
   for (const {from, to} of linkByFrom.values()) validateLink(from, to, repos[0]!.worktree);
   const linkWarnings = [...projectDefaults.notices, ...staleProjectLinkWarnings(projectDefaults.links, config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
@@ -585,7 +617,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     pin,
     priority,
     weight,
-    after,
+    after: [...new Set([...after, ...(perf?.artifacts.flatMap(a => a.fromTask ? [a.fromTask] : []) ?? [])])],
     ...(Object.keys(afterVerdicts).length ? { afterVerdicts } : {}),
     touches,
     ...(h.peak_ok === true ? {peakOk: true} : {}),
@@ -594,6 +626,9 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
     requested: { agent: agent as AgentName, model, effort: orderedEffort },
   };
   if (specClass) spec.class = specClass;
+  if (requestedHost === 'auto' && !ctx.placedHost) spec.placement = 'auto';
+  if (perf) spec.perf = perf;
+  if (typeof h.reuse_worktree === 'string') spec.reuseWorktree = h.reuse_worktree;
   if (classWarnings.length > 0) spec.warnings = classWarnings;
   if (spec.integration) spec.warnings = [...(spec.warnings ?? []), 'integration: true – overlap warnings suppressed / ostrzeżenia o nakładaniu wyciszone'];
   if (reviewOf) spec.reviewOf = reviewOf;

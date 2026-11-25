@@ -82,7 +82,9 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `doctor` | read | `as?`, `project?` | Diagnose the installation, permissions and disk |
 | `equivalents` | read | `as?` | Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported) |
 | `config_show` | read | `as?` | Read effective configuration, queue holds and chat ceilings with secrets masked |
-| `hosts` | read | `as?`, `refresh?` | Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec with "host: <name>" starts the task remotely, with a local report mirror |
+| `hosts` | read | `as?`, `refresh?` | Read host health, placement slots, availability and perf reservations. Prefer host: auto for routine tasks. Pin pc for GPU or Windows and local for Mac-only tools such as Keychain |
+| `hosts_pause` | write | `as?`, `host?`, `until?`, `confirm?`, `preview_token?` | Reserve a host for the owner |
+| `hosts_resume` | write | `as?`, `host?`, `confirm?`, `preview_token?` | Clear the manual host reservation |
 | `manager_status` | read | `as?` | Inspect the manager session |
 | `away_status` | read | `as?` | Inspect away mode |
 | `report` | read | `as?`, `task` | Inspect report location and candidates |
