@@ -82,6 +82,8 @@ Per-chat ceilings and floor-first admission are configured in `quotas:`. See the
 | `manager` | mapping | see below | g | The dispatcher session you talk to from the Claude app on the phone (`agentctl manager`). |
 | `usage` | mapping | see below | g | Token usage and plan limits: thresholds, queue hold, tmux status line, where the agents keep their logs. |
 | `hosts` | mapping | `{}` | g | Remote task hosts over SSH (0.23): worktree, setup, agent operations and report mirrors. No secrets are stored here. See [Hosts](en/hosts.md). |
+| `perf` | mapping | `{wait_max: 30m, max_artifact_mb: 2048}` | g | Exclusive perf wait and artifact transfer limits. |
+| `placement` | mapping | `{default: local, prefer: [local], failover_after: 10m}` | g | Host placement strategy. Chat and cohort overrides select auto or local. |
 | `hosts.<name>` | mapping | required per host | g | `<name>`: lowercase letters, digits, `_`, `-` (at most 32). Keys: `ssh` (`user@host`, required — a name or an IP, handed to ssh verbatim every call, never cached resolved), `port` (integer 1–65535, default 22), `identity_file` (local private-key path, optional), `work_dir` (remote directory for task work; disk health reports on it), `repos` (repository name → remote clone path; separate clones synced via GitHub, agentctl fetches and never pushes), `providers` (provider CLIs installed on the host: `claude`, `codex`, `kimi`, `glm`; at least one, no duplicates), `limits` (optional per-provider positive integer, an additional cap alongside the account limit), `env` (optional remote environment for host commands). Fixed security posture: one ControlMaster connection per host (socket in `~/.agentctl/ssh/`), `BatchMode` (never prompts), `StrictHostKeyChecking=yes` (a changed key fails as `host-key-changed`, never auto-accepted; a first-time key fails as `host-key-unknown` until you run the exact command `agentctl doctor` prints). |
 | `hosts.<name>.ssh` | `user@host` | required | g | The SSH target. Passed to ssh verbatim on every call: no IP is cached, so a changed address only needs this value updated once. |
 | `hosts.<name>.port` | integer | `22` | g | SSH port (the owner's WSL box: a Windows portproxy listens on 2222). |
@@ -338,6 +340,7 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `repos[].worktree` | path | `<worktree_root>/<repo>-<task>` | s | Where the new worktree goes. Must differ from `path`. |
 | `repos[].setup` | list of strings | none | s | Shell commands for this repository's own worktree (see `setup`). The chat cannot send it. |
 | `repos[].base` | git ref | none | s | Start point of the worktree. |
+| `repos[].base_task` | task ID | unset | s | Use a task’s output or branch for this repository. |
 | `repos[].branch` | string | none | s | Branch to create (or reuse). Without it the worktree is detached. |
 | `links` | list | `[]` | s | Same as in the other layers; added to theirs. |
 | `setup` | list or mapping | project, else global | s | A list replaces inherited commands for the first repository. A mapping can name a dependency source. |
@@ -360,6 +363,13 @@ The header of a spec file, between `---` lines, followed by the prompt. Several 
 | `weight` | `normal` or `heavy` | `normal` | s | Heavy tasks share the queue cap across providers; starting tasks and live task windows count, including report-ready. Immediate new is outside queue admission. |
 | `priority` | `high` or `normal` | `normal` | s | Queue order: `high` tasks start before every `normal` one (first come, first served inside each class). `new` ignores it. |
 | `host` | host name | none | s | A configured host: run worktree, setup and agent remotely; report is mirrored to the local `report:` path. Unknown hosts/providers fail validation. Watch reconnects with backoff after `host-unreachable`. See [Hosts](en/hosts.md). |
+| `on_pass` | cohort or pattern | unset | s | Require a PASS from a matching integration task. |
+| `at` | HH:MM | unset | s | Next daily local-time boundary for the order. |
+| `start_after` | ISO timestamp | unset | s | Earliest eligible perf start time. |
+| `results` | relative directory | unset | s | Perf result directory to copy back to the Mac. |
+| `artifacts` | list | `[]` | s | Perf inputs from Mac build directories. |
+| `reuse_worktree` | task ID | unset | s | Use a closed task’s registered worktree and host. |
+| `base_task` | task ID | unset | s | Use the named task’s output or branch as the base. |
 
 ## Environment variables
 

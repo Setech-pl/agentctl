@@ -472,12 +472,14 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       deps.stdout(text);
     }));
 
-  hostsCommand.command('add').argument('<host>').requiredOption('--ssh <user@host>').option('--port <port>', 'SSH port', '22')
+  hostsCommand.command('add').description('Register a remote worker in config.yaml').argument('<host>', 'name for the worker').requiredOption('--ssh <user@host>', 'SSH user and host').option('--port <port>', 'SSH port', '22')
     .action(guarded(async (host: string, opts: {ssh: string; port: string}) => line(await addHost(contextFor(false, { migrate: false }), host, opts.ssh, Number(opts.port)))));
-  hostsCommand.command('doctor').argument('<host>')
+  hostsCommand.command('doctor').description('Check tools, disks and logins on a worker and print setup commands').argument('<host>', 'name of the worker')
     .action(guarded(async (host: string) => line((await doctorHost(contextFor(false, { migrate: false }), host)).join('\n'))));
   for (const action of ['pause', 'resume'] as const) {
-    const command = hostsCommand.command(action).argument('<host>');
+    const command = hostsCommand.command(action)
+      .description(action === 'pause' ? 'Reserve a host for the owner' : 'Clear a manual owner reservation')
+      .argument('<host>', 'configured host or local');
     if (action === 'pause') command.option('--until <time>', 'HH:MM, ISO date or duration (e.g. 3h)');
     command.action(guarded(async (host: string, opts: {until?: string}) => line(await setHostPause(contextFor(false, { migrate: false }), host, action === 'pause', opts.until))));
   }

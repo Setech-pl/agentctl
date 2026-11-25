@@ -13,7 +13,16 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | Key | Typ / domyślne / warstwy | Znaczenie |
 |---|---|---|
 | `hosts` | mapping · `{}` · g | Nazwane hosty SSH: ssh, port, identity_file, work_dir, repos, providers, limits, env. [Pełny config hostów](hosts.md). |
+| `perf` | mapa · 30m, 2048 MiB · g | Czas oczekiwania na wyłączność hosta i limit rozmiaru artefaktów. |
+| `placement` | mapa · local · g | Wybór hosta, preferencje, czas przełączenia i reguły czatów i kohort. |
 | `host` | nazwa · brak · s | Uruchom zadanie na skonfigurowanym hoście; lokalna kopia raportu oraz limity konta i hosta. |
+| `on_pass` | kohorta lub wzorzec · brak · s | Czekaj na PASS pasującej integracji. |
+| `at` | HH:MM · brak · s | Najbliższa wskazana godzina czasu lokalnego dla zlecenia. |
+| `start_after` | znacznik ISO · brak · s | Najwcześniejszy start pomiaru. |
+| `results` | ścieżka względna · brak · s | Katalog wyników perf do skopiowania na Maca. |
+| `artifacts` | lista · [] · s | Katalogi buildów do przesłania z Maca przed pomiarem. |
+| `reuse_worktree` | ID zadania · brak · s | Użyj worktree zamkniętego zadania na jego hoście. |
+| `base_task` | ID zadania · brak · s | Użyj wyniku lub gałęzi wskazanego zadania jako bazy. |
 
 ## Warstwy i instancja
 
@@ -79,6 +88,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `repos[].worktree` | path · `<worktree_root>/<repo>-<task>` · s | Docelowy checkout różny od path; fallback worktree_root. |
 | `repos[].setup` | list of strings · none · s | Setup tego repo, fallback jego configu; MCP spec zabroniony. |
 | `repos[].base` | git ref · none · s | Ref Git lub task:<ID>, zamrażany do commitu przy starcie. |
+| `repos[].base_task` | ID zadania · brak · s | Wyznacz bazę jednego repozytorium z wyniku zadania. |
 | `repos[].branch` | string · none · s | Gałąź; brak oznacza detached. |
 | `review_of` | task ID or list · none · s | ID/lista recenzowanych zadań; inny agent/model, wspólny provider ostrzega. |
 | `review.mode` | `readonly-on-author` · własne worktree · s | Korzysta z worktree zatrzymanego lokalnego autora. Osobny raport i dowody są pod `cache`. Wymaga jednego `review_of`. |
