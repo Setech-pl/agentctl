@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AgentName } from './config.ts';
+import type { AgentName, GlobalConfig } from './config.ts';
+import { readTaskRecord, taskDir } from './taskstore.ts';
+import { sameMessage } from './paste-wrapper.ts';
 import { RealRunner, type ExecOptions, type ExecResult } from './runner.ts';
 import { insidePath } from './worktree-volume.ts';
 
@@ -27,12 +29,14 @@ export class CanaryRunner extends RealRunner {
   private sequence = 0;
   private readonly buffers = new Map<string, string>();
   readonly root: string;
+  private readonly config: GlobalConfig;
   private readonly session: string;
   private readonly slowMs: number;
-  constructor(root: string, session: string, slowMs: number) {
+  constructor(root: string, config: GlobalConfig, slowMs: number) {
     super();
     this.root = root;
-    this.session = session;
+    this.config = config;
+    this.session = config.session;
     this.slowMs = slowMs;
   }
 
@@ -98,7 +102,8 @@ export class CanaryRunner extends RealRunner {
         if (!pane) return absent('can\'t find pane');
         if (args.includes('-J') && pane.ack) { pane.ack = false; return ok(`⏺ Fixture delivered\n• Fixture delivered\n${busy}`); }
         const agent = pane.screen.includes('›') ? 'codex' : 'claude';
-        const draft = pane.paste ? (agent === 'claude' && pane.paste.includes('\n') ? `[Pasted text #1 +${pane.paste.split('\n').length - 1} lines]` : pane.paste) : undefined;
+        let draft = pane.paste;
+        if (draft?.includes('\n')) draft = agent === 'claude' ? `[Pasted text #1 +${draft.split('\n').length - 1} lines]` : `[Pasted Content ${draft.length} chars]`;
         return ok(draft ? composer(agent, draft) : pane.screen);
       }
       case 'load-buffer': this.buffers.set(buffer, opts.input ?? ''); return ok();
@@ -107,7 +112,16 @@ export class CanaryRunner extends RealRunner {
         if (!pane) return absent('can\'t find pane');
         const key = args.at(-1) ?? '';
         if (key === 'Enter' && pane.paste) {
-          for (const [name, p] of this.panes) if (p === pane) this.delivered.add(name);
+          const window = [...this.panes].find(([, current]) => current === pane)?.[0];
+          if (window) {
+            this.delivered.add(window);
+            const record = readTaskRecord(this.config, window);
+            if (record?.deliveryId && record.pendingPrompt && sameMessage(pane.paste, record.pendingPrompt, record.agent)) {
+              fs.writeFileSync(this.permitted(path.join(taskDir(this.config, window), 'delivery-evidence.json')), JSON.stringify({
+                accepted: true, deliveryId: record.deliveryId, at: new Date(this.now()).toISOString(),
+              }));
+            }
+          }
           delete pane.paste;
           pane.ack = true;
         } else if (args.includes('-l') && /(?:^|\W)codex(?:\W|$)/.test(key)) pane.screen = idle('codex');

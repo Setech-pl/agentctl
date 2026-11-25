@@ -1406,6 +1406,12 @@ agentctl upgrade-health [options]
 | `--expect <version>` | expected candidate version | required |
 | `--since <ms>` | earliest valid watch launch time in Unix milliseconds | required |
 
+Examples:
+
+```sh
+agentctl upgrade-health --expect 0.27.2 --since "$watch_start_ms"  # invoked by agentctl-update
+```
+
 ## agentctl canary
 
 Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux.
@@ -1418,6 +1424,12 @@ agentctl canary [options]
 |---|---|---|
 | `--from <home>` | source AGENTCTL_HOME | required |
 | `--minutes <minutes>` | minimum number of minutes to observe | default `30` |
+
+Examples:
+
+```sh
+agentctl canary --from "$PROD_AGENTCTL_HOME" --minutes 30
+```
 
 ## agentctl watch
 

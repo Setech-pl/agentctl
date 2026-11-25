@@ -48,6 +48,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
 
+## [0.27.2] - 2026-11-25
+
+- Production-shape release checks, shadow replay, and stable-update rollback. [Release notes](docs/release-notes/0.27.2.en.md) · [Informacje o wydaniu](docs/release-notes/0.27.2.pl.md).
+
 ## [0.27.1] - 2026-11-24
 
 Field fixes for launch recovery and operator reads / Poprawki wznowień i widoków operacyjnych. [Release notes (EN)](docs/release-notes/0.27.1.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.1.pl.md).

@@ -54,6 +54,7 @@ describe('the one door of every agent window (FIX3 N1)', () => {
 
 /** The only functions that may create a window/session or start a provider CLI, each with the reason. Everything else goes through openAgentWindow. */
 const EXEMPT: { file: string; fn: string; why: string }[] = [
+  { file: 'src/core/canary-runner.ts', fn: 'tmux', why: 'interprets the fake tmux commands in memory; it never executes tmux or a provider' },
   { file: 'src/core/window-guard.ts', fn: 'openAgentWindow', why: 'the door itself' },
   { file: 'src/core/tmux.ts', fn: 'newSession', why: 'tmux primitive called by the door' },
   { file: 'src/core/tmux.ts', fn: 'newWindow', why: 'tmux primitive called by the door' },

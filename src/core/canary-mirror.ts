@@ -25,7 +25,7 @@ function screenFor(state: unknown, codex: boolean): string | undefined {
   if (state === 'background') return codex ? '1 background terminal running' : '1 shell still running';
   if (state === 'needs-trust') return codex ? 'Trust this folder?' : 'Yes, I trust this folder';
   if (state === 'needs-input') return codex ? 'Waiting for your answer' : 'Enter to select · Esc to cancel';
-  if (state === 'limited') return 'Usage limit reached';
+  if (state === 'limited') return 'Error: [provider.rate_limit] Canary fixture';
   if (state === 'overloaded') return '■ Overloaded';
   return undefined;
 }
@@ -71,7 +71,7 @@ export async function mirrorCanary(world: CanaryWorld, source: GlobalConfig) {
   for (const {record, archived} of combined) {
     const task = idFor(record.task), window = task.toLowerCase();
     const row = rows.get(record.task);
-    const agent = record.agent === 'codex' ? 'codex' : 'claude';
+    const agent = row?.state === 'limited' ? 'kimi' : record.agent === 'codex' ? 'codex' : 'claude';
     const repos = record.repos.map(r => {
       const repo = mapPath(r.path, 'repo');
       const external = Boolean(r.worktreeMount ?? inferredWorktreeMount(r.worktree));
@@ -79,7 +79,7 @@ export async function mirrorCanary(world: CanaryWorld, source: GlobalConfig) {
       if (!world.runner.worktrees.has(worktree) && repo !== worktree) world.runner.addWorktree(repo, worktree);
       return {path: repo, worktree, ...(external ? {worktreeMount: world.volume} : {})};
     });
-    const model = agent === 'codex' ? 'gpt-5.5' : 'opus';
+    const model = agent === 'codex' ? 'gpt-5.5' : agent === 'kimi' ? 'kimi-k2.6' : 'opus';
     const clean: TaskRecord = {
       task, window, session: world.config.session, agent, model, effort: record.effort, repos,
       links: [], env: {}, requested: {agent, model, effort: 'high'},
@@ -95,7 +95,7 @@ export async function mirrorCanary(world: CanaryWorld, source: GlobalConfig) {
     const verdict = typeof row?.verdict === 'string' ? dependencyVerdict(`Verdict: ${row.verdict}`) : undefined;
     if (!archived && !record.closed && !record.cancelled && row?.window === 'alive') {
       clean.windowId = world.runner.addPane(window, agent, screenFor(row.state, agent === 'codex')).id;
-      occupied[agent]++;
+      if (agent !== 'kimi') occupied[agent]++;
     }
     seedCanaryRecord(world, clean, archived, verdict ?? (row?.state === 'report-ready' ? 'BLOCKED' : undefined), safeNumber(row?.reportMtime));
   }

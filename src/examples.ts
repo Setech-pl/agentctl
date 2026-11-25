@@ -83,6 +83,8 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
     'agentctl cancel TASK-43                             # a queued task: taken out of the queue',
     'agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N',
   ],
+  canary: ['agentctl canary --from "$PROD_AGENTCTL_HOME" --minutes 30'],
+  'upgrade-health': ['agentctl upgrade-health --expect 0.27.2 --since "$watch_start_ms"  # invoked by agentctl-update'],
   watch: ['agentctl watch --tmux                  # in window "watch" of the agentctl session', 'agentctl watch                         # in this terminal'],
   board: ['agentctl board --tmux                  # in window "board" of the agentctl session', 'agentctl board'],
   manager: ['agentctl manager                       # start the session you open from the Claude app on the phone', 'agentctl manager --project ~/src/sample-app --model sonnet --effort medium', 'agentctl manager --url                 # the address / QR code, if the window shows them'],

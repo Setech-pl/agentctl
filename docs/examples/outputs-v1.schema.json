@@ -251,5 +251,8 @@
     "checks",
     "notes"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x_": {}
+  }
 }

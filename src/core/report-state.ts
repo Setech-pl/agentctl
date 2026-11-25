@@ -31,15 +31,16 @@ function digestReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick
   const hit = reportDigests.get(file);
   if (version !== undefined && hit?.version === version) return hit.digest;
   const text = config.cache ? readReportText({ cache: config.cache }, record, file) : fs.readFileSync(file, 'utf8');
-  let fence: string | null = null, lastDirective = '';
+  let fence: string | null = null, lastDirective = '', hasEndMarker = false;
   const declaredAttempts = new Set<string>();
   for (const line of text.split('\n')) {
     const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
     if (marker) { if (!fence) fence = marker; else if (marker[0] === fence[0] && marker.length >= fence.length) fence = null; if (line.trim()) lastDirective = ''; continue; }
     if (line.trim()) lastDirective = fence ? '' : line.trim();
+    if (!fence && lastDirective === REPORT_END) hasEndMarker = true;
     if (!fence) { const attempt = /^<!-- agentctl:attempt ([^>]+) -->$/.exec(line.trim())?.[1]; if (attempt) declaredAttempts.add(attempt); }
   }
-  const digest: ReportDigest = { signature: createHash('sha256').update(text).digest('hex'), lastDirective, declaredAttempts, structured: !!dependencyVerdict(text, !!record.reviewOf) && parseOutputs(text, {review: !!record.reviewOf}).outputs_valid };
+  const digest: ReportDigest = { signature: createHash('sha256').update(text).digest('hex'), lastDirective, declaredAttempts, structured: !hasEndMarker && !!dependencyVerdict(text, !!record.reviewOf) && parseOutputs(text, {review: !!record.reviewOf}).outputs_valid };
   if (reportDigests.size > 5000) reportDigests.delete(reportDigests.keys().next().value!);
   if (version !== undefined) reportDigests.set(file, { version, digest });
   else reportDigests.delete(file);

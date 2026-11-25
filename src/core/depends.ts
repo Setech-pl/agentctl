@@ -75,7 +75,7 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
       const verdicts = e.after.flatMap(task => {
         const allowed = e.afterVerdicts?.[task] ?? DEFAULT_AFTER_VERDICTS;
         const row = byTask.get(task);
-        const terminalWithoutVerdict = !row?.verdict && (row?.closed || row?.cancelled || row?.archived);
+        const terminalWithoutVerdict = !row?.cancelled && !row?.verdict && (row?.closed || row?.archived);
         return (terminalWithoutVerdict || hasReport(row)) && !verdictPending(row, clock) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
       });
       if (verdicts.length) b.verdicts = verdicts;

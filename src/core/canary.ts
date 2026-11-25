@@ -57,7 +57,7 @@ export function createCanaryWorld(root: string, out: (line: string) => void, slo
   const home = path.join(root, 'home'), repo = path.join(root, 'repo'), volume = path.join(root, 'volumes', 'Crucial');
   const session = 'agentctl-canary';
   const chatQuotas = Object.fromEntries(chats.map((chat, i) => [chat, i % 2 ? {claude: 2} : {codex: 2}]));
-  const providers = {claude: 10, codex: 6, kimi: 1};
+  const providers = {claude: 12, codex: 6, kimi: 1};
   fs.mkdirSync(home, {recursive: true, mode: 0o700});
   fs.mkdirSync(path.join(repo, '.git'), {recursive: true});
   fs.mkdirSync(volume, {recursive: true});
@@ -77,7 +77,7 @@ export function createCanaryWorld(root: string, out: (line: string) => void, slo
     usage: {claude_dir: path.join(root, 'claude'), codex_dir: path.join(root, 'codex')},
   }), {mode: 0o600});
   const config = loadGlobalConfig(home);
-  const runner = new CanaryRunner(root, session, slowMs);
+  const runner = new CanaryRunner(root, config, slowMs);
   runner.addPane('watch', 'unknown');
   const ctx = new Context(runner, config, out);
   ctx.fetch = async () => { throw Error('Network is disabled in the release canary'); };
@@ -124,7 +124,7 @@ export function seedCanaryRecord(world: CanaryWorld, record: TaskRecord, archive
 
 function fixtureRecord(world: CanaryWorld, task: string, agent: AgentName = 'claude'): TaskRecord {
   const window = task.toLowerCase(), started = date(Date.UTC(2025, 10, 25, 12));
-  const model = agent === 'codex' ? 'gpt-5.5' : 'opus';
+  const model = agent === 'codex' ? 'gpt-5.5' : agent === 'kimi' ? 'kimi-k2.6' : 'opus';
   return { task, window, session: world.config.session, agent, model, effort: 'high',
     started, requested: {agent, model, effort: 'high'}, env: {}, links: [], repos: [],
     report: path.join(world.config.cache, window, 'report.md') };
@@ -145,9 +145,9 @@ async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) 
   if (scale) seedCanaryWall(world, Array.from({length: wallCount}, (_, i) => date(Date.UTC(2025, 10, 25, 12, 0, i))));
   for (let i = 0; i < count; i++) {
     const task = `${ID}-ROW-${i}`, archived = i >= (scale ? 16 : 10) && i % 5 !== 0;
-    const record = fixtureRecord(world, task, i === 6 ? 'codex' : 'claude');
+    const record = fixtureRecord(world, task, i === 6 ? 'codex' : i === 4 ? 'kimi' : 'claude');
     if (i < 6) {
-      const screen = ['Working (esc to interrupt)', '❯ ', 'Quick safety check', 'Enter to select · Esc to cancel', 'Usage limit reached', 'Update available! Run: brew upgrade claude-code'][i];
+      const screen = ['Working (esc to interrupt)', '❯ ', 'Quick safety check', 'Enter to select · Esc to cancel', 'Error: [provider.rate_limit] Canary fixture', 'Update available! Run: brew upgrade claude-code'][i];
       record.windowId = runner.addPane(record.window, record.agent, screen).id;
     } else if (i === 6) {
       record.windowId = runner.addPane(record.window, 'codex', 'Working (esc to interrupt)').id;
@@ -159,6 +159,8 @@ async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) 
       record.windowId = runner.addPane(record.window, record.agent, '⏺ Fixture\n⎿ API Error: 529 Overloaded').id;
     } else if (scale && i === 13) {
       record.supersededBy = `${ID}-ROW-1`;
+    } else if (scale && i === 14) {
+      record.host = 'offline-fixture';
     } else if (i >= 9) {
       if (i % 7 === 0) record.cancelled = true;
       else record.closed = true;
@@ -252,7 +254,7 @@ const readSnapshot = (config: GlobalConfig): Snapshot => JSON.parse(fs.readFileS
 export interface CanaryMetrics {
   ticks: number; tasks: number; worktreeDirs: number; queued: number; wall: number;
   started: number; maxStartTicks: number; maxSnapshotAgeMs: number; maxMcpMs: number;
-  maxSkipped: number; peakLoad1: number; minLoad1: number;
+  maxSkipped: number; peakLoad1: number; minLoad1: number; states: string[];
 }
 
 export async function exerciseCanary(world: CanaryWorld, opts: {
@@ -265,7 +267,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   const begin = runner.now();
   const metrics: CanaryMetrics = {ticks: 0, tasks: shape.count + mirrored, worktreeDirs: runner.worktrees.size,
     queued: shape.prepared.length, wall: shape.wallCount, started: 0, maxStartTicks: 0, maxSnapshotAgeMs: 0, maxMcpMs: 0,
-    maxSkipped: 0, peakLoad1: 0, minLoad1: Infinity};
+    maxSkipped: 0, peakLoad1: 0, minLoad1: Infinity, states: []};
   const readyAt = new Map<string, number>(), completed = new Set<string>();
   const stop = new AbortController();
   const signal = opts.signal ? AbortSignal.any([stop.signal, opts.signal]) : stop.signal;
@@ -305,9 +307,11 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     await memory.queue.idle();
     const snap = readSnapshot(config);
     const age = runner.now() - snap.at;
-    if (previousSnapshot !== undefined) assert.ok(snap.at - previousSnapshot < 60_000, 'watch publication gap reached 60 seconds');
+    const gap = previousSnapshot === undefined ? 0 : snap.at - previousSnapshot;
+    assert.ok(gap < 60_000, `watch publication gap: ${gap} ms`);
     previousSnapshot = snap.at;
-    metrics.maxSnapshotAgeMs = Math.max(metrics.maxSnapshotAgeMs, age);
+    metrics.maxSnapshotAgeMs = Math.max(metrics.maxSnapshotAgeMs, age, gap);
+    metrics.states = [...new Set([...metrics.states, ...snap.rows.map(row => row.state)])].sort();
     assert.ok(age < 60_000 && !snap.degraded, `snapshot age ${age} ms, degraded=${snap.degraded ?? 'no'}`);
     assert.ok(snap.rows.length >= metrics.tasks, `partial watch snapshot: ${snap.rows.length} < ${metrics.tasks}`);
     const heartbeat = JSON.parse(fs.readFileSync(watchHeartbeatPath(config), 'utf8')) as {consecutive?: Record<string, number>};
@@ -360,6 +364,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
       assert.ok(fs.existsSync(dirtyPath), 'confirmed GC removed a data-carrying worktree');
       assert.ok(!fs.existsSync(cleanPath), 'confirmed GC did not remove its safe candidate');
       assert.ok(runner.delivered.has(sendTask.toLowerCase()), 'queued send did not reach the idle pane');
+      assert.equal(readTaskRecord(config, sendTask.toLowerCase())?.promptDelivery, 'sent', 'queued send remained unconfirmed');
       requests = [];
     }
     for (const probe of shape.prepared) {
@@ -367,7 +372,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
       const admissible = readyAt.get(probe.task);
       const launched = runner.launches.get(probe.task.toLowerCase());
       if (launched === undefined) {
-        assert.ok(admissible === undefined || tick - admissible < 1, `${probe.task}: no start in two admissible ticks`);
+        assert.ok(admissible === undefined || tick - admissible < 1, `${probe.task}: no start in two admissible ticks (${snap.queue.find(entry => entry.task === probe.task)?.startCondition ?? 'no queue reason'})`);
         continue;
       }
       if (admissible === undefined) assert.fail(`${probe.task}: started before admissible`);
@@ -404,6 +409,10 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   assert.equal(metrics.started, shape.prepared.length, `queued tasks remained: ${readQueue(config).map(entry => entry.task).join(', ')}`);
   assert.ok(metrics.maxStartTicks <= 2, 'queue start exceeded two ticks');
   assert.ok(runner.launches.has(extraTask.toLowerCase()) || opts.mirror && readQueue(config).some(entry => entry.task === extraTask && entry.status === 'queued'), `confirmed queue order never started: ${JSON.stringify(readSnapshot(config).queue.find(entry => entry.task === extraTask))}`);
+  if (opts.scale) {
+    const expected = ['background', 'cancelled', 'closed', 'dead', 'host-unreachable', 'limited', 'needs-attention', 'needs-input', 'needs-trust', 'orphan', 'overloaded', 'report-ready', 'superseded', 'waiting', 'working'];
+    assert.deepEqual(metrics.states, expected, 'production fixture did not exercise every task state');
+  }
   if (!opts.load) metrics.minLoad1 = 0;
   return metrics;
 }
