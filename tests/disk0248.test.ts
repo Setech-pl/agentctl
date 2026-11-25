@@ -1,3 +1,4 @@
+import { defaultDeps } from '../src/cli.ts';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -19,7 +20,7 @@ import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, runCli, seedTask, useScr
 import { collectStatus } from '../src/core/status.ts';
 import { WatchMemory, watchTick } from '../src/core/watch.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
-import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { mcpRequestDir, readMcpRequests, recordMcpRequest } from '../src/core/mcp-requests.ts';
 import { readThread, readWall } from '../src/core/wall.ts';
 
 const scratch = useScratch();
@@ -519,4 +520,48 @@ it('DISK0248-LOCK: interrupted checkout clears only its initializing locks and p
   await memory.idle();
   assert.ok(fs.existsSync(path.join(wt, '.git')));
   assert.ok(fs.existsSync(path.join(unrelated, 'locked')));
+});
+
+it('HOTFIX0263-WATCH: stalled stage exits and the restarted watcher reconciles request and start', async () => {
+  const w = world('hotfix-watch');
+  const item = w.spec('INTERRUPTED');
+  await newTasks(w.ctx, [item.spec], { noAgent: true });
+  await registerDirectStart(w.ctx, [item], { noAgent: true, reuse: true });
+  const entry = readQueue(w.config)[0]!;
+  const { saveEntry } = await import('../src/core/queue.ts');
+  await saveEntry(w.ctx, { ...entry, status: 'starting', startingPid: 99_999_999 });
+  const { request } = await recordMcpRequest(w.ctx, { tool: 'send', args: {}, scope: null, key: 'old', label: 'interrupted' });
+  fs.writeFileSync(path.join(mcpRequestDir(w.config), `${request.id}.json`), JSON.stringify({ ...request, status: 'applying' }));
+
+  assert.match(defaultDeps().watchCommand(), /watch --supervise$/);
+  const { superviseWatch } = await import('../src/core/watch-supervisor.ts');
+  const controller = new AbortController();
+  const memory = new WatchMemory();
+  const log = path.join(w.root, 'watch-test.log');
+  const step = memory.steps.run(w.ctx, log, 'fixture', () => new Promise(() => {}), {
+    now: () => w.runner.now(), schedule(fn) { queueMicrotask(fn); return () => {}; },
+  });
+  await step;
+  let runs = 0;
+  await superviseWatch(w.ctx, async () => {
+    if (++runs === 1) {
+      for (let tick = 0; tick < 5; tick++) memory.steps.check(w.ctx, log);
+      await w.runner.sleep(600_000);
+      try { memory.steps.check(w.ctx, log); } catch (error) { return String(error); }
+      assert.fail('stalled watch did not exit');
+    }
+    const next = new QueueMemory();
+    await queueTick(w.ctx, next, w.notifier);
+    await next.idle();
+    controller.abort();
+    return 'stopped';
+  }, controller.signal);
+  assert.equal(runs, 2);
+  assert.match(fs.readFileSync(log, 'utf8'), /Watch exiting: stage "fixture" stalled/);
+  assert.deepEqual(readQueue(w.config), []);
+  assert.ok(fs.existsSync(path.join(item.spec.repos[0]!.worktree, '.git')));
+  assert.match(readMcpRequests(w.config)[0]?.error ?? '', /preview again/);
+  const events = readJournal(w.config);
+  assert.equal(events.filter(e => e.kind === 'watch-stalled').length, 1);
+  for (const kind of ['watch-resumed', 'mcp-failed', 'queue-retry', 'queue-start']) assert.ok(events.some(e => e.kind === kind), kind);
 });

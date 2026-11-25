@@ -38,6 +38,7 @@ import { recordJournal } from './journal.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { writeSetupProgress } from './setup-progress.ts';
 import type { SetupProgress } from './setup-progress.ts';
+import { withCommandStage } from './command-stage.ts';
 
 const guardRequest = (spec: ResolvedSpec) => ({ host: spec.host, task: spec.task, window: spec.window, report: spec.report, reportAlt: spec.reportAlt, repos: spec.repos, reviewOf: spec.reviewOf, reviewOfAll: spec.reviewOfAll, reviewMode: spec.reviewMode, autoReview: spec.autoReview });
 
@@ -69,9 +70,9 @@ export interface NewResult {
   switchedBy?: 'flag' | 'limit';
 }
 
-async function requireTool(ctx: Context, tool: string, args: string[], hint?: string): Promise<string> {
-  const r = await ctx.runner.exec(tool, args, { readOnly: true });
-  if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, hint);
+async function requireTool(ctx: Context, tool: string, args: string[], hint?: string, signal?: AbortSignal): Promise<string> {
+  const r = await ctx.runner.exec(tool, args, { readOnly: true, timeoutMs: 5000, signal });
+  if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working${/ETIMEDOUT/i.test(r.stderr) ? ' (ETIMEDOUT after 5s)' : ''}`, hint);
   return r.stdout.trim().split('\n')[0] || 'unknown';
 }
 
@@ -108,7 +109,7 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
       const setup = { repo: name, repoIndex: repoIndex + 1, repoCount: todo.length, command: label, commandIndex: i + 1, commandCount: commands.length, log: logFile };
       if (track) await recordJournal(ctx, { kind: 'setup-started', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup, text: `${spec.task}: setup rozpoczęty w ${name} (repo ${repoIndex + 1}/${todo.length}, command ${i + 1}/${commands.length}): ${label}; log: ${logFile}` });
       const install = async () => {
-        const r = await (spec.host ? ctx.hosts.forHost(spec.host) : runner).exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: ctx.config.git.timeoutS * 1000, async: true });
+        const r = await (spec.host ? ctx.hosts.forHost(spec.host) : runner).exec('sh', label === command ? ['-c', command] : ['-s'], { cwd: repo.worktree, ...(label === command ? {} : { input: command }), timeoutMs: config.setupTimeoutS * 1000, async: true });
         if (runner.dryRun) return;
         const output = redact(`${r.stdout}${r.stderr}`);
         await runner.appendFile(logFile, `[${name}] $ ${label}\n${output}${output.endsWith('\n') || output === '' ? '' : '\n'}[exit ${r.code}]\n\n`);
@@ -116,7 +117,7 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
           if (track) await recordJournal(ctx, { kind: 'setup-failed', task: spec.task, ...(spec.owner ? {owner: spec.owner} : {}), setup: { ...setup, exitCode: r.code }, text: `${spec.task}: setup nie powiódł się w ${name} (exit ${r.code}): ${label}; log: ${logFile}; worktree zostaje` });
           const tail = output.trimEnd().split('\n').slice(-SETUP_TAIL_LINES).join('\n');
           throw new AgentctlError(
-            `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` after ${config.git.timeoutS}s (git.timeout_s; check disk/I/O or increase the timeout)` : ''} (exit ${r.code}): ${label}\n${tail}`,
+            `${spec.task}: setup command failed in ${name}${/ETIMEDOUT/i.test(r.stderr) ? ` within setup.timeout_s (${config.setupTimeoutS}s; check disk/I/O)` : ''} (exit ${r.code}): ${label}\n${tail}`,
             `Full output: ${logFile}. The worktree ${repo.worktree} was kept and no window was started; fix the cause and run "agentctl new --reuse" again.`,
           );
         }
@@ -144,8 +145,12 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
   if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
+  // A person answering a capacity question must never own the global lock.
+  const interactive = Boolean(ctx.confirm && (!opts.noSwitch || opts.overflow));
+  const planned = interactive ? await planBatch(ctx, requested, opts) : requested;
+  const admissionOptions = interactive ? { ...opts, agent: undefined, noSwitch: true, overflow: undefined } : opts;
   const admission = await withStartLock(ctx, async () => {
-    const specs = await planBatch(ctx, requested, opts);
+    const specs = await planBatch(ctx, planned, admissionOptions);
     for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
     for (const spec of specs) {const hold = providerHolds(ctx.config, ctx.runner.now())[spec.agent]; if (hold) throw new AgentctlError(`provider hold: ${providerHoldText(spec.agent, hold)}`, 'Queue the task or wait for the provider reset.');}
     for (const spec of specs) { const held = peakHold(ctx.config, spec, ctx.runner.now()); if (held) throw new AgentctlError(held, 'Add this task to the queue; it will start after peak.'); }
@@ -156,7 +161,7 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       if (held) throw new AgentctlError(held, 'Free disk space before starting setup.');
     }
     return { specs, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) };
-  });
+  }, requested.map(spec => spec.task).join(', '));
   try { return await startTasks(ctx, admission.specs, opts, true); }
   finally { await releaseStarts(ctx, admission.ids); }
 }
@@ -166,8 +171,8 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
 
   // Tools needed by the orders as written; the provider may change below, so check both agents the batch could end on.
   if (!runner.dryRun && requested.some(s => !s.host)) {
-    if (!opts.noAgent) await requireTool(ctx, 'tmux', ['-V'], INSTALL_HINTS.tmux);
-    await requireTool(ctx, 'git', ['--version'], INSTALL_HINTS.git);
+    if (!opts.noAgent) await requireTool(ctx, 'tmux', ['-V'], INSTALL_HINTS.tmux, opts.signal);
+    await requireTool(ctx, 'git', ['--version'], INSTALL_HINTS.git, opts.signal);
   }
   const specs = admitted ? requested : await planBatch(ctx, requested, opts);
   for (const spec of specs.filter(s => !s.host)) checkLinkTargets(spec.links.filter(l => !spec.repos.some(r => l.to === r.worktree || l.to.startsWith(`${r.worktree}/`))), spec.task);
@@ -179,14 +184,14 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   }
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
-    for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);
+    for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent], opts.signal);
   }
 
   const results: NewResult[] = [];
   const prepared = new Map<string, ResolvedSpec['repos']>();
   let sessionUp = await tmux.hasSession();
   for (const [index, original] of specs.entries()) {
-    let spec = original.host ? await prepareRemoteTask(ctx, original, opts.reuse) : original;
+    let spec = original.host ? await withCommandStage(config.git.timeoutS * 1000, opts.signal, () => prepareRemoteTask(ctx, original, opts.reuse)) : original;
     if (spec.reviewMode) {
       const repos = await readonlyReviewRepos(ctx, spec);
       const evidence = readonlyReviewEvidence(ctx, spec.window);
@@ -216,18 +221,21 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     // 1. worktrees
     await track?.({ phase: 'worktree' });
     try {
-      for (const repo of spec.host || spec.reviewMode ? [] : spec.repos) {
-        if (!runner.dryRun) assertWorktreeVolumes([repo], spec.task);
-        if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
-        else {
-          await addWorktree(runner, repo, config.git.timeoutS);
-          ctx.info(`${spec.task}: worktree ${repo.worktree}`);
+      await withCommandStage(config.git.timeoutS * 1000, opts.signal, async () => {
+        for (const repo of spec.host || spec.reviewMode ? [] : spec.repos) {
+          if (!runner.dryRun) assertWorktreeVolumes([repo], spec.task);
+          if (opts.reuse && fs.existsSync(repo.worktree)) ctx.info(`${spec.task}: reusing worktree ${repo.worktree}`);
+          else {
+            await addWorktree(runner, repo, config.git.timeoutS);
+            ctx.info(`${spec.task}: worktree ${repo.worktree}`);
+          }
+          if (spec.mergeBaseCheck === 'candidate') await assertCandidateCheckout(ctx, spec.task, repo);
         }
-        if (spec.mergeBaseCheck === 'candidate') await assertCandidateCheckout(ctx, spec.task, repo);
-      }
-      if (spec.readOnly) await protectReadOnly(ctx, spec);
+        if (spec.readOnly) await protectReadOnly(ctx, spec);
+      });
       // 2. setup commands, before links because an install may wipe node_modules.
-      if (!spec.reviewMode) await runSetup(ctx, spec, prepared, track);
+      if (!spec.reviewMode) await withCommandStage(config.setupTimeoutS * 1000, opts.signal, () => runSetup(ctx, spec, prepared, track));
+      if (opts.signal?.aborted) throw new AgentctlError(`${spec.task}: start interrupted`);
     } catch (error) {
       const missing = error instanceof WorktreeVolumeError ? error.mount : spec.host ? undefined : missingWorktreeVolume(spec.repos);
       if (missing) throw new WorktreeVolumeError(missing, spec.task);
@@ -286,7 +294,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
       if (spec.host) await ctx.hosts.trackHost(spec.host);
       await queuePrompt(ctx, record, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext), 'launching');
-    });
+    }, spec.task);
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 

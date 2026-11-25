@@ -173,6 +173,8 @@ export interface GlobalConfig extends Layer {
   guideLang: 'en' | 'pl';
   disk: { minFreeStartGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
+  startLockStaleS: number;
+  setupTimeoutS: number;
   gc: { afterIntegration: 'off' | 'propose' };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
@@ -381,7 +383,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'close', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'wall', 'hosts', 'quotas'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'start_lock_stale_s', 'wall', 'hosts', 'quotas'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -565,7 +567,7 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   if (report) layer.report = report;
   if (reports.length > 1) layer.reportAlt = reports.slice(1);
   if (isObject(obj.setup)) {
-    checkKeys(obj.setup, ['commands', 'node_modules'], `${where}.setup`, p);
+    checkKeys(obj.setup, where === 'config' ? ['commands', 'node_modules', 'timeout_s'] : ['commands', 'node_modules'], `${where}.setup`, p);
     if (obj.setup.commands !== undefined) layer.setup = parseSetup(obj.setup.commands, `${where}.setup.commands`, p);
     layer.nodeModules = parseEnumValue(obj.setup.node_modules, ['clone', 'off'] as const, `${where}.setup.node_modules`, p);
   } else if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
@@ -1341,6 +1343,14 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   const hosts = parseHosts(raw.hosts, p);
   const quotas = parseChatQuotas(raw.quotas, p);
+  const positiveSeconds = (value: unknown, key: string, fallback: number): number => {
+    if (value === undefined) return fallback;
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+    p.add(`config.${key} must be positive`);
+    return fallback;
+  };
+  const startLockStaleS = positiveSeconds(raw.start_lock_stale_s, 'start_lock_stale_s', 180);
+  const setupTimeoutS = positiveSeconds(isObject(raw.setup) ? raw.setup.timeout_s : undefined, 'setup.timeout_s', 900);
   const gc: GlobalConfig['gc'] = { afterIntegration: 'propose' };
   if (raw.gc !== undefined) {
     if (!isObject(raw.gc)) p.add('config.gc must be a mapping');
@@ -1356,7 +1366,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, wall, hosts, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS, setupTimeoutS, wall, hosts, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return config;

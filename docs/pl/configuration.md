@@ -277,7 +277,9 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `disk.workers` | `2` | Wspólny limit workerów pomiarowych 1–8. |
 | `disk.measurement_timeout_s` | `600` | Deadline pomiaru; błąd zachowuje poprzednią wartość. |
 | `git` | mapping | Limity czasu startu. |
-| `git.timeout_s` | `600` | Timeout worktree add i każdego setup. |
+| `git.timeout_s` | `600` | Dodatni limit czasu etapu checkoutu Git w sekundach. |
+| `start_lock_stale_s` | `180` | Odzyskuje starszą blokadę startu, jeśli proces właściciela zniknął lub pole właściciela jest puste. Wartość w sekundach. |
+| `setup.timeout_s` | `900` | Łączny limit setupu zadania w sekundach. Ustaw go w globalnej mapie `setup`. Dotychczasowy zapis listy poleceń nadal działa. |
 | `gc` | mapowanie | Ustawienia sprzątania po integracji. |
 | `gc.after_integration` | `propose` | `propose` tworzy plan GC z identyfikatorem żądania po przesunięciu lokalnego `main`/`master` i przekazuje wiadomość WALL każdemu czatowi będącemu właścicielem zadań. `off` wyłącza propozycje. |
 | `mcp.client` | — | Opcjonalny wspólny sufiks kursora; domyślnie sesje niezależne. |

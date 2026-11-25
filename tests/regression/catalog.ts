@@ -26,6 +26,9 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOTFIX0263-START', fixedIn: '0.26.1', symptom: 'Hung checkout or setup retained a setup slot and delayed unrelated queued tasks.', scenarios: [s('queue.test.ts', '^HOTFIX0263-START:')] },
+  { id: 'HOTFIX0263-LOCK', fixedIn: '0.26.1', symptom: 'An old admission lock with no live owner kept starts from proceeding.', scenarios: [s('queue.test.ts', '^HOTFIX0263-LOCK:')] },
+  { id: 'HOTFIX0263-WATCH', fixedIn: '0.26.1', symptom: 'A stalled watch stayed down or left interrupted starts in the failed queue.', scenarios: [s('disk0248.test.ts', '^HOTFIX0263-WATCH:')] },
   { id: 'FLOW-GC', fixedIn: '0.26.0', symptom: 'Integration left closed worktrees for chats to find and scope manually before GC.', scenarios: [s('disk0248.test.ts', '^FLOW-GC:')] },
   { id: 'FLOW-FRESHNESS', fixedIn: '0.26.0', symptom: 'Reviews could start against outdated integration bases without a warning or candidate.', scenarios: [s('disk0248.test.ts', '^FLOW-FRESHNESS:')] },
   { id: 'FLOW-READONLY', fixedIn: '0.26.0', symptom: 'A review could not use the stopped author checkout with isolated evidence and Git hooks.', scenarios: [s('disk0248.test.ts', '^FLOW-READONLY:'), s('audit-0174.test.ts', '^W4 a stale resume plan')] },

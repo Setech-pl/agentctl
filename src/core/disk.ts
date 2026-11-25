@@ -349,9 +349,34 @@ export function taskDiskStartHold(config: Context['config'], host: string | unde
   return gb < config.disk.minFreeStartGb ? `wstrzymane: dysk [${host}] ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB` : undefined;
 }
 
-/** Fresh remote work_dir counters before any worktree/setup mutation. */
+/** Fresh local and remote filesystem counters before any worktree/setup mutation. */
 export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: (string | DiskWorktree)[]): Promise<string | undefined> {
-  if (!host) return diskStartHold(ctx.config, worktrees);
+  if (!host) {
+    const { config } = ctx;
+    const repos = worktrees.map(worktree => typeof worktree === 'string' ? { worktree } : worktree);
+    if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), worktreeMount: config.worktreeMount });
+    const missing = missingWorktreeVolume(repos);
+    if (missing) return `volume missing: ${missing}`;
+    if (config.disk.minFreeStartGb === 0) return undefined;
+    const targets = new Set([config.cache, config.stateDir, ...repos.map(repo => repo.worktree)]);
+    if (config.nodeModules === 'clone' || repos.some(repo => repo.nodeModules === 'clone')) targets.add(path.dirname(config.path));
+    const devices = new Set<number>();
+    for (const target of targets) {
+      const ancestor = existingAncestor(target);
+      const dev = fs.statSync(ancestor, { throwIfNoEntry: false })?.dev;
+      if (dev === undefined) return 'wstrzymane: dysk – nie można odczytać wolnego miejsca';
+      if (devices.has(dev)) continue;
+      devices.add(dev);
+      const { availableBytes } = await freeSpace(ctx, ancestor, fs.promises.statfs, FREE_SPACE_BUDGET_MS);
+      if (availableBytes === null) return 'wstrzymane: dysk – nie można odczytać wolnego miejsca';
+      const gb = availableBytes / 1024 ** 3;
+      if (gb < config.disk.minFreeStartGb) {
+        const mount = repos.find(repo => repo.worktree === target)?.worktreeMount ?? inferredWorktreeMount(target);
+        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
+      }
+    }
+    return undefined;
+  }
   const workDir = ctx.config.hosts[host]!.workDir;
   const mount = inferredWorktreeMount(workDir);
   if (ctx.config.disk.minFreeStartGb === 0 && !mount) return undefined;

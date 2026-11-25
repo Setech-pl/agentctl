@@ -10,6 +10,9 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| HOTFIX0263-START | Hung checkout or setup retained a setup slot and delayed unrelated queued tasks. | `tests/queue.test.ts` (`^HOTFIX0263-START:`) | 0.26.1 | fails on v0.26.0 (2 failing of 2) |
+| HOTFIX0263-LOCK | An old admission lock with no live owner kept starts from proceeding. | `tests/queue.test.ts` (`^HOTFIX0263-LOCK:`) | 0.26.1 | fails on v0.26.0 (1 failing of 1) |
+| HOTFIX0263-WATCH | A stalled watch stayed down or left interrupted starts in the failed queue. | `tests/disk0248.test.ts` (`^HOTFIX0263-WATCH:`) | 0.26.1 | fails on v0.26.0 (1 failing of 1) |
 | FLOW-GC | Integration left closed worktrees for chats to find and scope manually before GC. | `tests/disk0248.test.ts` (`^FLOW-GC:`) | 0.26.0 | fails on v0.25.3 (2 failing of 2) |
 | FLOW-FRESHNESS | Reviews could start against outdated integration bases without a warning or candidate. | `tests/disk0248.test.ts` (`^FLOW-FRESHNESS:`) | 0.26.0 | fails on v0.25.3 (2 failing of 2) |
 | FLOW-READONLY | A review could not use the stopped author checkout with isolated evidence and Git hooks. | `tests/disk0248.test.ts` (`^FLOW-READONLY:`)<br>`tests/audit-0174.test.ts` (`^W4 a stale resume plan`) | 0.26.0 | fails on v0.25.3 (1 failing of 2) |
