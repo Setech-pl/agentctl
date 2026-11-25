@@ -176,7 +176,7 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { minFreeStartGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { minFreeStartGb: number; minFreeStateGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
   gc: { afterIntegration: 'off' | 'propose' };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
@@ -1323,10 +1323,10 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { minFreeStartGb: 30, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const disk = { minFreeStartGb: 30, minFreeStateGb: 5, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { min_free_start_gb: 'minFreeStartGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', disk, { min_free_start_gb: 'minFreeStartGb', min_free_state_gb: 'minFreeStateGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];

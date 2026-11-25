@@ -1494,6 +1494,16 @@
       "UX0228: queued selection closes its cohort and manager selection has no implicit cohort"
     ]
   },
+  "W102-VOLUME": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W102-VOLUME: external checkout uses its own floor and close/GC keep data safe across volumes",
+      "W102-VOLUME: external checkout uses its own floor and close/GC keep data safe across volumes"
+    ]
+  },
   "W110-A": {
     "rev": "v0.27.1",
     "outcome": "FAILS",

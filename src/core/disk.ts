@@ -278,31 +278,49 @@ export async function refreshHostHealth(ctx: Context): Promise<void> {
   }
   finally { hostRefreshing.delete(ctx.config.path); }
 }
+interface StartVolume { target: string; floor: number; label: string }
+
+function stateVolumes(config: Context['config']): StartVolume[] {
+  return [...new Set([config.stateDir, config.cache])].map(target => ({target, floor: config.disk.minFreeStateGb, label: `state volume ${target}`}));
+}
+
+function startVolumeHold(volumes: StartVolume[], statfs = fs.statfsSync): string | undefined {
+  const checked = new Set<number>();
+  // If paths share a device, the strictest floor is sufficient.
+  for (const {target, floor, label} of volumes.sort((a, b) => b.floor - a.floor)) {
+    if (!floor) continue;
+    try {
+      const ancestor = existingAncestor(target);
+      const device = fs.statSync(ancestor).dev;
+      if (checked.has(device)) continue;
+      checked.add(device);
+      const stat = statfs(ancestor);
+      const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
+      if (!Number.isFinite(gb)) throw Error('invalid free-space sample');
+      if (gb < floor) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${floor} GB (${label})`;
+    } catch {
+      return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
+    }
+  }
+  return undefined;
+}
+
+export function worktreeVolumeLabel(repo: WorktreeVolume): string {
+  return repo.worktreeMount ?? inferredWorktreeMount(repo.worktree) ?? existingAncestor(repo.worktree);
+}
+
 /** Fresh cheap filesystem admission, independent of recursive worktree measurements. Unknown space fails closed. */
 export function diskStartHold(config: Context['config'], worktrees: (string | DiskWorktree)[] = [], statfs = fs.statfsSync): string | undefined {
   const repos = worktrees.map(worktree => typeof worktree === 'string' ? { worktree } : worktree);
   if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), ...(config.worktreeMount ? { worktreeMount: resolvePath(config.worktreeMount) } : {}) });
   const missing = missingWorktreeVolume(repos);
   if (missing) return `volume missing: ${missing}`;
-  const targets = new Set([config.cache, config.stateDir, ...repos.map(repo => repo.worktree)]);
-  if (config.nodeModules === 'clone' || repos.some(repo => repo.nodeModules === 'clone')) targets.add(path.dirname(config.path));
-  const devices = new Set<number>();
-  for (const target of targets) {
-    const ancestor = existingAncestor(target);
-    try {
-      const device = fs.statSync(ancestor).dev;
-      if (devices.has(device)) continue;
-      devices.add(device);
-      const stat = statfs(ancestor);
-      const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
-      if (gb < config.disk.minFreeStartGb) {
-        const external = repos.find(repo => repo.worktree === target);
-        const mount = external && (external.worktreeMount ?? inferredWorktreeMount(external.worktree));
-        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
-      }
-    } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
+  const volumes = repos.map(repo => ({target: repo.worktree, floor: config.disk.minFreeStartGb, label: worktreeVolumeLabel(repo)}));
+  if (config.nodeModules === 'clone' || repos.some(repo => repo.nodeModules === 'clone')) {
+    const target = path.dirname(config.path);
+    volumes.push({target, floor: config.disk.minFreeStartGb, label: `node_modules store volume ${target}`});
   }
-  return undefined;
+  return startVolumeHold([...volumes, ...stateVolumes(config)], statfs);
 }
 
 export function worktreeCostEstimates(ctx: Context, repos: {path: string}[], opts: {persistedOnly?: boolean} = {}) {
@@ -342,7 +360,8 @@ export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): 
 /** Cached host admission for synchronous queue previews; never stat a remote path locally. */
 export function taskDiskStartHold(config: Context['config'], host: string | undefined, worktrees: (string | DiskWorktree)[], now = Date.now()): string | undefined {
   if (!host) return diskStartHold(config, worktrees);
-  if (config.disk.minFreeStartGb === 0) return undefined;
+  const local = startVolumeHold(stateVolumes(config));
+  if (local || config.disk.minFreeStartGb === 0) return local;
   const health = readHostsCache(process.env, now, 60_000)?.hosts.find(h => h.name === host);
   if (!health || health.state !== 'reachable' || health.disk?.workDir !== config.hosts[host]?.workDir) return `wstrzymane: dysk [${host}] – brak świeżego odczytu work_dir`;
   const gb = health.disk.freeKb / 1024 ** 2;
@@ -352,6 +371,8 @@ export function taskDiskStartHold(config: Context['config'], host: string | unde
 /** Fresh remote work_dir counters before any worktree/setup mutation. */
 export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: (string | DiskWorktree)[]): Promise<string | undefined> {
   if (!host) return diskStartHold(ctx.config, worktrees);
+  const local = startVolumeHold(stateVolumes(ctx.config));
+  if (local) return local;
   const workDir = ctx.config.hosts[host]!.workDir;
   const mount = inferredWorktreeMount(workDir);
   if (ctx.config.disk.minFreeStartGb === 0 && !mount) return undefined;

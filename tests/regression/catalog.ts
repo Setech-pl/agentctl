@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'W102-VOLUME', fixedIn: '0.27.2', symptom: 'State and external worktree disks shared the same start floor.', scenarios: [s('disk0248.test.ts', '^W102-VOLUME:')] },
   { id: 'W110-A', fixedIn: '0.27.2', symptom: 'Watch stages could starve indefinitely after timing out.', scenarios: [s('field0272.test.ts', '^W110-A:')] },
   { id: 'W110-B', fixedIn: '0.27.2', symptom: 'A finished task with a complete report could remain working.', scenarios: [s('field0272.test.ts', '^W110-B:')] },
   { id: 'W110-C', fixedIn: '0.27.2', symptom: 'A transient tmux inventory gap could report a live window lost.', scenarios: [s('field0272.test.ts', '^W110-C:')] },

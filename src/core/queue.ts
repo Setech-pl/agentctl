@@ -3,7 +3,7 @@ import { collectMachine } from './machine.ts';
 import { readReservations, reservationText } from './limits.ts';
 import type { Reservations } from './limits.ts';
 import { peakHold } from './peak.ts';
-import { freshTaskDiskStartHold, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
+import { freshTaskDiskStartHold, taskDiskStartHold, worktreeCostEstimates, worktreeVolumeLabel } from './disk.ts';
 import { expireProviderHolds, providerHolds } from './provider-hold.ts';
 import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
@@ -290,6 +290,8 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     if (spec.owner) lines.push(`  owner:    ${spec.owner}`);
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
+    const volumes = spec.host ? [`[${spec.host}] ${config.hosts[spec.host]?.workDir ?? 'work_dir'}`] : [...new Set(spec.repos.map(worktreeVolumeLabel))];
+    if (volumes.length) lines.push(`  worktree volumes: ${volumes.join(', ')}`);
     if (spec.after.length > 0) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
       const blocked = findBlocked([{ ...spec, status: 'queued' }], rows, verdictClock(config, ctx.runner.now())).get(spec.task);
