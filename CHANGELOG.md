@@ -4,10 +4,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- HOTFIX0263-DISK/TRASH: Delete directly by default, measure actual reclaimed space and support a scoped Trash purge. / Domyślnie usuwaj bezpośrednio, mierz odzyskane miejsce i ogranicz opróżnianie kosza do wskazanych elementów.
-- HOTFIX0263-START/LOCK: Bound checkout and setup, reclaim stale start locks and release setup slots. / Limity czasu checkoutu i setupu, odzyskiwanie nieaktywnych blokad startu i zwalnianie miejsc setupu.
-- HOTFIX0263-WATCH: Supervise tmux watch and recover interrupted starts and MCP writes. / Nadzór watch w tmux i odzyskiwanie przerwanych startów oraz zapisów MCP.
-
 - Watch proposes confirmation-bound GC after local integration, routing one WALL message to each affected task-owning chat. / Po lokalnej integracji watch proponuje GC wymagające potwierdzenia i wysyła jedną wiadomość WALL do każdego czatu, którego zadania obejmuje plan.
 - `merge_base_check` warns, waits for the author, or creates a local merge candidate against the current `main`/`master`. / `merge_base_check` ostrzega, czeka na aktualizację gałęzi autora lub tworzy lokalny merge do przeglądu względem aktualnej gałęzi `main` albo `master`.
 - `review: {mode: readonly-on-author}` shares a stopped author's local worktree with task-scoped Git hooks and a separate evidence directory. / Przegląd tylko do odczytu korzysta z lokalnego worktree zatrzymanego autora, z hookami Git zadania i osobnym katalogiem dowodów.
@@ -29,6 +25,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.26.1] - 2026-11-25
+
+- HOTFIX0263-START/LOCK: Bound checkout and setup, reclaim stale start locks and release setup slots. / Limity czasu checkoutu i setupu, odzyskiwanie nieaktywnych blokad startu i zwalnianie miejsc setupu.
+- HOTFIX0263-WATCH: Supervise tmux watch and recover interrupted starts and MCP writes. / Nadzór watch w tmux i odzyskiwanie przerwanych startów oraz zapisów MCP.
+- HOTFIX0263-DISK/TRASH: Delete directly by default, measure actual reclaimed space and support a scoped Trash purge. / Domyślnie usuwaj bezpośrednio, mierz odzyskane miejsce i ogranicz opróżnianie kosza do wskazanych elementów.
 
 ## [0.26.0] - 2026-11-22
 
