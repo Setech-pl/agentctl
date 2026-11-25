@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { Context } from '../src/core/context.ts';
-import { setHostPause } from '../src/core/host-availability.ts';
+import { hostAvailability, setHostPause } from '../src/core/host-availability.ts';
 import { fetchRemoteBranches } from '../src/core/host-branches.ts';
 import { readJournal } from '../src/core/journal.ts';
 import { mirrorPerfResults, stagePerfArtifacts } from '../src/core/perf-transfer.ts';
@@ -109,4 +109,33 @@ Measure Windows.`)[0]!, {config});
   assert.match(perfScheduleHold(order, [], morning - 1) ?? '', /start po/);
   assert.match(perfScheduleHold(order, [], morning) ?? '', /integration PASS/);
   assert.equal(perfScheduleHold(order, [{task: 'INTEGRATION-1', integration: true, verdict: 'PASS'} as StatusRow], morning), undefined);
+});
+
+test('owner availability evaluates overnight windows, process names, GPU and pause expiry', async () => {
+  const config = makeConfig(scratch.sub('availability'), `hosts:
+  local:
+    availability: {windows: ["sun 23:00-02:00"]}
+  pc:
+    ssh: owner@fake-wsl
+    work_dir: /work
+    repos: {}
+    providers: [codex]
+    availability: {processes: [ComfyUI.exe], gpu_busy_pct: 70, yield: stop-new}
+`);
+  let now = new Date(2026, 10, 29, 23, 30).getTime();
+  class Clock extends DiskRunner { override now(): number { return now; } }
+  const ctx = new Context(new Clock({dryRun: false}), config, () => {});
+  assert.equal(hostAvailability(config, 'local', undefined, now), undefined);
+  const gpu = {name: 'fake RTX', totalMiB: 16_384, usedMiB: 500, utilizationPct: 25};
+  const pc = {name: 'pc', state: 'reachable' as const, probedAt: new Date(now).toISOString(), gpu, processes: []};
+  assert.equal(hostAvailability(config, 'pc', pc, now), undefined);
+  assert.match(hostAvailability(config, 'pc', {...pc, processes: ['comfyui']}, now) ?? '', /zajęty przez właściciela/);
+  assert.match(hostAvailability(config, 'pc', {...pc, gpu: {...gpu, utilizationPct: 71}}, now) ?? '', /GPU 71%/);
+  await setHostPause(ctx, 'local', true, '1h');
+  assert.match(hostAvailability(config, 'local', undefined, now) ?? '', /zajęty przez właściciela/);
+  now += 60 * 60_000;
+  assert.equal(hostAvailability(config, 'local', undefined, now), undefined);
+  now += 2 * 60 * 60_000;
+  assert.match(hostAvailability(config, 'local', undefined, now) ?? '', /poza oknem/);
+  assert.match(hostAvailability(config, 'pc', pc, now) ?? '', /brak aktualnej próbki/);
 });
