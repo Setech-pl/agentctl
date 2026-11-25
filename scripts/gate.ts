@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -84,6 +85,29 @@ export async function runReleaseChecks(live: string[], runCheck: (name: string) 
   return failures;
 }
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+interface ReleaseInputs { sha: string; fixtureDigest: string }
+
+/** Seal the inputs, including mode and ctime so a fixture edited and restored during a step invalidates the result. */
+export function releaseInputs(root = process.cwd()): ReleaseInputs {
+  const readGit = (...args: string[]) => execFileSync('git', args, {cwd: root, encoding: 'utf8'});
+  const sha = readGit('rev-parse', 'HEAD').trim();
+  const files = [...new Set(readGit('ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();
+  const hash = createHash('sha256');
+  for (const file of files) {
+    const target = path.join(root, file);
+    const stat = fs.lstatSync(target, {bigint: true, throwIfNoEntry: false});
+    hash.update(JSON.stringify([file, stat?.mode.toString(), stat?.ino.toString(), stat?.ctimeNs.toString()]));
+    if (stat?.isSymbolicLink()) hash.update(fs.readlinkSync(target));
+    else if (stat?.isFile()) hash.update(fs.readFileSync(target));
+  }
+  return {sha, fixtureDigest: hash.digest('hex')};
+}
+
+export function assertReleaseInputs(expected: ReleaseInputs, actual: ReleaseInputs, step: string): void {
+  if (expected.sha !== actual.sha) throw new Error(`release SHA changed at ${step}: ${expected.sha} → ${actual.sha}`);
+  if (expected.fixtureDigest !== actual.fixtureDigest) throw new Error(`release fixtures or source files changed at ${step}`);
+}
+
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? filesUnder(`${dir}/${e.name}`) : [`${dir}/${e.name}`]);
 }
@@ -110,6 +134,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const affected = affectedTests(changed, sources, tests);
   const plan = planTier(opts.tier, affected.tests, live, opts.skipLive, opts.node26Only);
   const result: any = { sha, dirty, allowDirty: opts.allowDirty, tier: opts.tier, node26Only: Boolean(opts.node26Only), base, dryRun: opts.dryRun, uncertainMapping: affected.uncertain, plan, nodeVersions: {}, counts: { pass: 0, fail: 0, skip: 0 }, retriedFiles: [], steps: [], status: 'FAIL', durationMs: 0 };
+  const sealed = opts.tier === 'release' ? releaseInputs() : undefined;
+  if (sealed) {
+    if (sealed.sha !== sha) throw new Error('release HEAD changed while enumerating inputs');
+    result.inputs = sealed;
+  }
   const started = Date.now();
   const runId = `${started}-${process.pid}`;
   result.runId = runId;
@@ -124,6 +153,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const env: NodeJS.ProcessEnv & { TMPDIR: string; AGENTCTL_TEST_TMP: string } = { ...process.env, TMPDIR: path.join(work, 'tmp'), AGENTCTL_TEST_TMP: path.join(work, 'tests'), npm_config_cache: path.join(work, 'npm-cache'), NODE_COMPILE_CACHE: path.join(work, 'compile-cache'), XDG_CACHE_HOME: path.join(work, 'cache') };
   for (const key of ['AGENTCTL_REAL_CODEX', 'AGENTCTL_REAL_CLAUDE', 'AGENTCTL_REAL_KIMI', 'AGENTCTL_BASELINE_ROOT']) delete env[key as keyof typeof env];
   async function run(name: string, command: string, argv: string[], extra: NodeJS.ProcessEnv = {}, required = true): Promise<{ code: number; text: string }> {
+    if (sealed) assertReleaseInputs(sealed, releaseInputs(), `before ${name}`);
     const log = path.join(path.dirname(output), `${opts.tier}-${runId}-${result.steps.length}-${name.replace(/[^a-z0-9-]/gi, '-')}.log`);
     const [cmd, wrapped] = heavyCommand(command, argv);
     console.log(`gate: ${name}`);
@@ -143,6 +173,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }).finally(() => { stopChild = undefined; stream.end(); });
     if (interrupted) throw new Error('Gate interrupted');
     result.steps.push({ name, command: [cmd, ...wrapped], code, log, durationMs: Date.now() - stepStart });
+    if (sealed) {
+      const inputs = releaseInputs();
+      result.steps.at(-1).inputs = inputs;
+      assertReleaseInputs(sealed, inputs, `after ${name}`);
+    }
     if (required && code !== 0) { result.counts.fail++; throw new Error(`${name} failed (${code}); see ${log}`); }
     return { code, text };
   }
@@ -221,6 +256,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         if (failures.length) throw new Error(`Release checks failed: ${failures.join(', ')}; see step logs in ${path.dirname(output)}`);
       }
     }
+    if (sealed) assertReleaseInputs(sealed, releaseInputs(), 'final result');
     result.status = 'PASS';
   } catch (error) { result.error = String(error); throw error; }
   finally {

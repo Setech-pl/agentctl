@@ -329,3 +329,23 @@ it('L1 prechecked contender: publication must not admit C while A is displaced',
     assert.ok(waits > 0, 'C must wait for A; pre-acquisition tombstone check alone is insufficient');
   } finally { fs.mkdirSync = mkdir; fs.renameSync = rename; }
 });
+
+it('release input seal rejects SHA changes and fixture edits restored to the original bytes', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { releaseInputs, assertReleaseInputs } = await import('../scripts/gate.ts');
+  const root = scratch.sub('release-inputs');
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=gate@example.invalid', '-c', 'user.name=Gate', '-C', root, ...args], {stdio: 'ignore'});
+  git('init', '-b', 'main');
+  const file = path.join(root, 'fixture.txt');
+  fs.writeFileSync(file, 'before');
+  git('add', 'fixture.txt');
+  git('commit', '-m', 'initial');
+  const expected = releaseInputs(root);
+  assert.doesNotThrow(() => assertReleaseInputs(expected, releaseInputs(root), 'check A'));
+  fs.writeFileSync(file, 'changed');
+  assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'check B'), /fixtures.*changed/);
+  fs.writeFileSync(file, 'before');
+  assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'check C'), /fixtures.*changed/);
+  git('commit', '--allow-empty', '-m', 'new SHA');
+  assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'final result'), /SHA changed.*final result/);
+});

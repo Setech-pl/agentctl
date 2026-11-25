@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
 ## [Unreleased]
+- Release gate results seal the candidate SHA and source/fixture contents at every step, and fail if those inputs change.
+
 - **WALL agentctl-102 (W102-VOLUME):** Admission checks each worktree volume and a configurable 5 GiB floor for state, and queue previews name the worktree volumes.
 
 - **WALL agentctl-110 (W110-A–I):** Promote stalled watch stages and restart a wedged watcher, verify missing tmux windows, recognize complete idle reports, explain terminal dependencies and ambiguous verdicts, and retry provider version-check failures. Report outputs accept deferred cells and namespaced extensions. Chat quotas can be cleared, and expired plan percentages are excluded.
