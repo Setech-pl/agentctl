@@ -1955,8 +1955,9 @@ function confirmationTargets(name: string, scope: unknown): unknown {
   }
   if (name === 'gc') {
     const plan = scope as GcPlan;
-    return { deleteMode: plan.deleteMode, items: plan.items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, trash }) =>
-      ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, trash })) };
+    return plan.items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, trash }) =>
+      ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, trash,
+        deleteMode: !host && (kind === 'cache' || kind === 'node-modules') ? plan.deleteMode : undefined }));
   }
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);

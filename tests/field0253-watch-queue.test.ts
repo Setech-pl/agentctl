@@ -12,7 +12,10 @@ import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helper
 
 const scratch = useScratch();
 
-test('FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or waiting starts', async () => {
+test('FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or waiting starts', async t => {
+  const statfs = () => ({ bsize: 1024 ** 3, bavail: 256, blocks: 1024 });
+  t.mock.method(fs, 'statfsSync', statfs);
+  t.mock.method(fs.promises, 'statfs', async () => statfs());
   const config = makeConfig(scratch.sub('admission'), 'limits: {claude: 2, codex: 1}\nqueue: {parallel_starts: 1}\n');
   const tmux = new FakeTmux(config.session);
   const busy = tmux.add('slow', 'Working (esc to interrupt)');

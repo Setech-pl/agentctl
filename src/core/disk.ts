@@ -35,6 +35,7 @@ function existingAncestor(target: string): string {
   return current;
 }
 const FREE_SPACE_BUDGET_MS = 1000;
+const START_DISK_BUDGET_MS = 5000;
 type Statfs = typeof fs.promises.statfs;
 const pendingStats = new WeakMap<Statfs, Map<string, ReturnType<Statfs>>>();
 
@@ -354,7 +355,7 @@ export async function freshTaskDiskStartHold(ctx: Context, host: string | undefi
   if (!host) {
     const { config } = ctx;
     const repos = worktrees.map(worktree => typeof worktree === 'string' ? { worktree } : worktree);
-    if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), worktreeMount: config.worktreeMount });
+    if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), ...(config.worktreeMount ? { worktreeMount: resolvePath(config.worktreeMount) } : {}) });
     const missing = missingWorktreeVolume(repos);
     if (missing) return `volume missing: ${missing}`;
     if (config.disk.minFreeStartGb === 0) return undefined;
@@ -367,7 +368,7 @@ export async function freshTaskDiskStartHold(ctx: Context, host: string | undefi
       if (dev === undefined) return 'wstrzymane: dysk – nie można odczytać wolnego miejsca';
       if (devices.has(dev)) continue;
       devices.add(dev);
-      const { availableBytes } = await freeSpace(ctx, ancestor, fs.promises.statfs, FREE_SPACE_BUDGET_MS);
+      const { availableBytes } = await freeSpace(ctx, ancestor, fs.promises.statfs, START_DISK_BUDGET_MS);
       if (availableBytes === null) return 'wstrzymane: dysk – nie można odczytać wolnego miejsca';
       const gb = availableBytes / 1024 ** 3;
       if (gb < config.disk.minFreeStartGb) {

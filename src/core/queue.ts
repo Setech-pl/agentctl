@@ -1298,10 +1298,12 @@ export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: {
 
 async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
   const { config } = ctx;
+  // Sample the volume before taking the shared lock. newTasks rechecks before setup.
+  if (opts.signal?.aborted || await entryDiskStartHold(ctx, initial)) return false;
   let entry = initial;
   let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
-    if (fresh.volumeBlock || entryPeakHold(config, fresh, ctx.runner.now()) || await entryDiskStartHold(ctx, fresh) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
+    if (fresh.volumeBlock || entryPeakHold(config, fresh, ctx.runner.now()) || setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) return false;
     const slots = await liveWindows(ctx);
     if (heavyWait(config, isHeavy(fresh), heavyBudget(config, readQueue(config), slots).size)) return false;
     if (config.quotas) {
@@ -1322,7 +1324,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
   };
   const claimed = await withStartLock(ctx, async () => {
     const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
-    if (!fresh || fresh.status !== 'queued' || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
+    if (!fresh || fresh.status !== 'queued' || fresh.spec !== initial.spec || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
     const author = directAuthorState(config, fresh, readQueue(config));
     if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
     if (author.waiting) return false;
