@@ -20,6 +20,8 @@ export const CLI_MCP_EXCEPTIONS: Record<string, string> = {
   dataset: 'Local dataset command group; CLI only.',
   'dataset export': 'Owner-only local benchmark export; CLI only, no MCP tool.',
   up: 'Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI.',
+  canary: 'Owner runs a local shadow replay over an explicitly named state directory.',
+  'upgrade-health': 'Internal health check invoked by the stable updater after restarting watch.',
   watch: 'Long-running terminal watcher, started and supervised locally.',
   board: 'Interactive terminal UI.',
   'limits profile': 'Activates a profile from the owner terminal. MCP set_limits requests approval by default.',

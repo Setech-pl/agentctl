@@ -1481,6 +1481,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
 
   program
     .command('upgrade-health', {hidden: true})
+    .description('Check a newly restarted stable watcher from agentctl-update.')
     .requiredOption('--expect <version>', 'expected candidate version')
     .requiredOption('--since <ms>', 'earliest valid watch launch time in Unix milliseconds')
     .action(guarded(async (opts: { expect: string; since: string }) => {

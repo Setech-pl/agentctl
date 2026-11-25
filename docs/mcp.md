@@ -250,6 +250,8 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `pull` | `get_report`, `pull_ready` |  |
 | `close` | `close` |  |
 | `cancel` | `cancel` |  |
+| `upgrade-health` | — | Internal health check invoked by the stable updater after restarting watch. |
+| `canary` | — | Owner runs a local shadow replay over an explicitly named state directory. |
 | `watch` | — | Long-running terminal watcher, started and supervised locally. |
 | `board` | — | Interactive terminal UI. |
 | `report` | `report`, `report_from` |  |
@@ -388,6 +390,8 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
 - `close`: `--pulled`, `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
 - `cancel`: `--cohort &lt;name&gt;`, `--reason &lt;text&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
+- `upgrade-health`: `--expect &lt;version&gt;`, `--since &lt;ms&gt;`
+- `canary`: `--from &lt;home&gt;`, `--minutes &lt;minutes&gt;`
 - `watch`: `--tmux`, `--restart`, `--no-status-line`
 - `board`: `--restart`, `--tmux`
 - `report`: `--from &lt;path&gt;`, `--force`, `--json`, `--dry-run`

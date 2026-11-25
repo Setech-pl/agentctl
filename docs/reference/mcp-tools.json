@@ -281,7 +281,7 @@
       "name": "set_limits",
       "kind": "write",
       "title": "Request or change limits",
-      "description": "WRITE, off unless the user put \"set_limits\" in mcp.allow. With the default owner-approve policy, request a change and include a reason. The owner decides within two hours from the board or owner CLI. A chat confirmation cannot apply the change. Use 0 for no provider ceiling and \"off\" to disable a provider. Timed provider hold: hold: {glm: \"21:50\"}, ISO timestamp, duration \"3h\", or \"off\"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), \"off\" for no hold at all (queue_hold: \"off\"), or per provider {claude: 90, codex: \"off\"} (only the named providers change; \"off\" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows \"wstrzymane: … > usage.queue_hold N%\"; limits, capacity and config_show show the current hold. Use quota: {chat: \"nc\", share: 40} for a percentage or quota: {chat: \"nc\", claude: 4} for an absolute provider override. profile names a configured profile. Under direct policy the previous permissions and preview/confirm flow apply. A timed provider hold always uses direct preview/confirm. Use when the user needs this operation. CLI: agentctl limits set. For direct edits and timed provider holds, preview first. Then call confirm: true with the same arguments or the preview_token. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
+      "description": "WRITE, off unless the user put \"set_limits\" in mcp.allow. With the default owner-approve policy, request a change and include a reason. The owner decides within two hours from the board or owner CLI. A chat confirmation cannot apply the change. Use 0 for no provider ceiling and \"off\" to disable a provider. Timed provider hold: hold: {glm: \"21:50\"}, ISO timestamp, duration \"3h\", or \"off\"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), \"off\" for no hold at all (queue_hold: \"off\"), or per provider {claude: 90, codex: \"off\"} (only the named providers change; \"off\" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows \"wstrzymane: … > usage.queue_hold N%\"; limits, capacity and config_show show the current hold. Use quota: {chat: \"nc\", share: 40} for a percentage or quota: {chat: \"nc\", claude: 4} for an absolute provider override (0 blocks starts, off or null removes that provider quota). profile names a configured profile. Under direct policy the previous permissions and preview/confirm flow apply. A timed provider hold always uses direct preview/confirm. Use when the user needs this operation. CLI: agentctl limits set. For direct edits and timed provider holds, preview first. Then call confirm: true with the same arguments or the preview_token. Every response is bounded by mcp.max_response_kb (default 8 KiB). A truncated JSON envelope gives response_id and next_response_offset; call response_page with only those continuation fields to retrieve the next fragment without executing again. Concatenate fragment values to recover the original text/JSON.",
       "input": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -306,24 +306,68 @@
                 "maximum": 100
               },
               "claude": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "string",
+                    "const": "off"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "codex": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "string",
+                    "const": "off"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "kimi": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "string",
+                    "const": "off"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "glm": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "string",
+                    "const": "off"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [

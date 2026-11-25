@@ -393,6 +393,7 @@ Project default links to closed/cancelled/archived task worktrees are errors, in
 | Key | Default | Meaning |
 |---|---|---|
 | `disk.min_free_start_gb` | `30` | Minimum fresh free GiB before a queued start. |
+| `disk.min_free_state_gb` | `5` | Minimum fresh free GiB on each state and cache volume. |
 | `queue.max_parallel_setups` | `2` | Maximum concurrent worktree/setup phases. |
 | `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
 | `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |

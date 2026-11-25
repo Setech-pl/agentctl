@@ -68,6 +68,8 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`pull`](#agentctl-pull) | Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window). --ready: all new reports at once. |
 | [`close`](#agentctl-close) | Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first. |
 | [`cancel`](#agentctl-cancel) | Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first. |
+| [`upgrade-health`](#agentctl-upgrade-health) | Check a newly restarted stable watcher from agentctl-update. |
+| [`canary`](#agentctl-canary) | Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux. |
 | [`watch`](#agentctl-watch) | Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died. |
 | [`board`](#agentctl-board) | Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close. |
 | [`report`](#agentctl-report) | Where the report of a task is: the canonical path (the first "report:" entry) and, when the agent wrote it elsewhere, the source it was copied from. Without --from it also shows what the search finds now (the last lines of the window, the "report:" list); with --from \<path> that file becomes the source and is copied to the canonical path (not over a report the agent wrote, unless --force). |
@@ -1390,6 +1392,32 @@ agentctl cancel TASK-41 TASK-42 --rm-worktree -y      # also remove the worktree
 agentctl cancel TASK-43                             # a queued task: taken out of the queue
 agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N
 ```
+
+## agentctl upgrade-health
+
+Check a newly restarted stable watcher from agentctl-update.
+
+```
+agentctl upgrade-health [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--expect <version>` | expected candidate version | required |
+| `--since <ms>` | earliest valid watch launch time in Unix milliseconds | required |
+
+## agentctl canary
+
+Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux.
+
+```
+agentctl canary [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--from <home>` | source AGENTCTL_HOME | required |
+| `--minutes <minutes>` | minimum number of minutes to observe | default `30` |
 
 ## agentctl watch
 

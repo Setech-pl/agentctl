@@ -393,6 +393,7 @@ Wpisy integrate w `agentctl-outputs` przyjmują opcjonalne `base` obok repo/bran
 | Klucz | Domyślnie | Znaczenie |
 |---|---|---|
 | `disk.min_free_start_gb` | `30` | Minimalne wolne GiB przed startem z kolejki. |
+| `disk.min_free_state_gb` | `5` | Minimalne wolne GiB na każdym woluminie stanu i cache. |
 | `queue.max_parallel_setups` | `2` | Maksymalna liczba równoległych faz worktree/setup. |
 | `notify.attention_after_min` | `15` | Minuty do jednokrotnej eskalacji desktop/telefon/WALL. |
 | `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Okna {days, from, to, tz}; strefa IANA, peak: [] wyłącza. |
