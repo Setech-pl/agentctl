@@ -110,6 +110,8 @@ capacity: {snapshot: false, codex_refresh: false}
     consult: { spec: JSON.stringify({ consult: 'CHOICE', question: 'Which contract?', repos: [{ path: repo }], panel, synthesis: panel[0] }) },
     gc: {},
     hide: tasks,
+    hosts_pause: { host: 'local', until: '3h' },
+    hosts_resume: { host: 'local' },
     interrupt: task,
     limits_release: { claude: 1 },
     manager_start: {},
