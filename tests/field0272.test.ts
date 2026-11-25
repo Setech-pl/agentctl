@@ -10,7 +10,7 @@ import { dependencyVerdict, journalOutputs, parseOutputs } from '../src/core/out
 import { announceBlocked, planQueueAdd, queueTick, queueViews, QueueMemory, readQueue, saveEntry } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { collectStatus } from '../src/core/status.ts';
-import { planState, stalePlanLabel } from '../src/core/usage.ts';
+import * as usage from '../src/core/usage.ts';
 import { WatchMemory, watchTick } from '../src/core/watch.ts';
 import { WatchSteps } from '../src/core/watch-steps.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
@@ -150,7 +150,7 @@ test('W110-H: off and null erase a provider quota even with an inherited share, 
 test('W110-I: short-window samples expire after two windows and disappear from the plan', () => {
   const now = Date.now();
   const w = {kind: 'session' as const, minutes: 60, resetsAt: null, usedPercent: 99};
-  assert.equal(planState('kimi', {at: now - 119 * 60000, windows: [w], planType: null}, now, '').maxPercent, 99);
-  assert.equal(planState('kimi', {at: now - 121 * 60000, windows: [w], planType: null}, now, '').maxPercent, null);
-  assert.match(stalePlanLabel(235 * 3600000), /n\/d/);
+  assert.equal(usage.planState('kimi', {at: now - 119 * 60000, windows: [w], planType: null}, now, '').maxPercent, 99);
+  assert.equal(usage.planState('kimi', {at: now - 121 * 60000, windows: [w], planType: null}, now, '').maxPercent, null);
+  assert.match(usage.stalePlanLabel?.(235 * 3600000) ?? '', /n\/d/);
 });

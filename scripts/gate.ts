@@ -11,11 +11,11 @@ import { checkRuntime, homebrewNode26, node22Path, runtimesDir } from './runtime
 import { acquireLock } from './gate-lock.ts';
 export { acquireLock } from './gate-lock.ts';
 
-export type Tier = 'quick' | 'full' | 'release';
+export type Tier = 'quick' | 'full' | 'release' | 'prodshape';
 export interface Options { tier: Tier; base?: string; dryRun: boolean; allowDirty: boolean; skipLive: boolean; node26Only?: boolean }
 export function parseArgs(args: string[]): Options {
   const tier = args.shift();
-  if (!['quick', 'full', 'release'].includes(tier ?? '')) throw new Error('Usage: npm run gate -- <quick|full|release> [--base ref] [--dry-run] [--allow-dirty] [--skip-live] [--node26-only]');
+  if (!['quick', 'full', 'release', 'prodshape'].includes(tier ?? '')) throw new Error('Usage: npm run gate -- <quick|full|release|prodshape> [--base ref] [--dry-run] [--allow-dirty] [--skip-live] [--node26-only]');
   const opts: Options = { tier: tier as Tier, dryRun: false, allowDirty: false, skipLive: false };
   while (args.length) {
     const arg = args.shift();
@@ -45,7 +45,8 @@ export function planTier(tier: Tier, tests: string[], live: string[], skipLive =
   const regression = 'regression scenarios (tests/regression/CATALOG.md)';
   if (tier === 'quick') return ['typecheck', 'build', 'git diff --check', regression, `tests current: ${tests.join(' ') || '(none)'}`];
   if (tier === 'full') return [...(node26Only ? [] : ['tests Node 22.14.0 (full)']), 'tests Node 26 (full)', regression];
-  return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live)];
+  if (tier === 'prodshape') return [regression, 'prodshape watch and MCP canary'];
+  return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live), 'prodshape watch and MCP canary'];
 }
 /** Static relative import closure plus exact test naming. Unknown inputs always widen to the full suite. */
 export function affectedTests(changed: string[], sources: Record<string, string>, tests: string[]): { tests: string[]; uncertain: boolean } {
@@ -205,6 +206,14 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     // Initial failures remain visible in counts; a successful retry is explicitly recorded.
     if (first.code !== 0 && (!failed.length || retryFailed)) throw new Error(`Tests failed on ${label}`);
   }
+  const runProdshape = async (node: string) => {
+    const evidence = path.join(path.dirname(output), `${opts.tier}-${runId}-prodshape.json`);
+    const result = await run('prodshape', node, ['--experimental-strip-types', '--no-warnings', 'scripts/prodshape.ts'], {
+      AGENTCTL_PRODSHAPE_WORK: work,
+      AGENTCTL_PRODSHAPE_EVIDENCE: evidence,
+    }, false);
+    return result.code;
+  };
   try {
     assertClean(opts, dirty);
     if (opts.dryRun) { result.status = 'PASS'; console.log(JSON.stringify({ ...result, runtimes: [node22Path(), 'Homebrew Node 26'], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
@@ -221,6 +230,12 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       await run('diff-check', 'git', ['diff', '--check']);
       await run('regression', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']);
       await testSuite(process.execPath, 'current', affected.tests);
+    } else if (opts.tier === 'prodshape') {
+      result.nodeVersions.current = checkRuntime(process.execPath, `${process.versions.node}`);
+      const failed = await runReleaseChecks(['prodshape'], async name => name === 'prodshape' ? runProdshape(process.execPath)
+        : (await run('regression', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts'], {}, false)).code);
+      result.counts.fail += failed.length;
+      if (failed.length) throw new Error(`Prodshape checks failed: ${failed.join(', ')}`);
     } else {
       if (!opts.node26Only) await run('runtime-node22', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/runtime.ts', work]);
       const node22 = node22Path(), node26 = homebrewNode26();
@@ -247,7 +262,8 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
           result.counts.pass += 10;
         }
         if (opts.skipLive) result.counts.skip += live.length;
-        const failures = await runReleaseChecks(opts.skipLive ? [] : live, async name => {
+        const failures = await runReleaseChecks([...(opts.skipLive ? [] : live), 'prodshape'], async name => {
+          if (name === 'prodshape') return runProdshape(node26);
           const file = name === 'regression' ? 'scripts/regression.ts' : name;
           const step = await run(name, node26, ['--experimental-strip-types', '--no-warnings', file], {}, false);
           return step.code;

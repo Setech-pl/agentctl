@@ -7,7 +7,7 @@ import { readJournal } from '../src/core/journal.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { taskFile } from '../src/core/taskstore.ts';
 import { WatchMemory, watchTick } from '../src/core/watch.ts';
-import { watchSnapshotPath } from '../src/core/watch-snapshot.ts';
+import path from 'node:path';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -17,7 +17,7 @@ test('FIELD0253-ENOSPC: watch recovers task state and snapshot once space return
   const config = makeConfig(scratch.sub('enospc'));
   const record = seedTask(config, 'RECOVER');
   const file = taskFile(config, record.window);
-  const snapshot = watchSnapshotPath(config);
+  const snapshot = path.join(config.stateDir, 'mcp-state-snapshot.json');
   const tmux = new FakeTmux();
   tmux.add(record.window, 'Working (esc to interrupt)');
   const runner = new DiskRunner({dryRun: false, respond: tmux.respond});

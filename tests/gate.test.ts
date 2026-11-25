@@ -22,9 +22,9 @@ it('plans tiers in order, keeping both runtimes sequential and live last', () =>
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);
   assert.deepEqual(planTier('full', [], []), ['tests Node 22.14.0 (full)', 'tests Node 26 (full)', 'regression scenarios (tests/regression/CATALOG.md)']);
   const plan = planTier('release', [], ['scripts/live-a.ts', 'scripts/live-b.ts']);
-  assert.equal(plan.length, 9); assert.match(plan[6]!, /^regression scenarios/); assert.match(plan[2]!, /smoke Node 22/); assert.match(plan[5]!, /doctor.*Node 26/);
-  assert.deepEqual(plan.slice(-2), ['scripts/live-a.ts', 'scripts/live-b.ts']);
-  assert.equal(planTier('release', [], ['scripts/live-a.ts'], true).at(-1), 'SKIP live entries');
+  assert.equal(plan.length, 10); assert.match(plan[6]!, /^regression scenarios/); assert.match(plan[2]!, /smoke Node 22/); assert.match(plan[5]!, /doctor.*Node 26/);
+  assert.deepEqual(plan.slice(-3, -1), ['scripts/live-a.ts', 'scripts/live-b.ts']);
+  assert.equal(planTier('release', [], ['scripts/live-a.ts'], true).at(-2), 'SKIP live entries');
   assert.equal(parseArgs(['quick', '--base', 'HEAD~1']).base, 'HEAD~1');
   assert.throws(() => parseArgs(['full', '--base'])); assert.throws(() => parseArgs(['unknown']));
 });
