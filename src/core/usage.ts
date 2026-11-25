@@ -27,9 +27,9 @@ const START_SLACK_MS = 60_000;
 export const PLAN_STALE_MS = 30 * 60_000;
 const MAX_PLAN_AGE_MS = 24 * 3_600_000;
 
-export const stalePlanLabel = (ageMs: number): string => `stale (odczyt sprzed ${Number((ageMs / 3_600_000).toFixed(1))} h)`;
+export const stalePlanLabel = (ageMs: number): string => `n/d – stale (odczyt sprzed ${Number((ageMs / 3_600_000).toFixed(1))} h)`;
 export function planWindowCurrent(window: Pick<PlanWindowView, 'minutes' | 'resetsAt'>, ageMs: number, now: number): boolean {
-  return ageMs <= Math.min(MAX_PLAN_AGE_MS, (window.minutes ?? 1440) * 60_000) && (window.resetsAt === null || window.resetsAt > now);
+  return ageMs <= Math.min(MAX_PLAN_AGE_MS, (window.minutes ?? 1440) * 2 * 60_000) && (window.resetsAt === null || window.resetsAt > now);
 }
 
 // ---- the plan

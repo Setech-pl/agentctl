@@ -70,6 +70,14 @@ export class Tmux {
     return r.code === 0;
   }
 
+  /** A target reported by tmux itself even when the window inventory raced a rename or relink. */
+  async paneExists(window: string, id?: string): Promise<boolean> {
+    const target = id || this.target(window);
+    const r = await this.runner.exec('tmux', ['display-message', '-p', '-t', target, '#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_dead}'], {readOnly: true, timeoutMs: 1500});
+    const [session, windowId, name, paneId, dead] = r.stdout.trim().split('\t');
+    return r.code === 0 && session === this.session && (!id || windowId === id) && !!name && stripIcon(name, this.icons) === window && /^%\d+$/.test(paneId ?? '') && dead === '0';
+  }
+
   /** The windows of the agentctl session (empty when the session does not exist). */
   async windows(): Promise<WindowInfo[]> {
     const r = await this.runner.exec('tmux', ['list-windows', '-t', `=${this.session}`, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}\t#{pane_dead}\t#{pane_dead_status}'], {

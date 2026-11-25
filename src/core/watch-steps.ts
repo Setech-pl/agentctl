@@ -6,6 +6,7 @@ import { errorMessage } from './util.ts';
 import { watchHeartbeatPath } from './watch-snapshot.ts';
 
 export const WATCH_STEP_TIMEOUT_MS = 20_000;
+const RESTART_AFTER_MS = 10 * 60_000;
 const clock: BudgetClock = {
   now: Date.now,
   schedule(expire, delay) {
@@ -17,12 +18,31 @@ const clock: BudgetClock = {
 /** Skip late steps without starting another copy, or allowing a late snapshot to overwrite a newer one. */
 export class WatchSteps {
   private readonly running = new Map<string, number>();
-  private readonly skipped = new Map<string, number>();
+  private readonly skipped = new Map<string, {since: number; count: number; promoted: number}>();
+  private promotion = 0;
+
+  priority(stages: ReadonlyMap<string, unknown>): string | undefined {
+    let pick: string | undefined;
+    for (const [name, state] of this.skipped) {
+      if (state.count <= 3 || !stages.has(name)) continue;
+      if (!pick || state.promoted < this.skipped.get(pick)!.promoted) pick = name;
+    }
+    if (pick) this.skipped.get(pick)!.promoted = ++this.promotion;
+    return pick;
+  }
+
+  stalled(now: number): string[] {
+    return [...this.skipped].filter(([, state]) => now - state.since >= RESTART_AFTER_MS).map(([name]) => name);
+  }
 
   async run<T>(ctx: Context, log: string, name: string, step: (signal: AbortSignal) => Promise<T>, timer = clock): Promise<T | undefined> {
     const at = ctx.runner.now();
     const heartbeat = (state: string, since: number, reason?: string): void => {
-      if (state === 'skipped' && !this.skipped.has(name)) this.skipped.set(name, since);
+      if (state === 'skipped') {
+        const previous = this.skipped.get(name);
+        if (previous) previous.count++;
+        else this.skipped.set(name, {since, count: 1, promoted: 0});
+      }
       if (state === 'done') this.skipped.delete(name);
       if (!ctx.runner.dryRun) {
         try {
@@ -30,7 +50,8 @@ export class WatchSteps {
           // Diagnostic telemetry does not need a durable flush at every step boundary.
           fs.writeFileSync(watchHeartbeatPath(ctx.config), JSON.stringify({
             pid: process.pid, step: name, state, at: ctx.runner.now(), since, reason, running: Object.fromEntries(this.running),
-            skipped: Object.fromEntries(this.skipped),
+            skipped: Object.fromEntries([...this.skipped].map(([name, state]) => [name, state.since])),
+            consecutive: Object.fromEntries([...this.skipped].map(([name, state]) => [name, state.count])),
           }), { mode: 0o600 });
         } catch (error) { ctx.out(`watch heartbeat: ${errorMessage(error)}`); }
       }

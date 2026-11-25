@@ -1494,6 +1494,96 @@
       "UX0228: queued selection closes its cohort and manager selection has no implicit cohort"
     ]
   },
+  "W110-A": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-A: repeated misses are promoted and a ten-minute stall requests a restart",
+      "W110-A: repeated misses are promoted and a ten-minute stall requests a restart"
+    ]
+  },
+  "W110-B": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-B: complete report and an idle pane with an update footer become report-ready",
+      "W110-B: complete report and an idle pane with an update footer become report-ready"
+    ]
+  },
+  "W110-C": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-C: watch rechecks a missing window before recording loss",
+      "W110-C: watch rechecks a missing window before recording loss"
+    ]
+  },
+  "W110-D": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-D: a failed Codex version check retries three times and records the output",
+      "W110-D: a failed Codex version check retries three times and records the output"
+    ]
+  },
+  "W110-E": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-E: closed dependency without a report has warnings, a queue reason and a durable event",
+      "W110-E: closed dependency without a report has warnings, a queue reason and a durable event"
+    ]
+  },
+  "W110-F": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-F: leading verdict tokens accept trailing findings and ambiguity is journaled",
+      "W110-F: leading verdict tokens accept trailing findings and ambiguity is journaled"
+    ]
+  },
+  "W110-G": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-G: outputs retain deferred cells and silently ignore namespaced extensions",
+      "W110-G: outputs retain deferred cells and silently ignore namespaced extensions"
+    ]
+  },
+  "W110-H": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-H: off and null erase a provider quota even with an inherited share, whereas 0 blocks",
+      "W110-H: off and null erase a provider quota even with an inherited share, whereas 0 blocks"
+    ]
+  },
+  "W110-I": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-I: short-window samples expire after two windows and disappear from the plan",
+      "W110-I: short-window samples expire after two windows and disappear from the plan"
+    ]
+  },
   "WALL-1-f1": {
     "rev": "v0.20.2",
     "outcome": "IMPORT-ERROR",

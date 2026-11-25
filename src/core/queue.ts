@@ -50,7 +50,7 @@ import { assertReviewBase, ReviewBlocked } from './review-freshness.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
-import { queueHolds, usageSummaryLines } from './usage-limits.ts';
+import { queueHolds, refreshExpiredStartPlan, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
 import { clearSetupProgress, readSetupProgress, startProgressText } from './setup-progress.ts';
 
@@ -292,6 +292,8 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
     if (spec.after.length > 0) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
+      const blocked = findBlocked([{ ...spec, status: 'queued' }], rows, verdictClock(config, ctx.runner.now())).get(spec.task);
+      for (const reason of blocked?.verdicts ?? []) lines.push(`  WARNING: after ${reason.task}: ${reason.reason}`);
       lines.push(`  after:    ${spec.after.join(', ')}${unmet.length === 0 ? ' (all have a report already)' : ` – ${waitingText(unmet)}`}`);
     }
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
@@ -1226,6 +1228,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   entries = readQueue(config);
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());
+  const refreshed = new Set<AgentName>();
   const stillHeld = new Set<string>();
   const candidates: QueueEntry[] = [];
   const loadHold = queueLoadHold(config);
@@ -1283,6 +1286,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
       stillHeld.add(entry.task);
       if (memory.held.get(entry.task) !== waitsFor) { memory.held.set(entry.task, waitsFor); await opts.log?.(`queue: ${entry.task} ${waitsFor}`); }
       continue;
+    }
+    if (hasPlace(entry) && !refreshed.has(entry.agent)) {
+      refreshed.add(entry.agent);
+      void refreshExpiredStartPlan(ctx, entry.agent).catch(error => ctx.info(errorMessage(error)));
     }
     const held = holds[entry.agent];
     if (held) {
@@ -1504,7 +1511,8 @@ async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifie
   await writeEntry(ctx, failed);
   await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);
   const safeError = (redactQueue({ ...entry, error }, config) as QueueEntry).error ?? 'n/d';
-  const text = retry ? `${entry.task}: start z kolejki – ${firstLine(safeError)}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${firstLine(safeError)}`;
+  const check = /^.+ CLI version check failed/.test(safeError) ? safeError : firstLine(safeError);
+  const text = retry ? `${entry.task}: start z kolejki – ${check}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${check}`;
   await opts.log?.(`queue: ${text}`);
   await recordJournal(ctx, { kind: retry ? 'queue-retry' : 'queue-failed', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   if (notify) await notifyPlain(ctx, notifier, entry.task, retry ? text : `${text} (agentctl queue retry ${entry.task})`, opts.self);
@@ -1518,6 +1526,7 @@ async function notifyPlain(ctx: Context, notifier: Notifier, task: string, text:
 
 /** Explicit OS/network failures only; spec/path/branch failures are permanent by default. */
 export function transientStartError(error: string): boolean {
+  if (/^(?:codex not found or not working|.+ CLI version check failed)/i.test(error)) return true;
   if (/ENOENT|not (?:exist|found)|invalid spec|branch.*(?:exists|conflict)|already checked out/i.test(error)) return false;
   return /\b(?:ETIMEDOUT|EAGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|EAI_AGAIN)\b|lock.*(?:busy|temporar)|timed out waiting for .*lock|network.*(?:timeout|temporar)/i.test(error);
 }

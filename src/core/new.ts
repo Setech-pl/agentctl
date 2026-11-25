@@ -1,5 +1,6 @@
 import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
+import { refreshExpiredStartPlan } from './usage-limits.ts';
 import { providerHolds, providerHoldText } from './provider-hold.ts';
 import { freshTaskDiskStartHold } from './disk.ts';
 import { cloneTaskNodeModules, hasNpmLockfile, nodeModulesEvent, setupNodeModules } from './node-modules-store.ts';
@@ -69,10 +70,15 @@ export interface NewResult {
   switchedBy?: 'flag' | 'limit';
 }
 
-async function requireTool(ctx: Context, tool: string, args: string[], hint?: string): Promise<string> {
+async function requireTool(ctx: Context, tool: string, args: string[], hint?: string, agent?: string): Promise<string> {
   const r = await ctx.runner.exec(tool, args, { readOnly: true });
-  if (r.code !== 0) throw new AgentctlError(`${tool} not found or not working`, hint);
+  if (r.code !== 0) throw new AgentctlError(agent ? cliCheckFailure(agent, r) : `${tool} not found or not working`, hint);
   return r.stdout.trim().split('\n')[0] || 'unknown';
+}
+
+function cliCheckFailure(agent: string, result: { code: number; stderr: string; stdout: string }): string {
+  const output = (result.stderr.trim() || result.stdout.trim() || 'no output').replace(/\s+/g, ' ').slice(0, 500);
+  return `${agent} CLI version check failed (exit ${result.code}): ${output}`;
 }
 
 const SETUP_TAIL_LINES = 15;
@@ -179,7 +185,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
   }
   const versions: Record<string, string> = {};
   if (!runner.dryRun && !opts.noAgent) {
-    for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent]);
+    for (const agent of new Set(specs.filter(s => !s.host).map((s) => s.agent))) versions[agent] = await requireTool(ctx, providerCommand(config, agent), ['--version'], INSTALL_HINTS[agent], agent);
   }
 
   const results: NewResult[] = [];
@@ -192,13 +198,14 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       const evidence = readonlyReviewEvidence(ctx, spec.window);
       spec = { ...spec, repos, prompt: `Review in the author's checkout. Leave its files and Git state untouched. Write evidence under ${evidence}.\n\n${spec.prompt}` };
     } else if (!spec.host) await assertCheckoutNotBorrowed(ctx, spec.task);
+    if (!opts.noAgent && !opts.trackStart && !spec.host) await refreshExpiredStartPlan(ctx, spec.agent);
     const execution = spec.host ? ctx.hosts.forHost(spec.host) : runner;
     const taskTmux = spec.host ? ctx.hosts.tmux(spec.host) : tmux;
     const hint = spec.host ? remoteAttachHint(config, spec)! : attachHint(config);
     if (spec.host) {
       if (!opts.noAgent) await execution.exec('tmux', ['-V'], { readOnly: true }).then(r => { if (r.code !== 0) throw new AgentctlError(`host ${spec.host}: tmux is unavailable`); });
       const cli = await execution.exec(providerCommand(config, spec.agent), ['--version'], { readOnly: true });
-      if (!opts.noAgent && cli.code !== 0) throw new AgentctlError(`host ${spec.host}: ${spec.agent} CLI is unavailable`);
+      if (!opts.noAgent && cli.code !== 0) throw new AgentctlError(cliCheckFailure(`${spec.agent} on ${spec.host}`, cli));
       versions[`${spec.host}:${spec.agent}`] = cli.stdout.trim().split('\n')[0] ?? 'unknown';
     }
     // The same check as in the door itself, before the first worktree or file exists.

@@ -448,7 +448,7 @@ function editQuotas(config: GlobalConfig, edit: QuotaEdit): { chat?: string; sha
   const raw = edit.quota;
   const chat = isObject(raw) ? chatOwner(raw.chat) : undefined;
   if (raw !== undefined && !chat) throw new AgentctlError('quota must include a valid chat and at least one provider share');
-  const shares = isObject(raw) ? Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'chat')) : undefined;
+  const shares = isObject(raw) ? Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'chat').map(([key, value]) => [key, key !== 'share' && value === null ? 'off' : value])) : undefined;
   if (shares && !Object.keys(shares).length) throw new AgentctlError('quota must include at least one provider share');
   for (const id of Object.keys(shares ?? {})) if (id !== 'share' && !(activeProviders(config) as readonly string[]).includes(id)) throw new AgentctlError(`quota.${id}: provider is not active`);
   const name = chat?.slice(5) ?? '';
@@ -495,11 +495,12 @@ export function quotaDiffText(from?: ChatQuotas, to?: ChatQuotas): string | unde
     if (Object.hasOwn(from?.chats ?? {}, name) !== Object.hasOwn(to?.chats ?? {}, name)) differences.push(`chat:${name} ${Object.hasOwn(to?.chats ?? {}, name) ? 'dodano' : 'usunięto'}`);
     compare(`chat:${name} share %`, from?.chats[name]?.share, to?.chats[name]?.share);
   }
+  const quotaLabel = (value: unknown) => value === 0 ? '0 (blocked)' : value === 'off' ? 'off (no quota)' : value;
   for (const id of PROVIDER_IDS) {
-    compare(`default ${id}`, from?.default[id], to?.default[id]);
+    compare(`default ${id}`, quotaLabel(from?.default[id]), quotaLabel(to?.default[id]));
     compare(`floor ${id}`, from?.floor[id], to?.floor[id]);
     for (const name of chats) {
-      compare(`chat:${name} ${id}`, from?.chats[name]?.[id], to?.chats[name]?.[id]);
+      compare(`chat:${name} ${id}`, quotaLabel(from?.chats[name]?.[id]), quotaLabel(to?.chats[name]?.[id]));
     }
   }
   for (const cohort of [...new Set([...Object.keys(from?.cohorts ?? {}), ...Object.keys(to?.cohorts ?? {})])].sort()) {

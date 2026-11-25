@@ -15,7 +15,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'state-write-recovered', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'launch-failed', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-held', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
+export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered','watch-resumed', 'watch-stage-restarted', 'ambiguous-verdict', 'state-write-recovered', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'launch-failed', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-held', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -63,7 +63,7 @@ export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'
     const record = readTaskRecord(ctx.config, windowName(entry.task));
     if (record) {
       const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
-      if (!report.ready || (record.attemptId && !report.sentinel)) return;
+      if (!report.ready || (record.attemptId && !report.sentinel && !report.structured)) return;
       const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
       return withFileLock(`${journalPath(ctx.config)}.reports.lock`, async () => {
         if (readJournal(ctx.config, -1).some(e => e.kind === entry.kind && e.task === entry.task && e.reportAttempt === identity)) return;

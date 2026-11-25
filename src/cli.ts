@@ -82,7 +82,7 @@ import { accountTasks, taskNames } from './core/task-accounting.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
 import type { Notifier, NotifyResult } from './core/notify.ts';
-import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
+import { ensureWatchWindow, runWatch, WatchRestart, WATCH_RESTART_CODE, WATCH_WINDOW } from './core/watch.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { MANAGER_STATE_TEXT, MANAGER_WINDOW, managerAddress, managerAdvice, startManager, stopManager } from './core/manager.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
@@ -156,7 +156,7 @@ export function defaultDeps(): CliDeps {
     loadConfig: () => loadGlobalConfig(),
     confirm: process.stdin.isTTY ? askOnTerminal : undefined,
     readClipboard: () => readClipboard(new RealRunner()),
-    watchCommand: () => selfCommand('watch'),
+    watchCommand: () => `while :; do AGENTCTL_WATCH_SUPERVISED=1 ${selfCommand('watch')}; status=$?; [ "$status" = ${WATCH_RESTART_CODE} ] || exit "$status"; done`,
     statusLineCommand: () => selfCommand('status --tmux-line'),
     boardCommand: () => selfCommand('board'),
     selfArgv,
@@ -1498,10 +1498,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           const note = await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
-            await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
+            await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx),
+              ...(process.env.AGENTCTL_WATCH_SUPERVISED === '1' ? {onStall: () => { throw new WatchRestart(); }} : {}) });
           });
           if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
         } catch (e) {
+          if (e instanceof WatchRestart) { process.exitCode = WATCH_RESTART_CODE; return; }
           await (await makeNotifier(ctx)).notify('agentctl', `watch failed: ${errorMessage(e).split('\n')[0]}; restart: agentctl watch --tmux --restart`).catch(() => undefined);
           throw e;
         } finally {

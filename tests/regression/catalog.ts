@@ -26,6 +26,15 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'W110-A', fixedIn: '0.27.2', symptom: 'Watch stages could starve indefinitely after timing out.', scenarios: [s('field0272.test.ts', '^W110-A:')] },
+  { id: 'W110-B', fixedIn: '0.27.2', symptom: 'A finished task with a complete report could remain working.', scenarios: [s('field0272.test.ts', '^W110-B:')] },
+  { id: 'W110-C', fixedIn: '0.27.2', symptom: 'A transient tmux inventory gap could report a live window lost.', scenarios: [s('field0272.test.ts', '^W110-C:')] },
+  { id: 'W110-D', fixedIn: '0.27.2', symptom: 'A failed Codex version check failed the order without retry or CLI output.', scenarios: [s('field0272.test.ts', '^W110-D:')] },
+  { id: 'W110-E', fixedIn: '0.27.2', symptom: 'A terminal dependency without a verdict could block silently forever.', scenarios: [s('field0272.test.ts', '^W110-E:')] },
+  { id: 'W110-F', fixedIn: '0.27.2', symptom: 'Trailing findings and ambiguous first-line verdicts were mishandled.', scenarios: [s('field0272.test.ts', '^W110-F:')] },
+  { id: 'W110-G', fixedIn: '0.27.2', symptom: 'Deferred checks and namespaced output extensions were rejected.', scenarios: [s('field0272.test.ts', '^W110-G:')] },
+  { id: 'W110-H', fixedIn: '0.27.2', symptom: 'An owner could not remove a chat provider quota.', scenarios: [s('field0272.test.ts', '^W110-H:')] },
+  { id: 'W110-I', fixedIn: '0.27.2', symptom: 'Plan readings did not use a two-window age bound or show n/d when expired.', scenarios: [s('field0272.test.ts', '^W110-I:')] },
   { id: 'FIELD0256-LAUNCH', fixedIn: '0.27.1', symptom: 'A window could exit at launch without evidence, a retry, or a usable recovery and dependency state.', scenarios: [s('queue.test.ts', '^FIELD0256-LAUNCH:'), s('field0253-gc.test.ts', '^FIELD0256-DEAD-GC:')] },
   { id: 'FIELD0256-HOLD', fixedIn: '0.27.1', symptom: 'Registered orders stayed idle without a hold event or a visible owner reservation reason.', scenarios: [s('queue.test.ts', '^FIELD0256-HOLD:')] },
   { id: 'FIELD0256-CHAT-USAGE', fixedIn: '0.27.1', symptom: 'Named chats lacked a common footer showing their effective quotas and global headroom.', scenarios: [s('owner-limits.test.ts', '^FIELD0256-CHAT-USAGE:')] },

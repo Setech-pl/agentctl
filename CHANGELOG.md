@@ -3,6 +3,8 @@
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) while it is below 1.0 (minor versions may change behaviour).
 
 ## [Unreleased]
+- **WALL agentctl-110 (W110-A–I):** Promote stalled watch stages and restart a wedged watcher, verify missing tmux windows, recognize complete idle reports, explain terminal dependencies and ambiguous verdicts, and retry provider version-check failures. Report outputs accept deferred cells and namespaced extensions. Chat quotas can be cleared, and expired plan percentages are excluded.
+
 
 - Early task exits keep the CLI exit code, pane tail and log path. Watch retries once in the original worktree. Dead tasks can be resumed under the same ID and waiting dependencies show the cause. / Po wczesnym zakończeniu zadania zostają kod wyjścia, końcówka ekranu i ścieżka logu. Watch ponawia start w tym samym worktree. Martwe zadanie można wznowić pod tym samym ID, a zadania zależne pokazują przyczynę oczekiwania.
 - Exact task IDs take precedence across CLI and MCP, including closed tasks and queue entries. `task_spec` also returns queued-only specifications. / Dokładny identyfikator ma pierwszeństwo w CLI i MCP, także dla zamkniętych zadań i wpisów w kolejce. `task_spec` pokazuje też specyfikacje zadań czekających w kolejce.

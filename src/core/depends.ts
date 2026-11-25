@@ -41,7 +41,7 @@ export interface VerdictClock { nowMs: number; settleS: number }
  * is up and it is neither closed nor cancelled) or the report changed within `report.settle_s`. Only then does a missing verdict block.
  */
 export function verdictPending(row: StatusRow | undefined, clock?: VerdictClock): boolean {
-  if (!row || row.verdict) return false;
+  if (!row || row.verdict || row.closed || row.cancelled || row.archived) return false;
   if (row.window === 'alive' && !row.closed && !row.cancelled) return true;
   return clock !== undefined && clock.settleS > 0 && row.reportMtime !== undefined && clock.nowMs - row.reportMtime < clock.settleS * 1000;
 }
@@ -62,6 +62,7 @@ export interface Blockers {
  */
 export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' | 'status' | 'afterVerdicts'>[], rows: readonly StatusRow[], clock?: VerdictClock): Map<string, Blockers> {
   const cancelled = cancelledTasks(rows);
+  const byTask = new Map(rows.map(row => [row.task, row]));
   const dead = new Set(rows.filter(r => r.state === 'dead' && r.report !== 'yes').map(r => r.task));
   const blocked = new Map<string, Blockers>();
   const waiting = entries.filter((e) => e.status === 'queued');
@@ -73,8 +74,9 @@ export function findBlocked(entries: readonly Pick<QueueEntry, 'task' | 'after' 
       if (stopped.length) b.dead = stopped;
       const verdicts = e.after.flatMap(task => {
         const allowed = e.afterVerdicts?.[task] ?? DEFAULT_AFTER_VERDICTS;
-        const row = rows.find(r => r.task === task);
-        return hasReport(row) && !verdictPending(row, clock) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
+        const row = byTask.get(task);
+        const terminalWithoutVerdict = !row?.verdict && (row?.closed || row?.cancelled || row?.archived);
+        return (terminalWithoutVerdict || hasReport(row)) && !verdictPending(row, clock) && (!row?.verdict || !allowed.includes(row.verdict)) ? [{ task, reason: row?.verdict ? `verdict ${row.verdict}` : 'verdict missing/unparsable (brak werdyktu)' }] : [];
       });
       if (verdicts.length) b.verdicts = verdicts;
       if (b.cancelled.length + b.blocked.length + verdicts.length + stopped.length === 0) continue;

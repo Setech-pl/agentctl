@@ -10,6 +10,15 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| W110-A | Watch stages could starve indefinitely after timing out. | `tests/field0272.test.ts` (`^W110-A:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-B | A finished task with a complete report could remain working. | `tests/field0272.test.ts` (`^W110-B:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-C | A transient tmux inventory gap could report a live window lost. | `tests/field0272.test.ts` (`^W110-C:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-D | A failed Codex version check failed the order without retry or CLI output. | `tests/field0272.test.ts` (`^W110-D:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-E | A terminal dependency without a verdict could block silently forever. | `tests/field0272.test.ts` (`^W110-E:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-F | Trailing findings and ambiguous first-line verdicts were mishandled. | `tests/field0272.test.ts` (`^W110-F:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-G | Deferred checks and namespaced output extensions were rejected. | `tests/field0272.test.ts` (`^W110-G:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-H | An owner could not remove a chat provider quota. | `tests/field0272.test.ts` (`^W110-H:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| W110-I | Plan readings did not use a two-window age bound or show n/d when expired. | `tests/field0272.test.ts` (`^W110-I:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | FIELD0256-LAUNCH | A window could exit at launch without evidence, a retry, or a usable recovery and dependency state. | `tests/queue.test.ts` (`^FIELD0256-LAUNCH:`)<br>`tests/field0253-gc.test.ts` (`^FIELD0256-DEAD-GC:`) | 0.27.1 | fails on v0.27.0 (2 failing of 2) |
 | FIELD0256-HOLD | Registered orders stayed idle without a hold event or a visible owner reservation reason. | `tests/queue.test.ts` (`^FIELD0256-HOLD:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |
 | FIELD0256-CHAT-USAGE | Named chats lacked a common footer showing their effective quotas and global headroom. | `tests/owner-limits.test.ts` (`^FIELD0256-CHAT-USAGE:`) | 0.27.1 | fails on v0.27.0 (1 failing of 1) |

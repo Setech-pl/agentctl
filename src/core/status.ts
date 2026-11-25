@@ -163,6 +163,8 @@ export function guessAgent(screen: string): AgentName {
 export interface CollectOptions {
   /** Board refresh uses remote samples published by watch. */
   remoteCachedOnly?: boolean;
+  /** Watch confirms missing local windows and defers loss events until the sweep completed. */
+  verifyWatchLoss?: boolean;
   /** Ask git for the progress of each worktree (default). The watcher and the close plan have no use for it. */
   progress?: boolean;
   /** Read paths use persisted facts and never discover files or ask git to scan a worktree. */
@@ -196,6 +198,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   const infos = [...await ctx.localTmux.windows(), ...await ctx.hosts.windows(opts.cachedOnly || opts.remoteCachedOnly)];
   const windowByName = new Map(infos.map(info => [info.plain, info]));
   const windowHosts = new Set(infos.map(info => info.host ?? ''));
+  let verifiedWindows: ReturnType<typeof ctx.localTmux.windows> | undefined;
   const live = new Set(infos.filter(w => w.exitCode === undefined).map(w => w.plain));
   let queuedStarts: Set<string> | undefined;
   const rows: StatusRow[] = [];
@@ -219,7 +222,21 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     if (!archived) knownWindows.add(record.window);
     if (record.host && !archived && !record.closed && !record.cancelled && !opts.cachedOnly && !opts.remoteCachedOnly) await syncRemoteFiles(ctx, record);
     let unreachable = !!record.host && !record.closed && !record.cancelled && !archived && ctx.hosts.connection(record.host).unreachable;
-    const alive = live.has(record.window) || unreachable;
+    let alive = live.has(record.window) || unreachable;
+    let verifiedOnly = false;
+    if (!alive && opts.verifyWatchLoss && !record.host && !archived && !record.closed && !record.cancelled && record.started) {
+      verifiedWindows ??= ctx.localTmux.windows();
+      const found = ctx.localTmux.resolve(record.window, await verifiedWindows, record.windowId);
+      if (found && found.exitCode === undefined) {
+        infos.push(found);
+        windowByName.set(record.window, found);
+        live.add(record.window);
+        alive = true;
+      } else if (record.windowId && await ctx.localTmux.paneExists(record.window, record.windowId)) {
+        alive = verifiedOnly = true;
+        live.add(record.window);
+      }
+    }
     // Re-queued records retain attempt history, but no window has been launched yet. The queue owns their display.
     if (!alive && !record.started && record.promptDelivery === 'launching' && !record.cancelled && !record.closed && !archived) {
       if (!record.launchAt && !record.repos.some(repo => fs.existsSync(repo.worktree))) continue;
@@ -248,7 +265,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let screenRead = !alive;
     if (alive && !unreachable) {
       let screen;
-      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await tmux.capture(record.window, undefined, infos, record.windowId); }
+      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await tmux.capture(record.window, undefined, verifiedOnly ? undefined : infos, record.windowId); }
       catch (error) { if (!(error instanceof HostUnreachable)) throw error; unreachable = true; screen = { code: 255, stdout: '', stderr: error.message }; }
       if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }
@@ -258,6 +275,8 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const stored = readStoredEvent(config, record);
     const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
+    const completed = reportState.sentinel || reportState.structured;
+    const statusSettings = completed && screenRead ? { ...settings, idleRequiresInput: false } : settings;
     // The candidate lives on the row, not on the record copy: one bounded discovery walk per task per collect (R3).
     let reportCandidate = record.reportCandidate;
     let candidatesCache: ReturnType<typeof findCandidates> | undefined;
@@ -283,10 +302,11 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const missingDuringLaunch = !alive && sessionPresent && record.launchAt && inLaunchGrace(config, record, runner.now()) && !expectedStartClosure(config, record);
     const launchDead = !alive && (launchExit !== undefined || paneExit !== undefined || missingDuringLaunch);
     if (alive && record.launchAt && !opts.cachedOnly && !unreachable && inLaunchGrace(config, record, runner.now())) await saveLaunchTail(ctx, record, screenText);
-    const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, sessionPresent, opts.cachedOnly);
+    const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, sessionPresent, opts.verifyWatchLoss || opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
-    let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : launchDead ? (reportReady ? 'report-ready' : 'dead') : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings, reportReady, event: stored?.outcome });
+    let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : launchDead ? (reportReady ? 'report-ready' : 'dead') : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings: statusSettings, reportReady: reportReady && (!alive || screenRead), event: stored?.outcome });
     const quota = alive && !unreachable && !reportReady && !cancelled && !closed ? ((classifyScreen(screenText, settings) === 'limited' ? quotaError(screenText) : undefined) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!record.host && !opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;
+    if (alive && completed && screenRead && classifyScreen(screenText, statusSettings) === 'idle' && !unreachable && !writeFailure && !record.supersededBy) state = 'report-ready';
     if (state === 'report-ready' && hiddenBy === 'auto') hiddenBy = null;
     if (quota && !['working', 'background', 'report-ready', 'closed', 'cancelled', 'superseded'].includes(state)) state = 'limited';
     // Passive wire failures fill an idle screen; legacy hook recovery keeps its existing precedence.

@@ -1,3 +1,4 @@
+import { dependencyVerdict, parseOutputs } from './outputs.ts';
 import { fileVersion } from './file-version.ts';
 import { checkReportPath, readReportText } from './report-path.ts';
 import fs from 'node:fs';
@@ -12,13 +13,14 @@ export function reportFingerprint(file: string): string {
 export function attemptFields(record: Pick<TaskRecord, 'report' | 'attempt'>, now: number) {
   return { attempt: (record.attempt ?? 0) + 1, outputsProtocol: 1, attemptId: randomUUID(), attemptStarted: new Date(now).toISOString(), attemptReportBaseline: reportFingerprint(record.report) };
 }
-export interface ReportState { ready: boolean; exists: boolean; mtime?: number; signature?: string; reason: string; /** The report ends with the explicit report-end directive of this attempt (not only a settled turn). */ sentinel?: boolean }
+export interface ReportState { ready: boolean; exists: boolean; mtime?: number; signature?: string; reason: string; /** The report ends with the explicit report-end directive of this attempt (not only a settled turn). */ sentinel?: boolean; structured?: boolean }
 
 /** What the body of a report says, once read: its hash and the directives the readiness rule looks at. */
 interface ReportDigest {
   signature: string;
   lastDirective: string;
   declaredAttempts: Set<string>;
+  structured: boolean;
 }
 
 /** Digests per report path; only a reusable high-resolution file version permits a hit. */
@@ -37,7 +39,7 @@ function digestReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick
     if (line.trim()) lastDirective = fence ? '' : line.trim();
     if (!fence) { const attempt = /^<!-- agentctl:attempt ([^>]+) -->$/.exec(line.trim())?.[1]; if (attempt) declaredAttempts.add(attempt); }
   }
-  const digest: ReportDigest = { signature: createHash('sha256').update(text).digest('hex'), lastDirective, declaredAttempts };
+  const digest: ReportDigest = { signature: createHash('sha256').update(text).digest('hex'), lastDirective, declaredAttempts, structured: !!dependencyVerdict(text, !!record.reviewOf) && parseOutputs(text, {review: !!record.reviewOf}).outputs_valid };
   if (reportDigests.size > 5000) reportDigests.delete(reportDigests.keys().next().value!);
   if (version !== undefined) reportDigests.set(file, { version, digest });
   else reportDigests.delete(file);
@@ -56,7 +58,7 @@ export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Part
     if (!st.isFile() || st.isSymbolicLink()) return { ready: false, exists: true, reason: 'not a regular report' };
     const start = Date.parse(record.attemptStarted ?? record.started);
     if (Number.isFinite(start) && mtimeMs < start) return { ready: false, exists: true, mtime: mtimeMs, reason: 'before current attempt' };
-    const { signature, lastDirective, declaredAttempts } = digestReport(config, record, file, st);
+    const { signature, lastDirective, declaredAttempts, structured } = digestReport(config, record, file, st);
     if (record.deliveryStartedAt && signature === record.deliveryReportBaseline && (record.promptDelivery !== 'sent' || record.promptKind === 'followup')) return { ready: false, exists: true, mtime: mtimeMs, signature, reason: 'unchanged before prompt delivery' };
     if (record.attemptReportBaseline && signature === record.attemptReportBaseline) return { ready: false, exists: true, mtime: mtimeMs, signature, reason: 'unchanged from previous attempt' };
     // In-place revisions can retain an older directive after the current one.
@@ -65,7 +67,7 @@ export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Part
     const sentinel = lastDirective === REPORT_END;
     const copiedComplete = file === record.report && signature === record.reportCompleteHash;
     const ended = turnEnded || (!!record.turnEndedAt && Date.parse(record.turnEndedAt) >= (Number.isFinite(start) ? start : 0) && (config.reportSettleS === 0 || Date.parse(record.turnEndedAt) >= Math.floor(mtimeMs)));
-    const ready = sentinel || copiedComplete || (ended && (config.reportSettleS === 0 || now - mtimeMs >= config.reportSettleS * 1000));
-    return { ready, exists: true, mtime: mtimeMs, signature, sentinel, reason: ready ? sentinel ? 'report-end marker' : 'settled after turn end' : 'incomplete: awaiting report-end or settled turn end' };
+    const ready = sentinel || structured || copiedComplete || (ended && (config.reportSettleS === 0 || now - mtimeMs >= config.reportSettleS * 1000));
+    return { ready, exists: true, mtime: mtimeMs, signature, sentinel, structured, reason: ready ? sentinel ? 'report-end marker' : structured ? 'verdict and outputs' : 'settled after turn end' : 'incomplete: awaiting report-end or settled turn end' };
   } catch (error) { return { ready: false, exists: false, reason: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'no report' : error instanceof Error ? error.message : 'no report' }; }
 }

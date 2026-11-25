@@ -1,5 +1,6 @@
 import { attentionTick } from './attention.ts';
-import { maintainWall } from './wall.ts';
+import { tmuxLoss } from './tmux-loss.ts';
+import { maintainWall, OWNER_IDENTITY, postMessage } from './wall.ts';
 import { watchIntegrationGc } from './integration-gc.ts';
 import { autoClosePulled } from './pulled-auto-close.ts';
 import { applyAcceptedWrites } from './queue.ts';
@@ -245,20 +246,31 @@ export interface TickOptions {
  * announced a moment ago (see `agentctl event`) is logged but not notified again.
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
-  const step = <T>(name: string, body: (signal: AbortSignal) => Promise<T>) => options.signal?.aborted
-    ? Promise.resolve(undefined)
-    : withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, body, options.stepClock));
+  const stages = new Map<string, { run: (signal: AbortSignal) => Promise<unknown>; needs: string[] }>();
+  const done = new Set<string>();
+  const stage = (name: string, run: (signal: AbortSignal) => Promise<unknown>, ...needs: string[]) => { stages.set(name, {run, needs}); };
+  const execute = async (name: string): Promise<void> => {
+    const item = stages.get(name);
+    if (!item || done.has(name) || options.signal?.aborted) return;
+    for (const dependency of item.needs) await execute(dependency);
+    done.add(name);
+    await withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, item.run, options.stepClock));
+  };
+  let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
+  const allRows = () => processed ?? observed;
+  const activeRows = () => allRows()?.filter(r => !r.closed && !r.cancelled);
+  const collect = () => collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true});
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
   };
-  await step('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
-  await step('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
-  await step('launch health', signal => checkLaunchHealth(ctx, notifier, options.self, signal));
+  stage('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
+  stage('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
+  stage('launch health', signal => checkLaunchHealth(ctx, notifier, options.self, signal));
   // Admission observes slots and named dependencies. Full status and report processing are optional for it.
-  await step('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }));
-  await step('WALL maintenance', () => maintainWall(ctx));
-  await step('limit requests', () => maintainLimitRequests(ctx));
+  stage('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }), 'accepted MCP writes');
+  stage('WALL maintenance', () => maintainWall(ctx));
+  stage('limit requests', () => maintainLimitRequests(ctx));
   const tickAt = ctx.runner.now();
   if (memory.lastTickAt === undefined) {
     try {
@@ -275,20 +287,25 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   const gap = memory.lastTickAt === undefined ? 0 : tickAt - memory.lastTickAt;
   memory.lastTickAt = tickAt;
   // A closed or cancelled task is off the list: no transitions, no notifications (closing a task with no report is not a vanished window).
-  const observed = await step('status collection', async () => {
+  stage('status collection', async signal => {
     const config = ctx.config;
-    if (memory.statusSweep?.config === config) return memory.statusSweep.rows;
+    if (memory.statusSweep?.config === config) {
+      observed = memory.statusSweep.rows;
+      memory.statusSweep = undefined;
+      return;
+    }
     // A slow sweep may finish between ticks. Keep its result for the next tick instead of
     // discarding it and repeatedly starting the same work. WatchSteps keeps one sweep in flight.
-    const rows = await collectStatus(ctx, { progress: false, archived: true });
+    const rows = await collect();
     if (ctx.config !== config || options.signal?.aborted) throw new Error('watch configuration or run changed during status collection');
-    memory.statusSweep = { config, rows };
-    return rows;
+    if (signal.aborted) memory.statusSweep = { config, rows };
+    else observed = rows;
   });
-  if (observed) memory.statusSweep = undefined;
-  const processed = observed && await step('task delivery and reports', async (signal) => {
+  stage('task delivery and reports', async signal => {
+    if (!observed) return;
     let allRows = observed;
-    if (await autoClosePulled(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
+    if (await autoClosePulled(ctx, allRows)) allRows = await collect();
+    let changed = false;
     for (const row of allRows) {
       if (signal.aborted) break;
       const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
@@ -307,48 +324,59 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
           await new Alerts(ctx, notifier, { self: options.self }).send({ task: row.task, window: row.windowName }, 'needs-attention', text, 'watch');
           await journalTransition(ctx, row, { task: row.task, from: row.state, to: 'needs-attention', reason: 'transition', notification: text });
         }
-        if (result !== 'pending') allRows = await collectStatus(ctx, { progress: false, archived: true });
+        if (result !== 'pending') changed = true;
       }
     }
-    for (const record of listTaskRecords(ctx.config)) if (!signal.aborted && !record.closed && !record.cancelled && (!record.host || !ctx.hosts.connection(record.host).unreachable)) await drainPromptQueue(ctx, record.window, allRows.find(row => row.windowName === record.window)?.state);
+    if (signal.aborted) return;
+    if (changed) allRows = await collect();
+    const byWindow = new Map(allRows.map(row => [row.windowName, row.state]));
+    for (const record of listTaskRecords(ctx.config)) if (!signal.aborted && !record.closed && !record.cancelled && (!record.host || !ctx.hosts.connection(record.host).unreachable)) await drainPromptQueue(ctx, record.window, byWindow.get(record.window));
     // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
-    if (!signal.aborted && await syncWaitingReports(ctx, allRows)) allRows = await collectStatus(ctx, { progress: false, archived: true });
-    for (const record of listTaskRecords(ctx.config)) if (!signal.aborted) await journalOutputs(ctx, record);
-    return allRows;
-  });
-  const allRows = processed ?? observed;
-  const rows = allRows?.filter((r) => !r.closed && !r.cancelled);
-  if (rows) {
-    await step('limited recovery', () => limitedTick(ctx, rows, notifier));
-    await step('overload recovery', () => overloadTick(ctx, rows, notifier));
-    await step('window decorations', () => decorateWindows(ctx, memory, rows));
-  }
-  const now = ctx.runner.now();
-  await step('away', async () => {
+    if (!signal.aborted && await syncWaitingReports(ctx, allRows)) allRows = await collect();
+    const ready = new Set(allRows.filter(row => row.state === 'report-ready').map(row => row.task));
+    for (const record of listTaskRecords(ctx.config)) if (!signal.aborted && (ready.has(record.task) || record.closed || record.cancelled)) await journalOutputs(ctx, record);
+    if (!signal.aborted) processed = allRows;
+  }, 'status collection');
+  for (const [name, run] of [
+    ['limited recovery', (rows: StatusRow[]) => limitedTick(ctx, rows, notifier)],
+    ['overload recovery', (rows: StatusRow[]) => overloadTick(ctx, rows, notifier)],
+    ['window decorations', (rows: StatusRow[]) => decorateWindows(ctx, memory, rows)],
+  ] as const) stage(name, async () => { const rows = activeRows(); if (rows) await run(rows); }, 'task delivery and reports');
+  stage('away', async () => {
     const awayChange = await awayTick(ctx);
     if (awayChange) await startLog(`away ${awayChange} (away.auto_idle)`);
   });
-  await step('reviews', () => reviewTick(ctx));
-  await step('consultations', () => consultTick(ctx));
-  if (allRows && processed) {
-    await step('blocked queue', () => announceBlocked(ctx, notifier, allRows, { self: options.self, log: startLog }));
-    await step('cohorts', () => cohortTick(ctx, notifier, allRows, startLog));
-  }
-  await step('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
-  await step('machine load', () => recordMachineLoad(ctx));
-  await step('disk alerts', () => diskTick(ctx, notifier, startLog));
-  await step('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
-  await step('usage', () => usageTick(ctx, notifier, startLog));
-  await step('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });
-  if (allRows) await step('attention', () => attentionTick(ctx, allRows, notifier));
+  stage('reviews', () => reviewTick(ctx));
+  stage('consultations', () => consultTick(ctx));
+  stage('blocked queue', () => processed ? announceBlocked(ctx, notifier, processed, {self: options.self, log: startLog}) : Promise.resolve(), 'task delivery and reports');
+  stage('cohorts', () => processed ? cohortTick(ctx, notifier, processed, startLog) : Promise.resolve(), 'task delivery and reports');
+  stage('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
+  stage('machine load', () => recordMachineLoad(ctx));
+  stage('disk alerts', () => diskTick(ctx, notifier, startLog));
+  stage('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
+  stage('usage', () => usageTick(ctx, notifier, startLog));
+  stage('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });
+  stage('attention', async () => { const rows = allRows(); if (rows) await attentionTick(ctx, rows, notifier); }, 'task delivery and reports');
   const events: WatchEvent[] = [];
-  await step('transitions', async signal => {
+  stage('transitions', async signal => {
+    const rows = activeRows();
     if (!rows) return;
+    const now = ctx.runner.now();
+    for (const row of rows) {
+      if (signal.aborted) return;
+      if (!row.tmuxLost) continue;
+      const record = readTaskRecord(ctx.config, row.windowName);
+      if (!record || await ctx.localTmux.paneExists(record.window, record.windowId)) continue;
+      await tmuxLoss(ctx, record, false, false, row.hint?.includes('serwer/sesja tmux działa'));
+    }
     events.push(...detectTransitions(memory, rows, now, ctx.config.watch.waitingAfter * 1000));
     const alerts = new Alerts(ctx, notifier, { self: options.self });
+    const byTask = new Map(rows.map(row => [row.task, row]));
+    const baseline = [];
     for (const e of events) {
       if (signal.aborted) break;
-      const row = rows.find((r) => r.task === e.task);
+      if (e.reason === 'baseline') { baseline.push(logLine(now, e)); continue; }
+      const row = byTask.get(e.task);
       if (e.notification && row) {
         if (e.to === 'report-ready' && e.reason === 'transition') e.notification = reportReadyText(e.task, readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null));
         if (e.to === 'report-ready' && e.reason === 'transition') await recordReport(ctx, row.task);
@@ -359,32 +387,41 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       }
       if (!e.notification && e.from === 'host-unreachable' && e.reason === 'transition' && row) await journalTransition(ctx, row, e);
       await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
-      if (e.reason !== 'baseline') ctx.out(logLine(now, e).trimEnd());
+      ctx.out(logLine(now, e).trimEnd());
     }
+    if (baseline.length) await ctx.runner.appendFile(watchLogPath(ctx), baseline.join(''));
     if (!signal.aborted && gap > Math.max(300_000, 10 * ctx.config.watch.interval * 1000)) {
       const changes = events.filter(e => e.reason === 'transition').map(e => `${e.task}: ${e.from ?? 'new'} → ${e.to}`);
       await recordJournal(ctx, {kind: 'watch-resumed', text: `WATCH WZNOWIONY po przerwie ${formatDuration(gap)}; ${changes.join('; ') || 'bez zmian stanu zadań'}`});
     }
-  });
+  }, 'task delivery and reports');
   if (!ctx.runner.dryRun) {
-    const { publishMcpSnapshot, publishDegradedMcpSnapshot } = await import('./mcp-tools.ts');
+    const {publishMcpSnapshot, publishDegradedMcpSnapshot} = await import('./mcp-tools.ts');
     const snapshot = watchSnapshotPath(ctx.config);
     const snapshotFailed = stateWriteFailure(snapshot)?.reason.startsWith('ENOSPC:');
-    const published = allRows && await step('snapshot preparation', async signal => {
-      await publishMcpSnapshot(ctx, allRows, undefined, signal);
-      return true;
-    });
-    if (!published && !stateWriteFailure(snapshot)) await step('degraded snapshot', async signal => {
+    let published = false;
+    stage('snapshot preparation', async signal => {
+      const rows = allRows();
+      if (!rows) return;
+      await publishMcpSnapshot(ctx, rows, undefined, signal);
+      published = !signal.aborted;
+    }, 'task delivery and reports');
+    stage('degraded snapshot', async signal => {
+      if (published || stateWriteFailure(snapshot)) return;
       const disk = await collectDisk(ctx);
-      if (!signal.aborted) publishDegradedMcpSnapshot(ctx, disk, allRows ? 'snapshot preparation' : 'status collection');
-    });
-    if (published && snapshotFailed) memory.recoveredWrites.add('snapshot watch');
-    if (published && memory.recoveredWrites.size) await step('state write recovery event', async () => {
+      if (!signal.aborted) publishDegradedMcpSnapshot(ctx, disk, allRows() ? 'snapshot preparation' : 'status collection');
+    }, 'snapshot preparation');
+    stage('state write recovery event', async () => {
+      if (published && snapshotFailed) memory.recoveredWrites.add('snapshot watch');
+      if (!published || !memory.recoveredWrites.size) return;
       await recordJournal(ctx, { kind: 'state-write-recovered', text: `zapis stanu wznowiony: ${[...memory.recoveredWrites].join(', ')}` });
       memory.recoveredWrites.clear();
-    });
+    }, 'snapshot preparation');
   }
-  await step('integration GC proposals', () => watchIntegrationGc(ctx, options.signal));
+  stage('integration GC proposals', () => watchIntegrationGc(ctx, options.signal));
+  const priority = memory.steps.priority(stages);
+  if (priority) await execute(priority);
+  for (const name of stages.keys()) await execute(name);
   return events;
 }
 
@@ -401,7 +438,13 @@ export interface WatchOptions {
   maxTicks?: number;
   /** This very agentctl as a command line, for the click action of notifications. */
   self?: SelfArgv | undefined;
+  /** A supervisor relaunches the watch process after a stuck stage. */
+  onStall?: () => never;
+  onTick?: (tick: number, memory: WatchMemory) => Promise<void> | void;
 }
+
+export const WATCH_RESTART_CODE = 75;
+export class WatchRestart extends Error {}
 
 /**
  * Read config.yaml again if its text changed. A file that loads comes into force at once (the next tick sees it: a raised limit starts the
@@ -454,7 +497,7 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
 }
 
 async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): Promise<void> {
-  const memory = new WatchMemory();
+  let memory = new WatchMemory();
   const store = opts.configStore ?? new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path)), ctx.config);
   let current = notifier;
   const { interval, waitingAfter } = ctx.config.watch;
@@ -483,13 +526,26 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
       if (opts.signal?.aborted) break;
       await reload();
       await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal });
+      await opts.onTick?.(tick + 1, memory);
+      const stalled = memory.steps.stalled(ctx.runner.now());
+      if (stalled.length) {
+        const text = `Watch wznawia pętlę po 10 min bez ukończenia etapów: ${stalled.join(', ')}`;
+        ctx.out(text);
+        await recordJournal(ctx, {kind: 'watch-stage-restarted', owner: 'owner', text});
+        await postMessage(ctx, OWNER_IDENTITY, {kind: 'info', channel: 'agentctl', to: 'owner', subject: 'Watch wznowił pętlę etapów', body: text}).catch(error => ctx.out(errorMessage(error)));
+        if (opts.onStall) opts.onStall();
+        await memory.queue.idle();
+        memory = new WatchMemory();
+      }
     }
   } finally {
     fileWatcher?.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
-    await memory.queue.idle();
-    const restored = await restoreWindowNames(ctx, memory);
-    if (restored > 0) ctx.out(`Window names restored (${restored}).`);
+    if (!(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
+      await memory.queue.idle();
+      const restored = await restoreWindowNames(ctx, memory);
+      if (restored > 0) ctx.out(`Window names restored (${restored}).`);
+    }
   }
 }
 
