@@ -1287,6 +1287,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--verbose', 'full details, paginated with --offset/--limit')
     .option('--offset <n>', 'page offset', '0')
     .option('--limit <n>', 'page size (1–100)', '10')
+    .option('--purge-trash', 'preview previously trashed agentctl items; --apply confirms their removal')
     .option('--include-cache', 'owner-confirmed: also delete old, unreferenced task cache entries')
     .option('--keep <tasks...>', 'keep worktrees and cache for these task IDs in this GC run')
     .option('--keep-cache <tasks...>', 'keep all cache entries for these task IDs')
@@ -1300,12 +1301,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; forceDirty?: string[]; forceDirtyAll?: boolean; includeCache?: boolean; keepCache?: string[]; keep?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; purgeTrash?: boolean; forceDirty?: string[]; forceDirtyAll?: boolean; includeCache?: boolean; keepCache?: string[]; keep?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
         const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
         if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirtyAll || opts.forceDirty, includeCache: opts.includeCache, keepCache: opts.keepCache, keep: opts.keep });
+        const plan = await planGc(ctx, { purgeTrash: opts.purgeTrash, olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirtyAll || opts.forceDirty, includeCache: opts.includeCache, keepCache: opts.keepCache, keep: opts.keep });
         if (!opts.apply) {
           if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
           for (const l of renderGc(plan, view)) line(l);
@@ -1313,6 +1314,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (plan.items.length === 0) return opts.json ? line(JSON.stringify({ plan, done: [], failed: [], freedBytes: 0 }, null, 2)) : void renderGc(plan).forEach(line);
         const summary = renderGc(plan);
+        if (opts.purgeTrash) for (const item of plan.items) summary.push(`  ${item.target} (${item.detail})`);
         if (opts.forceDirtyAll) {
           summary.push('Worktree risk counts for the full selection:');
           for (const item of plan.items.filter(i => i.kind === 'worktree' && i.dirtyFiles !== undefined)) {

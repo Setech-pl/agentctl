@@ -44,7 +44,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 |---|---|---|---|
 | `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Status of all agent tasks |
 | `events_since` | read | `as?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
-| `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
+| `gc_preview` | read | `as?`, `purge_trash?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
 | `limits` | read | `as?`, `format?`, `detail?` | Limits of simultaneous agents |
 | `set_limits` | write | `as?`, `quota?`, `overprovision?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Change the limits |
 | `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
@@ -106,7 +106,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Start the supervising manager session |
 | `manager_stop` | write | `as?`, `confirm?`, `preview_token?` | Stop the manager session |
 | `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` | Test desktop notifications; phone true explicitly sends to ntfy |
-| `gc` | write | `as?`, `request_id?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token |
+| `gc` | write | `as?`, `request_id?`, `purge_trash?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Read the WALL |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Post on the WALL |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Reply on the WALL |

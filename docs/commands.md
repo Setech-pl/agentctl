@@ -1118,6 +1118,7 @@ agentctl gc [options]
 | `--verbose` | full details, paginated with --offset/--limit |  |
 | `--offset <n>` | page offset | default `0` |
 | `--limit <n>` | page size (1–100) | default `10` |
+| `--purge-trash` | preview previously trashed agentctl items; --apply confirms their removal |  |
 | `--include-cache` | owner-confirmed: also delete old, unreferenced task cache entries |  |
 | `--keep <tasks...>` | keep worktrees and cache for these task IDs in this GC run |  |
 | `--keep-cache <tasks...>` | keep all cache entries for these task IDs |  |
@@ -1329,6 +1330,7 @@ agentctl watch [options]
 | `--tmux` | run it in window "watch" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session |  |
 | `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--no-status-line` | with --tmux: leave the status bar of the session alone |  |
+| `--supervise` |  |  |
 
 Examples:
 

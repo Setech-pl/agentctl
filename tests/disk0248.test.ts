@@ -1,4 +1,6 @@
 import { defaultDeps } from '../src/cli.ts';
+import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -31,7 +33,9 @@ function git(root: string, ...args: string[]): string {
 }
 
 function world(name: string, yaml: (root: string) => string = () => '', payload?: Buffer) {
-  const root = scratch.sub(name), repo = scratch.sub(`${name}/repo`), trash = scratch.sub(`${name}/fixture-trash`);
+  const root = scratch.sub(name), repo = scratch.sub(`${name}/repo`);
+  const trash = process.platform === 'darwin' ? path.join(os.homedir(), '.Trash') : path.join(os.homedir(), '.local/share/Trash/files');
+  fs.mkdirSync(trash, { recursive: true });
   git(repo, 'init', '-b', 'main');
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.cache/\ndist*/\nprofile/\n');
   fs.mkdirSync(path.join(repo, 'dist-tracked'));
@@ -73,8 +77,9 @@ function world(name: string, yaml: (root: string) => string = () => '', payload?
       if (cmd === 'osascript' || cmd === 'gio') {
         const target = args.at(-1)!;
         moves.push(target);
-        fs.renameSync(target, path.join(trash, `${moves.length}-${path.basename(target)}`));
-        return { code: 0, stdout: '', stderr: '' };
+        const destination = path.join(trash, `${moves.length}-${path.basename(target)}`);
+        fs.renameSync(target, destination);
+        return { code: 0, stdout: pathToFileURL(destination).href, stderr: '' };
       }
       if (cmd.endsWith('lsof')) return { code: 1, stdout: '', stderr: '' };
       if (cmd === 'ps') return { code: 0, stdout: '', stderr: '' };
@@ -89,7 +94,7 @@ function world(name: string, yaml: (root: string) => string = () => '', payload?
     return { raw, spec: resolveSpec(raw, { config }) };
   };
   const notifier = { clickable: false, notify: async (_title: string, message: string) => { notifications.push(message); } };
-  return { root, repo, config, ctx, runner, tmux, spec, notifier, installs, copies, moves, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
+  return { root, repo, config, ctx, runner, tmux, spec, notifier, installs, copies, moves, trash, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
 }
 
 it('FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks', async () => {
@@ -276,7 +281,7 @@ it('FLOW-GC: off skips movements and propose detects a merge commit on master', 
   await watchTick(w.ctx, new WatchMemory(), w.notifier);
   assert.deepEqual(readMcpRequests(w.config), []);
   assert.ok(fs.existsSync(worktree));
-  w.ctx.setConfig({ ...w.config, gc: { afterIntegration: 'propose' } });
+  w.ctx.setConfig({ ...w.config, gc: { ...w.config.gc, afterIntegration: 'propose' } });
   await watchTick(w.ctx, new WatchMemory(), w.notifier);
   assert.deepEqual(readMcpRequests(w.config), [], 're-enabling establishes a new baseline');
   git(worktree, 'commit', '--allow-empty', '-m', 'next feature');
@@ -395,8 +400,8 @@ it('DISK0248-NM: same lockfile installs once, creates independent copies and exp
   assert.equal(w.moves.length, 0);
   const applied = await applyGc(w.ctx, preview);
   assert.equal(applied.failed.length, 0);
-  assert.equal(w.moves.length, 2);
-  assert.equal(applied.freedBytes, 0, 'Trash retains allocated bytes');
+  assert.equal(w.moves.length, 0);
+  assert.ok(entries.every(entry => !fs.existsSync(entry.target)));
   assert.equal(fs.readFileSync(file(b), 'utf8'), 'original');
 });
 
@@ -417,7 +422,7 @@ it('close cleanup config rejects paths outside the worktree', () => {
   assert.throws(() => loadGlobalConfig(path.dirname(w.config.path)), /invalid|cleanup/i);
 });
 
-it('DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untracked, linked and report paths', async () => {
+it('DISK0248-CLOSE: close removes ignored outputs, leaving tracked, untracked, linked and report paths', async () => {
   const w = world('close');
   Object.assign(w.config, { closeCleanup: ['.cache', 'dist*', 'profile/*', '*-dirty'] });
   const spec = w.spec('TRASH').spec;
@@ -432,12 +437,12 @@ it('DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untra
   seedTask(w.config, spec.task, { repos: spec.repos, report: path.join(wt, 'profile/report/item') });
   await closeTask(w.ctx, spec.task);
   const expected = ['.cache', 'dist-ok', 'profile/run'].map(name => path.join(wt, name));
-  assert.deepEqual([...w.moves].sort(), [...expected].sort());
+  assert.deepEqual(w.moves, []);
+  assert.ok(expected.every(target => !fs.existsSync(target)));
   for (const name of ['dist-tracked/tracked.txt', 'plain-dirty/item', 'dist-link', 'profile/report/item']) assert.ok(fs.existsSync(path.join(wt, name)), name);
   const cleanup = readJournal(w.config).find(event => event.cleanup)?.cleanup;
   assert.deepEqual(cleanup?.moved.map(item => item.path).sort(), [...expected].sort());
-  assert.equal(cleanup?.bytes, cleanup?.moved.reduce((total, item) => total + item.bytes, 0));
-  assert.ok(cleanup!.bytes > 0);
+  assert.equal(cleanup?.bytes, 0, 'unchanged fixture volume counter');
 });
 
 function fakeMount(t: TestContext, mount: string) {
@@ -564,4 +569,38 @@ it('HOTFIX0263-WATCH: stalled stage exits and the restarted watcher reconciles r
   const events = readJournal(w.config);
   assert.equal(events.filter(e => e.kind === 'watch-stalled').length, 1);
   for (const kind of ['watch-resumed', 'mcp-failed', 'queue-retry', 'queue-start']) assert.ok(events.some(e => e.kind === kind), kind);
+});
+
+it('HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge previews legacy ownership', async () => {
+  const w = world('hotfix-trash', () => 'setup: { node_modules: clone }\nmcp: { allow: [gc] }\n');
+  // Set the mode in-memory so the same scenario can exercise the older release.
+  Object.assign(w.config.gc, { deleteMode: 'trash' });
+  await newTasks(w.ctx, [w.spec('DEP').spec], { noAgent: true });
+  await w.runner.sleep(60_000);
+  const personal = path.join(w.trash, 'personal');
+  fs.writeFileSync(personal, 'keep');
+  const applied = await applyGc(w.ctx, await planGc(w.ctx, { olderThan: '1m' }));
+  assert.deepEqual(applied.failed, []);
+  assert.equal(w.moves.length, 1);
+  assert.deepEqual(fs.readdirSync(w.trash), ['personal']);
+  assert.equal(fs.readFileSync(personal, 'utf8'), 'keep');
+
+  seedTask(w.config, 'LEGACY', { closed: true });
+  const legacy = path.join(w.trash, 'legacy');
+  fs.mkdirSync(legacy);
+  const preview = await runCli(w.config, w.runner, ['gc', '--purge-trash', '--json']);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /legacy/);
+  assert.doesNotMatch(preview.stdout, /personal/);
+  assert.ok(fs.existsSync(legacy));
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {} };
+  const scope = await gc.run(deps, { purge_trash: true });
+  const token = /preview_token: ([\w-]+)/.exec(scope.text)?.[1];
+  assert.ok(token, scope.text);
+  const confirmed = await gc.run(deps, { confirm: true, preview_token: token });
+  assert.ok(!confirmed.isError, confirmed.text);
+  assert.equal(fs.existsSync(legacy), false);
+  assert.equal(fs.readFileSync(personal, 'utf8'), 'keep');
+  fs.unlinkSync(personal);
 });

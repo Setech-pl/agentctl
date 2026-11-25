@@ -1,3 +1,4 @@
+import { GcSpace } from './gc-space.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -139,7 +140,7 @@ export async function recheckIntegrationGc(ctx: Context, preview: GcPlan): Promi
   return planIntegrationGc(ctx, preview.integration, preview);
 }
 
-export async function applyIntegrationGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
+export async function applyIntegrationGc(ctx: Context, plan: GcPlan, space = new GcSpace()): Promise<GcResult> {
   const result: GcResult = { done: [], failed: [], freedBytes: 0 };
   const scope = plan.integration!;
   const current = await recheckIntegrationGc(ctx, plan);
@@ -154,14 +155,15 @@ export async function applyIntegrationGc(ctx: Context, plan: GcPlan): Promise<Gc
             all.some(record => record !== owner && (record.pin || live.has(record.window) || !record.closed && !record.cancelled) && record.repos.some(repo => location(repo.worktree) === item.target))) throw Error('Worktree is now active, pinned or no longer belongs to this GC plan');
         const base = await commitAt(ctx, scope.repo, `refs/heads/${scope.branch}`);
         if (!base || !await ancestor(ctx, scope.repo, scope.head, base) || await cleanIntegratedHead(ctx, item.target, scope.head) !== item.head || linkUsers(item.target, knownLinkReferences(ctx.config)).length) throw Error('Worktree or integration ref changed; kept');
+        if (!ctx.runner.dryRun) await space.before(item.target);
         const removed = await ctx.runner.exec('git', ['-C', scope.repo, 'worktree', 'remove', item.target], { async: true, timeoutMs: ctx.config.git.timeoutS * 1000 });
         if (removed.code !== 0) throw Error(removed.stderr.trim() || `git exit ${removed.code}`);
       });
       removedMeasurement(item.target, ctx.runner.now());
       result.done.push(item);
-      result.freedBytes += item.bytes;
     } catch (error) { result.failed.push({ item, reason: errorMessage(error) }); }
   }
+  result.freedBytes = await space.freed();
   return result;
 }
 

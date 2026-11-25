@@ -5,7 +5,8 @@ import { loadProjectConfig } from './config.ts';
 import { sizeOf } from './fs-measure.ts';
 import { recordJournal } from './journal.ts';
 import { listArchivedRecords, listTaskRecords, type TaskRecord } from './taskstore.ts';
-import { moveToTrash } from './trash.ts';
+import { moveToTrash, purgeTrashItem } from './trash.ts';
+import { GcSpace } from './gc-space.ts';
 import { insidePath, missingWorktreeVolume } from './worktree-volume.ts';
 import { errorMessage } from './util.ts';
 
@@ -42,6 +43,7 @@ export async function cleanupClosedWorktrees(ctx: Context, record: TaskRecord): 
     }
     return;
   }
+  const space = new GcSpace();
   const moved: { path: string; bytes: number }[] = [];
   let enabled = false;
   for (const repo of record.repos) {
@@ -73,14 +75,16 @@ export async function cleanupClosedWorktrees(ctx: Context, record: TaskRecord): 
         if (status.code !== 0 || status.stdout || !safeRoot() || shared()) continue;
         const current = fs.lstatSync(target, { throwIfNoEntry: false });
         if (!current || current.dev !== device || current.ino !== original.ino || current.isSymbolicLink() || fs.realpathSync(target) !== target) continue;
-        await moveToTrash(runner, target);
+        await space.before(target);
+        if (config.gc.deleteMode === 'trash') await purgeTrashItem(ctx, await moveToTrash(ctx, target));
+        else await runner.remove(target);
         moved.push({ path: target, bytes });
       }
     } catch (error) { ctx.info(`${record.task}: close.cleanup skipped in ${repo.worktree}: ${errorMessage(error)}`); }
   }
   if (!enabled) return;
-  const bytes = moved.reduce((total, item) => total + item.bytes, 0);
-  const text = `${record.task}: close.cleanup: ${moved.length} moved to Trash (${bytes} bytes)`;
+  const bytes = await space.freed();
+  const text = `${record.task}: close.cleanup: ${moved.length} removed (${bytes} bytes freed)`;
   ctx.info(text);
   await recordJournal(ctx, { kind: 'close-cleanup', task: record.task, text, cleanup: { moved, bytes } });
 }

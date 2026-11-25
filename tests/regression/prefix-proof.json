@@ -728,6 +728,17 @@
       "tests/host-boundaries.test.ts"
     ]
   },
+  "HOTFIX0263-DISK": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-DISK: reports free blocks gained on the volume, excluding estimates for failed and skipped entries",
+      "gc: --apply",
+      "HOTFIX0263-DISK: reports free blocks gained on the volume, excluding estimates for failed and skipped entries"
+    ]
+  },
   "HOTFIX0263-LOCK": {
     "rev": "v0.26.0",
     "outcome": "FAILS",
@@ -748,6 +759,16 @@
       "HOTFIX0263-START: hung setup releases admission and a setup slot by the second tick",
       "HOTFIX0263-START: hung worktree releases admission and a setup slot by the second tick",
       "HOTFIX0263-START: hung setup releases admission and a setup slot by the second tick"
+    ]
+  },
+  "HOTFIX0263-TRASH": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge previews legacy ownership",
+      "HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge previews legacy ownership"
     ]
   },
   "HOTFIX0263-WATCH": {

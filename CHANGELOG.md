@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- HOTFIX0263-DISK/TRASH: Delete directly by default, measure actual reclaimed space and support a scoped Trash purge. / Domyślnie usuwaj bezpośrednio, mierz odzyskane miejsce i ogranicz opróżnianie kosza do wskazanych elementów.
 - HOTFIX0263-START/LOCK: Bound checkout and setup, reclaim stale start locks and release setup slots. / Limity czasu checkoutu i setupu, odzyskiwanie nieaktywnych blokad startu i zwalnianie miejsc setupu.
 - HOTFIX0263-WATCH: Supervise tmux watch and recover interrupted starts and MCP writes. / Nadzór watch w tmux i odzyskiwanie przerwanych startów oraz zapisów MCP.
 

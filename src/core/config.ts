@@ -175,7 +175,7 @@ export interface GlobalConfig extends Layer {
   git: { timeoutS: number };
   startLockStaleS: number;
   setupTimeoutS: number;
-  gc: { afterIntegration: 'off' | 'propose' };
+  gc: { afterIntegration: 'off' | 'propose'; deleteMode: 'delete' | 'trash' };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
@@ -1351,12 +1351,13 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   };
   const startLockStaleS = positiveSeconds(raw.start_lock_stale_s, 'start_lock_stale_s', 180);
   const setupTimeoutS = positiveSeconds(isObject(raw.setup) ? raw.setup.timeout_s : undefined, 'setup.timeout_s', 900);
-  const gc: GlobalConfig['gc'] = { afterIntegration: 'propose' };
+  const gc: GlobalConfig['gc'] = { afterIntegration: 'propose', deleteMode: 'delete' };
   if (raw.gc !== undefined) {
     if (!isObject(raw.gc)) p.add('config.gc must be a mapping');
     else {
-      checkKeys(raw.gc, ['after_integration'], 'config.gc', p);
+      checkKeys(raw.gc, ['after_integration', 'delete_mode'], 'config.gc', p);
       gc.afterIntegration = parseEnumValue(raw.gc.after_integration, ['off', 'propose'] as const, 'config.gc.after_integration', p) ?? gc.afterIntegration;
+      gc.deleteMode = parseEnumValue(raw.gc.delete_mode, ['delete', 'trash'] as const, 'config.gc.delete_mode', p) ?? gc.deleteMode;
     }
   }
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
