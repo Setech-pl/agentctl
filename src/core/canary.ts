@@ -269,11 +269,12 @@ const readSnapshot = (config: GlobalConfig): Snapshot => JSON.parse(fs.readFileS
 export interface CanaryMetrics {
   ticks: number; tasks: number; worktreeDirs: number; queued: number; wall: number;
   started: number; maxStartTicks: number; maxSnapshotAgeMs: number; maxMcpMs: number;
-  maxSkipped: number; peakLoad1: number; minLoad1: number; states: string[];
+  firstTickMs: number; maxTickMs: number; maxSkipped: number; peakLoad1: number; minLoad1: number; states: string[];
 }
 
 export async function exerciseCanary(world: CanaryWorld, opts: {
   scale: boolean; mirror?: boolean; minTicks: number; durationMs?: number; signal?: AbortSignal; load?: () => number; sample?: (metrics: CanaryMetrics) => void;
+  observeStep?: import('./watch-steps.ts').WatchStepObserver;
 }): Promise<CanaryMetrics> {
   const {config, runner, ctx, deps} = world;
   const mirrored = opts.mirror ? listTaskRecords(config).length + listArchivedRecords(config).length : 0;
@@ -282,7 +283,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   const begin = runner.now();
   const metrics: CanaryMetrics = {ticks: 0, tasks: shape.count + mirrored, worktreeDirs: runner.worktrees.size,
     queued: shape.prepared.length, wall: shape.wallCount, started: 0, maxStartTicks: 0, maxSnapshotAgeMs: 0, maxMcpMs: 0,
-    maxSkipped: 0, peakLoad1: 0, minLoad1: Infinity, states: []};
+    firstTickMs: 0, maxTickMs: 0, maxSkipped: 0, peakLoad1: 0, minLoad1: Infinity, states: []};
   if (opts.scale) {
     config.capacity.loadThreshold = 0.01;
     config.queue.holdOnLoad = true;
@@ -322,8 +323,11 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   };
   runner.tick = 1;
   markEligible(1);
-  await runWatch(ctx, notifier, {signal, insideTmux: false, async onTick(tick, memory) {
+  await runWatch(ctx, notifier, {signal, insideTmux: false, ...(opts.observeStep ? {observeStep: opts.observeStep} : {}), async onTick(tick, memory, elapsedMs) {
     metrics.ticks = tick;
+    if (tick === 1) metrics.firstTickMs = elapsedMs;
+    metrics.maxTickMs = Math.max(metrics.maxTickMs, elapsedMs);
+    opts.sample?.(metrics);
     await memory.queue.idle();
     const snap = readSnapshot(config);
     const age = runner.now() - snap.at;

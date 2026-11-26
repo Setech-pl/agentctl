@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { pathToFileURL } from 'node:url';
 import { liveCacheRoot } from './live-cache.ts';
 import { exerciseCanary, runIsolatedCanary, type CanaryMetrics } from '../src/core/canary.ts';
+import { profileWatch } from './watch-profile.ts';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const load = () => os.loadavg()[0] ?? 0;
@@ -48,14 +49,18 @@ async function main() {
       await sleep(1000);
     }
     console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
-    const run = () => runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
-      scale: true, minTicks: 20, signal: stop.signal, load,
+    const run = async () => {
+      const profile = profileWatch(console.log);
+      try { return await runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
+      scale: true, minTicks: 20, signal: stop.signal, load, observeStep: profile.observe,
       sample: metrics => {
         current = {...metrics};
         if (metrics.ticks % 5 === 0) console.log(`prodshape ticks=${metrics.ticks}, starts=${metrics.started}, max MCP=${metrics.maxMcpMs.toFixed(0)}ms`);
         save({status: 'RUNNING'});
       },
-    }), 2, 5);
+      }), 2, 5); }
+      finally { profile.restore(); }
+    };
     try { current = await run(); }
     catch (error) {
       if (!String(error).includes('MCP_LATENCY') || load() <= 3 * cores || stop.signal.aborted) throw error;

@@ -18,7 +18,7 @@ import { journalOutputs } from './outputs.ts';
 import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
-import { WatchStalled, WatchSteps } from './watch-steps.ts';
+import { WatchStalled, WatchSteps, type WatchStepObserver } from './watch-steps.ts';
 import { watchSnapshotPath, watchProgressPath } from './watch-snapshot.ts';
 import { atomicWriteFile, readStateWriteFailure, stateWriteFailure } from './atomic-file.ts';
 import { taskLock, withFileLock } from './file-lock.ts';
@@ -84,7 +84,8 @@ export interface WatchEvent {
 export class WatchMemory {
   readonly tasks = new Map<string, Seen>();
   started = false;
-  readonly steps = new WatchSteps();
+  readonly steps: WatchSteps;
+  constructor(observe?: WatchStepObserver) { this.steps = new WatchSteps(observe); }
   statusSweep?: { config: GlobalConfig; rows: StatusRow[] } | undefined;
   lastTickAt?: number;
   /** Windows that got a state icon from this watcher (plain name -> tmux window ID, if known): they get their plain names back. */
@@ -461,7 +462,8 @@ export interface WatchOptions {
   self?: SelfArgv | undefined;
   /** A supervisor relaunches the watch process after a stuck stage. */
   onStall?: () => never;
-  onTick?: (tick: number, memory: WatchMemory) => Promise<void> | void;
+  onTick?: (tick: number, memory: WatchMemory, elapsedMs: number) => Promise<void> | void;
+  observeStep?: WatchStepObserver;
 }
 
 export const WATCH_RESTART_CODE = 75;
@@ -519,7 +521,7 @@ export async function runWatch(ctx: Context, notifier: Notifier, opts: WatchOpti
 }
 
 async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): Promise<void> {
-  let memory = new WatchMemory();
+  let memory = new WatchMemory(opts.observeStep);
   const startedAt = ctx.runner.now(), version = packageVersion();
   const store = opts.configStore ?? new ConfigStore(() => loadGlobalConfig(path.dirname(ctx.config.path)), ctx.config);
   let current = notifier;
@@ -548,6 +550,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(ctx.config.watch.interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
+      const tickStarted = performance.now();
       await reload();
       await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal,
         backgroundStarts: !ctx.runner.dryRun && opts.maxTicks === undefined && !opts.onTick });
@@ -556,7 +559,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
           atomicWriteFile(watchProgressPath(ctx.config), JSON.stringify({version, pid: process.pid, tick: tick + 1, startedAt, at: ctx.runner.now()}));
         } catch (error) { ctx.out(`watch progress: ${errorMessage(error)}`); }
       }
-      await opts.onTick?.(tick + 1, memory);
+      await opts.onTick?.(tick + 1, memory, performance.now() - tickStarted);
       const stalled = memory.steps.stalled(ctx.runner.now());
       if (stalled.length) {
         const text = `Watch wznawia pętlę po 10 min bez ukończenia etapów: ${stalled.join(', ')}`;
@@ -567,7 +570,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
         await memory.queue.idle();
         memory.launchHealth.close();
         await memory.launchHealth.idle();
-        memory = new WatchMemory();
+        memory = new WatchMemory(opts.observeStep);
       }
     }
   } catch (error) {

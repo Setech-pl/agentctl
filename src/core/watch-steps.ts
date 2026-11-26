@@ -10,6 +10,7 @@ import { appendStartLog, startLogPath } from './boardstart.ts';
 export const WATCH_STEP_TIMEOUT_MS = 20_000;
 export const WATCH_STALL_MS = 600_000;
 export class WatchStalled extends Error {}
+export type WatchStepObserver = <T>(name: string, work: () => Promise<T>) => Promise<T>;
 const clock: BudgetClock = {
   now: Date.now,
   schedule(expire, delay) {
@@ -20,6 +21,8 @@ const clock: BudgetClock = {
 
 /** Skip late steps without starting another copy, or allowing a late snapshot to overwrite a newer one. */
 export class WatchSteps {
+  private readonly observe: WatchStepObserver | undefined;
+  constructor(observe?: WatchStepObserver) { this.observe = observe; }
   private readonly running = new Map<string, number>();
   private readonly skipped = new Map<string, {since: number; count: number; promoted: number}>();
   private promotion = 0;
@@ -64,6 +67,11 @@ export class WatchSteps {
   }
 
   async run<T>(ctx: Context, log: string, name: string, step: (signal: AbortSignal) => Promise<T>, timer = clock): Promise<T | undefined> {
+    const execute = () => this.execute(ctx, log, name, step, timer);
+    return this.observe ? this.observe(name, execute) : execute();
+  }
+
+  private async execute<T>(ctx: Context, log: string, name: string, step: (signal: AbortSignal) => Promise<T>, timer: BudgetClock): Promise<T | undefined> {
     const at = ctx.runner.now();
     const heartbeat = (state: string, since: number, reason?: string): void => {
       if (state === 'skipped') {
