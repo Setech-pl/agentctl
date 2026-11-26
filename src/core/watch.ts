@@ -93,6 +93,7 @@ export class WatchMemory {
   /** Queued tasks this watcher is in the middle of starting. */
   readonly queue = new QueueMemory();
   admission?: Promise<void>;
+  readonly maintenance = new Set<Promise<void>>();
   readonly launchHealth = new LaunchHealthMemory();
   readonly archive = new TaskRecordIndex();
   rows?: StatusRow[];
@@ -102,6 +103,14 @@ export class WatchMemory {
   readonly collisions = new CollisionMemory();
   readonly recoveredWrites = new Set<string>();
   readonly journaledReports = new WeakMap<TaskRecord, string>();
+
+  async inventory(ctx: Context): Promise<RecordScan> {
+    const {config, runner} = ctx;
+    const [current, archived] = await Promise.all([
+      this.launchHealth.records.current(config, runner.now()), this.archive.current(config, runner.now(), archiveDir(config)),
+    ]);
+    return {current, archived, all: [...current, ...archived]};
+  }
 }
 
 /** Revalidate the last complete task state under its normal lock. Watch then derives fresh updates from the current task. */
@@ -280,14 +289,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
   const allRows = () => processed ?? observed;
   const activeRows = () => allRows()?.filter(r => !r.closed && !r.cancelled);
-  const inventory = async (): Promise<RecordScan> => {
-    const {config, runner} = ctx;
-    const [current, archived] = await Promise.all([
-      memory.launchHealth.records.current(config, runner.now()),
-      memory.archive.current(config, runner.now(), archiveDir(config)),
-    ]);
-    return {current, archived, all: [...current, ...archived]};
-  };
+  const inventory = () => memory.inventory(ctx);
   const collect = async () => {
     if (memory.closedConfig !== ctx.config) {
       memory.closedConfig = ctx.config;
@@ -306,7 +308,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     return inventoryReady;
   };
   let diskSample: ReturnType<typeof collectDisk> | undefined;
-  const disk = async () => (diskSample ??= (async () => collectDisk(ctx, undefined, {records: (await inventory()).all}))());
+  const disk = async () => (diskSample ??= (async () => collectDisk(ctx, undefined, {records: (await inventory()).all, asyncPaths: options.backgroundStarts === true}))());
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
@@ -422,7 +424,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('machine load', () => recordMachineLoad(ctx));
   stage('disk alerts', async signal => diskTick(ctx, notifier, startLog, (await inventory()).all, disk, signal));
   stage('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
-  stage('usage', () => usageTick(ctx, notifier, startLog));
+  stage('usage', async () => usageTick(ctx, notifier, startLog, (await inventory()).all));
   stage('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });
   stage('attention', async () => { const rows = allRows(); if (rows) await attentionTick(ctx, rows, notifier); }, 'task delivery and reports');
   const events: WatchEvent[] = [];
@@ -484,7 +486,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       if (!published || !memory.recoveredWrites.size) return;
       await recordJournal(ctx, { kind: 'state-write-recovered', text: `zapis stanu wznowiony: ${[...memory.recoveredWrites].join(', ')}` });
       memory.recoveredWrites.clear();
-    }, 'snapshot preparation');
+    }, 'snapshot preparation', 'state write recovery');
   }
   stage('integration GC proposals', async () => watchIntegrationGc(ctx, options.signal, await inventory()));
   const priority = memory.steps.priority(stages);
@@ -492,13 +494,16 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   if (options.backgroundStarts) {
     if (!memory.admission) memory.admission = execute('queue').catch(error => ctx.out(errorMessage(error))).finally(() => { memory.admission = undefined; });
     else for (const name of ['accepted MCP writes', 'queue']) memory.steps.busy(name);
-    // Read the first complete inventory while recovery checks its independent write markers.
-    void execute('status collection').catch(error => ctx.out(errorMessage(error)));
-  }
-  for (const name of stages.keys()) {
-    if (options.backgroundStarts && (name === 'accepted MCP writes' || name === 'queue')) continue;
-    await execute(name);
-  }
+    void disk().catch(() => undefined);
+    const foreground = new Set(['status collection', 'task delivery and reports', 'snapshot preparation', 'degraded snapshot']);
+    for (const name of foreground) await execute(name);
+    const nextTurn = new Promise<void>(resolve => setImmediate(resolve));
+    for (const name of stages.keys()) {
+      if (name === 'accepted MCP writes' || name === 'queue' || foreground.has(name)) continue;
+      const work = nextTurn.then(() => execute(name)).catch(error => ctx.out(errorMessage(error))).finally(() => memory.maintenance.delete(work));
+      memory.maintenance.add(work);
+    }
+  } else for (const name of stages.keys()) await execute(name);
   memory.steps.flush(ctx);
   return events;
 }
@@ -604,13 +609,17 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
   let stalled = false;
   try {
     let startupAnnounced = false;
+    const backgroundStarts = !ctx.runner.dryRun && (opts.backgroundStarts ?? (opts.maxTicks === undefined && !opts.onTick));
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(ctx.config.watch.interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
       const tickStarted = performance.now();
       await reload();
-      await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal,
-        backgroundStarts: !ctx.runner.dryRun && (opts.backgroundStarts ?? (opts.maxTicks === undefined && !opts.onTick)) });
+      if (tick === 0 && backgroundStarts) {
+        // Finish one cold inventory before optional scans compete with it. Its time counts toward tick one.
+        await memory.steps.run(ctx, watchLogPath(ctx), 'inventory bootstrap', () => memory.inventory(ctx));
+      }
+      await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal, backgroundStarts });
       if (!startupAnnounced && memory.rows) {
         startupAnnounced = true;
         const rows = memory.rows;
@@ -651,6 +660,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     if (!stalled && !(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
       await memory.admission;
       await memory.queue.idle();
+      await Promise.allSettled(memory.maintenance);
       const restored = await restoreWindowNames(ctx, memory);
       if (restored > 0) ctx.out(`Window names restored (${restored}).`);
     }

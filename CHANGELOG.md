@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Watch publishes complete rows before launching maintenance and shares its task inventory with usage sampling. The first tick still includes loading the initial inventory. / Watch publikuje pełne wiersze przed pracami pomocniczymi i używa wspólnego indeksu do odczytu zużycia. Pierwszy przebieg obejmuje początkowy odczyt indeksu.
 - Confirmed GC revalidates task headers asynchronously and keeps cohort summaries in the event stream. Trash purge carries measured results by volume. / Potwierdzone GC sprawdza nagłówki asynchronicznie i zachowuje podsumowania kohort w zdarzeniach. Opróżnianie kosza zwraca pomiary według woluminu.
 
 - Watch refreshes its index after a confirmed cancellation. Cached doctor and GC previews reuse asynchronous task inventories. / Watch odświeża indeks po potwierdzonym anulowaniu. Podglądy GC i skrócony doctor współdzielą asynchroniczny odczyt zadań.

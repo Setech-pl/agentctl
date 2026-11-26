@@ -76,7 +76,7 @@ async function freeSpace(ctx: Context, ancestor: string, statfs: Statfs, budgetM
 }
 
 /** Read cached sizes only. Watch owns measurement jobs; no read starts a walk or writes the size cache. */
-export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
+export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[]; asyncPaths?: boolean } = {}): Promise<DiskReport> {
   const records = (opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host);
   const targets = new Map<string, string | undefined>([[ctx.config.cache, undefined], [ctx.config.stateDir, undefined]]);
   const store = nodeModulesStore(ctx.config);
@@ -109,6 +109,15 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     return mounted.get(mount)!;
   };
   const volumes = new Map<string, DiskVolume>();
+  const devices = new Map<string, number>();
+  if (opts.asyncPaths) {
+    const mountedTargets = [...targets].filter(([, mount]) => !mount || onVolume(mount));
+    for (let i = 0; i < mountedTargets.length; i += 128) {
+      await Promise.all(mountedTargets.slice(i, i + 128).map(async ([target]) => {
+        try { devices.set(target, (await fs.promises.stat(target)).dev); } catch { /* use the nearest existing ancestor */ }
+      }));
+    }
+  }
   for (const [target, mount] of targets) {
     if (mount && !onVolume(mount)) {
       const key = `missing:${mount}`;
@@ -119,8 +128,8 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     let ancestor = target;
     let device: string | null = null;
     try {
-      const stat = fs.statSync(target, {throwIfNoEntry: false});
-      if (stat) device = String(stat.dev);
+      const dev = opts.asyncPaths ? devices.get(target) : fs.statSync(target, {throwIfNoEntry: false})?.dev;
+      if (dev !== undefined) device = String(dev);
       else {
         ancestor = existingAncestor(path.dirname(target));
         device = String(fs.statSync(ancestor).dev);
@@ -152,7 +161,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const byDevice = new Map<string, number>();
   for (const measurement of values) {
     try {
-      const device = String(fs.statSync(measurement.target).dev);
+      const device = String(devices.get(measurement.target) ?? fs.statSync(measurement.target).dev);
       byDevice.set(device, (byDevice.get(device) ?? 0) + measurement.bytes);
     } catch { /* disappeared since measurement */ }
   }

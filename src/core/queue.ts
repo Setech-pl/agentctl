@@ -1228,7 +1228,8 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   if (opts.signal?.aborted) return [];
   await expireProviderHolds(ctx);
   const now = ctx.runner.now(), interval = config.watch.interval * 1000, lastTick = workerAt(config);
-  if (config.queue.enabled && (lastTick === undefined || now - lastTick > 2 * interval)) {
+  const loadHold = queueLoadHold(config);
+  if (config.queue.enabled && !loadHold && (lastTick === undefined || now - lastTick > 2 * interval)) {
     await recordHeldOrders(ctx, new Map(readQueue(config).filter(entry => (entry.status === 'queued' || entry.status === 'accepted') && !entry.holdNotified && now - Date.parse(entry.queuedAt) >= interval).map(entry => [entry.seq, 'opóźnienie watch'])));
   }
   await touchWorker(ctx);
@@ -1277,6 +1278,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     await recordHeldOrders(ctx, new Map(waiting(entries).filter(e => !e.holdNotified).map(entry => [entry.seq, 'queue paused (agentctl queue resume)'])));
     return [];
   }
+  if (loadHold) {
+    await recordHeldOrders(ctx, new Map(waiting(entries).filter(entry => !entry.holdNotified).map(entry => [entry.seq, loadHold])));
+    return [];
+  }
   const live = await liveWindows(ctx);
   const rows = opts.rows ?? await queueDependencyRows(ctx, entries);
   const used: Record<AgentName, number> = perProvider(activeProviders(config), () => 0);
@@ -1292,7 +1297,6 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const refreshed = new Set<AgentName>();
   const stillHeld = new Set<string>();
   const candidates: QueueEntry[] = [];
-  const loadHold = queueLoadHold(config);
   const heldProviders = providerHolds(config, ctx.runner.now());
   let occupiedSetups = setupSlots(config, entries);
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
@@ -1314,7 +1318,6 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   };
   for (const entry of waiting(entries)) {
     if (entry.volumeBlock) continue;
-    if (loadHold) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
     const author = directAuthorState(config, entry, entries);

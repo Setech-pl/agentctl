@@ -2606,8 +2606,9 @@ export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport | unde
   try {
     previous = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
   } catch { /* no previous snapshot */ }
+  if (!previous || !Array.isArray(previous.rows) || typeof previous.at !== 'number') return;
   const now = ctx.runner.now();
-  writeWatchSnapshot(ctx, { ...previous, version: 1, at: previous?.at ?? now, degraded: step, degraded_at: now, ...(disk ? {disk} : {}) });
+  writeWatchSnapshot(ctx, { ...previous, version: 1, at: previous.at, degraded: step, degraded_at: now, ...(disk ? {disk} : {}) });
 }
 
 async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {

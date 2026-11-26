@@ -214,6 +214,16 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const current = new Set(records.map((r) => r.record.window));
     for (const record of scanned.archived) if (!current.has(record.window) && !live.has(record.window)) records.push({ source: record, record: { ...record }, archived: true });
   }
+  const historicalReportStats = new Map<TaskRecord, fs.BigIntStats>();
+  if (opts.watchClosedRows) {
+    const historical = records.filter(({record, archived}) => record.report && !live.has(record.window) && (archived || record.closed || record.cancelled));
+    for (let i = 0; i < historical.length; i += 96) {
+      await Promise.all(historical.slice(i, i + 96).map(async ({source, record}) => {
+        try { historicalReportStats.set(source, await fs.promises.lstat(record.report, {bigint: true})); }
+        catch { /* missing report */ }
+      }));
+    }
+  }
   const tokenRecords: TaskRecord[] = [];
   let sinceYield = 0;
   for (const { source, record, archived } of records) {
@@ -252,7 +262,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let reportVersion: string | undefined;
     try {
       if (record.report && historical) {
-        const stat = fs.lstatSync(record.report, {bigint: true, throwIfNoEntry: false});
+        const stat = historicalReportStats.get(source);
         reportVersion = stat ? fileVersion(stat) : 'missing';
         if (stat) reportMtime = Number(stat.mtimeNs) / 1e6;
       } else reportMtime = record.report ? fs.statSync(record.report).mtimeMs : undefined;

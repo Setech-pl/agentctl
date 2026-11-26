@@ -28,6 +28,10 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-DISK-ASYNC', fixedIn: '0.27.2', proofAgainst: '2aff93d417d52478679a3e1a29bf2bade7c4012d', symptom: 'A watch disk snapshot synchronously resolved each worktree filesystem before publishing.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-DISK-ASYNC:')] },
+  { id: 'REL0272-COLD-SNAPSHOT', fixedIn: '0.27.2', proofAgainst: '2aff93d417d52478679a3e1a29bf2bade7c4012d', symptom: 'An initial status timeout still published a new rowless degraded file when there was no last good snapshot.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-COLD-SNAPSHOT:')] },
+  { id: 'REL0272-MAINTENANCE', fixedIn: '0.27.2', proofAgainst: '2aff93d417d52478679a3e1a29bf2bade7c4012d', symptom: 'A long usage observation could delay the complete status publication for an entire stage budget.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-MAINTENANCE:')] },
+  { id: 'REL0272-HOLD-OBSERVATION', fixedIn: '0.27.2', proofAgainst: '2aff93d417d52478679a3e1a29bf2bade7c4012d', symptom: 'An explicit load hold still ran a live pane and scheduling sweep before publishing its hold reason.', scenarios: [s('review0256.test.ts', '^REL0272-HOLD-OBSERVATION:')] },
   { id: 'REL0272-GC-APPLY-IO', fixedIn: '0.27.2', proofAgainst: '25fae22e54d8692ce1dd744d56e215f4587a3f45', symptom: 'Confirmed GC repeatedly reopened every task header synchronously while removing worktrees.', scenarios: [s('field0253-gc.test.ts', '^REL0272-GC-APPLY-IO:')] },
   { id: 'REL0272-GC-RESULT-COMPAT', fixedIn: '0.27.2', proofAgainst: '25fae22e54d8692ce1dd744d56e215f4587a3f45', symptom: 'The 0.26.2 hotfix merge replaced normal GC cohort results with a machine payload in events_since.', scenarios: [s('field0253-gc.test.ts', '^FIELD0256-GC-EVENT:')] },
   { id: 'REL0272-PRESSURE-OVERSHOOT', fixedIn: '0.27.2', proofAgainst: 'cad707e92212f3f95773251354295b93c340ab74', symptom: 'An increasing-only CPU injector overshot two cores per core severalfold and never shed workers.', scenarios: [s('gate.test.ts', '^REL0272-PRESSURE-OVERSHOOT:')] },

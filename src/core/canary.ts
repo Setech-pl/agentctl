@@ -78,7 +78,7 @@ export function createCanaryWorld(root: string, out: (line: string) => void, slo
     collisions: {enabled: false},
     notify: {events: false},
     mcp: {allow: ['queue', 'close', 'gc'], max_response_kb: 1024},
-    usage: {claude_dir: path.join(root, 'claude'), codex_dir: path.join(root, 'codex')},
+    usage: {claude_dir: path.join(root, 'claude'), codex_dir: path.join(root, 'codex'), kimi_dir: path.join(root, 'kimi')},
   }), {mode: 0o600});
   const config = loadGlobalConfig(home);
   const runner = new CanaryRunner(root, config, slowMs);
@@ -95,13 +95,14 @@ export function createCanaryWorld(root: string, out: (line: string) => void, slo
 
 /** The shim applies only to the disposable filesystem. It never opens or mounts a production volume. */
 export function useCanaryFilesystem(world: CanaryWorld, latency: number): () => void {
-  const stat = fs.statSync, statfs = fs.promises.statfs, statfsSync = fs.statfsSync;
+  const stat = fs.statSync, statAsync = fs.promises.stat, statfs = fs.promises.statfs, statfsSync = fs.statfsSync;
   const root = world.runner.root, external = world.volume;
-  fs.statSync = ((target: fs.PathLike, options?: object) => {
-    const value = Reflect.apply(stat, fs, [target, options]) as fs.Stats | fs.BigIntStats | undefined;
+  const mockVolume = (target: fs.PathLike, value: fs.Stats | fs.BigIntStats | undefined) => {
     if (!value || typeof target !== 'string' || !insidePath(external, path.resolve(target))) return value;
     return Object.assign(Object.create(value), {dev: typeof value.dev === 'bigint' ? value.dev + 1n : value.dev + 1});
-  }) as typeof stat;
+  };
+  fs.statSync = ((target: fs.PathLike, options?: object) => mockVolume(target, Reflect.apply(stat, fs, [target, options]))) as typeof stat;
+  fs.promises.stat = (async (target: fs.PathLike, options?: object) => mockVolume(target, await Reflect.apply(statAsync, fs.promises, [target, options]))) as typeof statAsync;
   const counters = (target: fs.PathLike, stats: fs.StatsFs | fs.BigIntStatsFs) => {
     if (typeof target !== 'string' || !insidePath(root, path.resolve(target))) return stats;
     const block = Number(stats.bsize);
@@ -112,7 +113,7 @@ export function useCanaryFilesystem(world: CanaryWorld, latency: number): () => 
     if (latency && typeof target === 'string' && insidePath(root, path.resolve(target))) await world.runner.sleep(latency);
     return counters(target, await Reflect.apply(statfs, fs.promises, [target, options]));
   }) as typeof statfs;
-  return () => { fs.statSync = stat; fs.statfsSync = statfsSync; fs.promises.statfs = statfs; };
+  return () => { fs.statSync = stat; fs.promises.stat = statAsync; fs.statfsSync = statfsSync; fs.promises.statfs = statfs; };
 }
 
 export function seedCanaryRecord(world: CanaryWorld, record: TaskRecord, archived = false, verdict?: string, mtime?: number): void {

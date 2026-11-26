@@ -17,6 +17,7 @@ import { homeDir } from './usage-sources.ts';
 import { isObject } from './util.ts';
 import { withFileLock } from './file-lock.ts';
 import { RESET_TOLERANCE_MS } from './usage-samples.ts';
+import type { TaskRecord } from './taskstore.ts';
 
 /*
  * What the plan percentages are used for: a notification when a window crosses `usage.warn` or `usage.critical`, a hint when a task is
@@ -118,14 +119,14 @@ export function alertText(config: Pick<GlobalConfig, 'usage'>, plans: ProviderVa
  * One look at the plans for `watch`: a notification for every window that crossed `usage.warn` or `usage.critical` since the last look
  * (once per threshold and window period; the ledger survives a restart of the watcher). Returns the texts that were sent.
  */
-export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void> | void): Promise<string[]> {
+export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void> | void, records?: readonly TaskRecord[]): Promise<string[]> {
   const { config, runner } = ctx;
   if (runner.dryRun) return [];
   const file = alertsFile(config);
   const { now, plans, alerts } = await withFileLock(`${file}.lock`, async () => {
     const now = runner.now();
     const reader = openReader(config);
-    const plans = readPlans(config, reader, now);
+    const plans = readPlans(config, reader, now, records);
     reader.save();
     const ledger = readAlertLedger(config);
     let changed = false;

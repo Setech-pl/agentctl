@@ -4,6 +4,7 @@ import path from 'node:path';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import { runDoctor } from '../src/core/doctor.ts';
+import { collectDisk } from '../src/core/disk.ts';
 import { MCP_TOOLS, publishDegradedMcpSnapshot, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
@@ -17,6 +18,53 @@ function deferred<T>() {
 
 const diskStats = (free: number) => ({ bavail: free, blocks: 1000, bsize: 1024 ** 3 });
 const snapshotFile = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
+
+it('REL0272-COLD-SNAPSHOT: an initial scan failure does not publish a rowless replacement', () => {
+  const config = makeConfig(scratch.sub('cold-degraded'));
+  const ctx = new Context(new DiskRunner({dryRun: false}), config, () => {});
+  publishDegradedMcpSnapshot(ctx, undefined, 'status collection');
+  assert.equal(fs.existsSync(snapshotFile(ctx)), false);
+});
+
+it('REL0272-MAINTENANCE: a delayed usage observation does not delay publishing status', async t => {
+  const config = makeConfig(scratch.sub('slow-usage'));
+  seedTask(config, 'READY-TO-OBSERVE', {closed: true});
+  const ctx = new Context(new DiskRunner({dryRun: false, respond: new FakeTmux().respond}), config, () => {});
+  const finished = deferred<void>();
+  const memory = new WatchMemory(async (name, work) => {
+    if (name === 'usage') await finished.promise;
+    return work();
+  });
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  const tick = watchTick(ctx, memory, {notify: async () => {}}, {backgroundStarts: true});
+  try {
+    // This deadline breaks a deterministic circular dependency in the old serial scheduler.
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([tick, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error('usage still blocks status publication')), 5000); })]);
+    } finally { clearTimeout(timeout); }
+    const snapshot = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+    assert.equal(snapshot.rows[0]?.task, 'READY-TO-OBSERVE');
+  } finally {
+    finished.resolve();
+    await tick;
+    await Promise.allSettled(memory.maintenance);
+  }
+});
+
+it('REL0272-DISK-ASYNC: watch can resolve worktree volume identity off the event loop', async t => {
+  const root = scratch.sub('async-disk');
+  const config = makeConfig(root);
+  const worktree = path.join(root, 'checkout');
+  fs.mkdirSync(worktree);
+  const record = seedTask(config, 'VOLUME-SAMPLE', {repos: [{path: root, worktree}]});
+  const ctx = new Context(new DiskRunner({dryRun: false}), config, () => {});
+  const stat = t.mock.method(fs, 'statSync');
+  const report = await collectDisk(ctx, undefined, {records: [record], asyncPaths: true});
+  assert.equal(report.worktreeCount, 1);
+  assert.ok(report.volumes.some(volume => volume.device !== null && volume.availableBytes !== null));
+  assert.ok(!stat.mock.calls.some(call => call.arguments[0] === worktree));
+});
 
 it('REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age', async () => {
   const config = makeConfig(scratch.sub('degraded-rows'));

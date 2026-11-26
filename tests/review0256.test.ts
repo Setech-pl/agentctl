@@ -103,6 +103,16 @@ test('REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps a
   assert.ok((await queueViews(w.ctx)).every(view => /obciążenie/.test(view.condition.text)));
 });
 
+test('REL0272-HOLD-OBSERVATION: a load-held queue publishes its reason without observing panes', async t => {
+  t.mock.method(os, 'loadavg', () => [75, 75, 75]);
+  const w = world('hold-observation', 'capacity: {load_threshold: 20}\nqueue: {hold_on_load: true}\n');
+  await saveEntry(w.ctx, {task: 'WAIT-LOAD', seq: 1, order: 1, status: 'queued', agent: 'claude', model: 'opus', effort: 'high',
+    priority: 'normal', after: [], queuedAt: new Date(w.runner.now()).toISOString(), spec: '---\ntask: WAIT-LOAD\nagent: claude\n---\nFixture.'});
+  assert.deepEqual(await queueTick(w.ctx, new QueueMemory(), notifier), []);
+  assert.ok(!w.tmux.seen.some(command => command.startsWith('list-windows')));
+  assert.ok(readJournal(w.config).some(event => event.kind === 'queue-held' && /obciążenie/.test(event.text)));
+});
+
 test('REVIEW0256-INDEX: repeated launch checks keep task reads and journal parsing bounded', async t => {
   const w = world('index');
   for (let i = 0; i < 12; i++) seedTask(w.config, `INDEX-${i}`, {launchAt: '2026-01-01T01:00:00Z'});
