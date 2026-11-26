@@ -7,16 +7,30 @@ import { commandStageRemaining } from './command-stage.ts';
 interface LockOwner { pid: number; task: string; at: string }
 interface LockRecovery { task: string; staleMs: number; recovered: (owner: Partial<LockOwner>) => void }
 
+function parseOwner(raw: string): Partial<LockOwner> {
+  if (!raw.startsWith('{')) return { pid: Number(raw) };
+  try {
+    const owner = JSON.parse(raw);
+    const at = typeof owner.at === 'number' ? new Date(owner.at).toISOString() : owner.at;
+    return { pid: Number(owner.pid), ...(typeof owner.task === 'string' ? { task: owner.task } : {}), ...(typeof at === 'string' ? { at } : {}) };
+  } catch { return {}; }
+}
+
 function recoverDeadOwner(file: string, recovery?: LockRecovery): void {
   try {
     const original = fs.lstatSync(file);
     if (!original.isFile()) return;
-    const age = Date.now() - original.mtimeMs;
-    const raw = fs.readFileSync(file, 'utf8').trim();
-    const owner: Partial<LockOwner> = raw.startsWith('{') ? JSON.parse(raw) : { pid: Number(raw) };
-    let dead = (!raw || owner.pid === 0) && age > (recovery?.staleMs ?? 5000);
-    if (owner.pid && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
-      try { process.kill(owner.pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+    const now = Date.now();
+    const owner = parseOwner(fs.readFileSync(file, 'utf8').trim());
+    const at = Date.parse(owner.at ?? '');
+    const pid = owner.pid;
+    const validPid = pid !== undefined && Number.isSafeInteger(pid) && pid > 0;
+    let dead = !validPid && now - original.mtimeMs >= (recovery ? 30_000 : 5000);
+    if (validPid) {
+      dead = Boolean(recovery && Number.isFinite(at) && now - at >= Math.max(30_000, recovery.staleMs));
+      if (!dead) {
+        try { process.kill(pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+      }
     }
     if (dead && sameLock(file, original)) {
       fs.unlinkSync(file);
@@ -60,7 +74,7 @@ export class FileLockTimeout extends Error {
 const ownership = new AsyncLocalStorage<Map<string, { active: boolean }>>();
 export const taskLock = (file: string): string => path.join(path.dirname(path.resolve(file)), 'prompt-delivery.lock');
 
-/** Short, process-shared critical section. A dead owner's lock can be recovered; a live owner is never evicted. */
+/** Short, process-shared critical section. An admission lease can be recovered when its recorded timestamp expires. */
 export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000, stateWrite = false, recovery?: LockRecovery): Promise<T> {
   file = path.resolve(file);
   if (stateWrite) checkResponseBudget();

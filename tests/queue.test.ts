@@ -764,3 +764,24 @@ it('HOTFIX0264-F1: admission can wait beyond five seconds for a holder', async t
   fs.unlinkSync(file);
   assert.equal(await waiting, 'committed');
 });
+
+it('HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners after 30 seconds', async t => {
+  const s = setup('hotfix0264-expired');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  fs.mkdirSync(s.config.stateDir, { recursive: true });
+  const now = Date.now();
+  let current = now;
+  t.mock.method(Date, 'now', () => { const at = current; current += 61_000; return at; });
+  for (const owner of [
+    JSON.stringify({ pid: process.pid, task: 'STALE', at: new Date(now - 181_000).toISOString() }),
+    '',
+    '0',
+    '{"pid":0}',
+  ]) {
+    fs.writeFileSync(file, owner);
+    fs.utimesSync(file, new Date(now - 30_000), new Date(now - 30_000));
+    current = now;
+    assert.equal(await withStartLock(s.ctx, async () => 'recovered'), 'recovered');
+    assert.equal(fs.existsSync(file), false);
+  }
+});
