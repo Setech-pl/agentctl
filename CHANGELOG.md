@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A setup retry checks all reused checkouts with one bounded process census. / Ponowienie setupu sprawdza wszystkie używane worktree jednym odczytem procesów z limitem czasu.
 - High load raises alerts. Queue admission holds only with `queue.hold_on_load: true` and an explicit `capacity.load_threshold`. / Wysokie obciążenie zgłasza alert. Kolejka wstrzymuje starty po ustawieniu `queue.hold_on_load: true` i jawnego `capacity.load_threshold`.
 - Launch retries run outside the watch tick with bounded commands. Legacy interrupted launches wait for a named resume. / Watch ponawia start w tle z limitami czasu, a stare przerwane starty czekają na jawne wznowienie zadania.
 - Watch rejects old MCP limit writes. Quit and reopen Claude with ⌘Q after updating. `agentctl config downgrade-check --to 0.26.x` checks manual rollback compatibility and prunes expired overrides. / Watch blokuje zmiany limitów ze starego MCP. Po aktualizacji zamknij Claude przez ⌘Q. Polecenie sprawdza konfigurację przed ręcznym powrotem i usuwa wygasłe limity czasowe.

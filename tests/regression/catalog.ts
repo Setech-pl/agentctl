@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-P19-RETRY', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Retrying setup over kept worktrees ran a separate unbounded series of cwd probes for each checkout.', scenarios: [s('worktree-start.test.ts', '^REL0272-P19-RETRY:')] },
   { id: 'REL0272-GIT-REFUSAL', fixedIn: '0.27.2', proofAgainst: '5274994a68ce2d2fdaf2cc310ad602c00a6b0e94', symptom: 'Local GC could override Git’s untracked-file protection after the hotfix merge.', scenarios: [s('fix0227-gc.test.ts', '^D1: cached MCP preview checks every repo')] },
   { id: 'REL0272-PRESSURE-POLICY', fixedIn: '0.27.2', proofAgainst: '6631d091d0b6f64af65184dbb37f68684d9faa43', symptom: 'The macOS CPU fixture concentrated its competing application workload in the gate’s background scheduling group.', scenarios: [s('gate.test.ts', '^REL0272-PRESSURE-POLICY:')] },
   { id: 'REL0272-DELIVERY-SCAN', fixedIn: '0.27.2', proofAgainst: 'e3a6373f67cc15323ad95af1e91bacb8c0d83760', symptom: 'Watch acquired the shared start lock once per active task even when there were no messages to send.', scenarios: [s('review0256.test.ts', '^REL0272-DELIVERY-SCAN:')] },

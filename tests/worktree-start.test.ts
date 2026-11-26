@@ -104,6 +104,23 @@ describe('worktree start resilience', () => {
     } });
     await checkRetryWorktrees(runner, [r]);
   });
+  it('REL0272-P19-RETRY: two reused worktrees share one bounded process census', async () => {
+    const repos = [repo('retry-one'), repo('retry-two')];
+    for (const r of repos) fs.mkdirSync(r.worktree);
+    const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args) => {
+      if (cmd === 'ps') return { stdout: '483 git status\n492 git gc\n' };
+      if (cmd.endsWith('lsof')) return { stdout: 'p483\nn/elsewhere\np492\nn/other\n' };
+      if (args.includes('status')) return { stdout: '' };
+      if (args.includes('--git-path')) return { stdout: 'index.lock' };
+      if (args.includes('--verify')) return { stdout: 'fixed-head' };
+      const r = repos.find(r => r.path === args[1] || r.worktree === args[1])!;
+      if (args.includes('symbolic-ref')) return { stdout: r.branch ?? '', code: r.branch ? 0 : 1 };
+      return args.includes('list') ? { stdout: `worktree ${r.worktree}\n` } : { stdout: r.worktree };
+    } });
+    await checkRetryWorktrees(runner, repos);
+    assert.deepEqual(runner.queries.filter(query => query.startsWith('ps ')), ['ps -axo pid=,args=']);
+    assert.deepEqual(runner.queries.filter(query => query.includes('lsof ')).map(query => query.split('lsof ')[1]), ['-a -p 483,492 -d cwd -Fn']);
+  });
 });
 
 it('BASE-DEFAULT: missing bases name the local default without network or substitution', async () => {
