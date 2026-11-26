@@ -604,3 +604,30 @@ it('HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge pr
   assert.equal(fs.readFileSync(personal, 'utf8'), 'keep');
   fs.unlinkSync(personal);
 });
+
+it('HOTFIX0264-F2: integration removal receives the Git timeout without the admission lock', async () => {
+  const w = world('integration-remove-timeout');
+  const worktree = path.join(w.root, 'integrated');
+  git(w.repo, 'worktree', 'add', '-b', 'integrated', worktree);
+  seedTask(w.config, 'INTEGRATED', { closed: true, owner: 'chat:nc', repos: [{ path: w.repo, worktree, branch: 'integrated' }] });
+  const head = git(w.repo, 'rev-parse', 'HEAD');
+  let remaining = 0;
+  let lockHeld = true;
+  const { commandStageRemaining } = await import('../src/core/command-stage.ts');
+  w.interceptGit(args => {
+    if (args.includes('remove')) {
+      remaining = commandStageRemaining();
+      lockHeld = fs.existsSync(path.join(w.config.stateDir, 'start.lock'));
+    }
+    return undefined;
+  });
+  const result = await applyGc(w.ctx, {
+    integration: { repo: fs.realpathSync(w.repo), branch: 'main', head, owner: 'chat:nc' },
+    items: [{ kind: 'worktree', task: 'INTEGRATED', target: fs.realpathSync(worktree), bytes: 0, detail: '', head }],
+    skipped: [], freeBytes: 0, olderThanMs: 0, unknownCacheDirs: 0,
+  });
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.done.length, 1);
+  assert.equal(remaining, Infinity);
+  assert.equal(lockHeld, false);
+});

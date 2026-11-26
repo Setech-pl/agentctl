@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOTFIX0264-F2', fixedIn: '0.26.2', symptom: 'Integration GC cut slow Git worktree removal at the 30-second admission deadline.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F2:')] },
   { id: 'HOTFIX0264-F1', fixedIn: '0.26.2', symptom: 'Start-lock contention failed callers after five seconds and could fail a queued start after setup.', scenarios: [s('queue.test.ts', '^HOTFIX0264-F1:')] },
   { id: 'HOTFIX0263-START', fixedIn: '0.26.1', symptom: 'Hung checkout or setup retained a setup slot and delayed unrelated queued tasks.', scenarios: [s('queue.test.ts', '^HOTFIX0263-START:')] },
   { id: 'HOTFIX0263-LOCK', fixedIn: '0.26.1', symptom: 'An old admission lock with no live owner kept starts from proceeding.', scenarios: [s('queue.test.ts', '^HOTFIX0263-LOCK:')] },

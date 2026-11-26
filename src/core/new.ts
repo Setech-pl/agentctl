@@ -1,3 +1,4 @@
+import { claimStartPaths } from './start-paths.ts';
 import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { providerHolds, providerHoldText } from './provider-hold.ts';
@@ -142,9 +143,21 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
   ctx.info(`${spec.task}: setup done (${todo.map(({ repo }) => path.basename(repo.path)).join(', ')}), output in ${logFile}`);
 }
 
+function localStartPaths(specs: ResolvedSpec[]): string[] {
+  return specs.filter(spec => !spec.host).flatMap(spec => [
+    spec.report, ...spec.repos.map(repo => repo.worktree), ...spec.links.map(link => link.to),
+  ]);
+}
+
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
-  if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
+  if (ctx.runner.dryRun) return startTasks(ctx, requested, opts);
+  if (opts.noAgent) {
+    const specs = await planBatch(ctx, requested, opts);
+    const release = await withStartLock(ctx, () => claimStartPaths(ctx, 'start', localStartPaths(specs)));
+    try { return await startTasks(ctx, specs, opts, true); }
+    finally { release(); }
+  }
   // A person answering a capacity question must never own the global lock.
   const interactive = Boolean(ctx.confirm && (!opts.noSwitch || opts.overflow));
   const planned = interactive ? await planBatch(ctx, requested, opts) : requested;
@@ -160,10 +173,12 @@ export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: Ne
       if (held?.startsWith('volume missing: ')) throw new WorktreeVolumeError(held.slice(16), spec.task, true);
       if (held) throw new AgentctlError(held, 'Free disk space before starting setup.');
     }
-    return { specs, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) };
+    const release = await claimStartPaths(ctx, 'start', localStartPaths(specs));
+    try { return { specs, release, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) }; }
+    catch (error) { release(); throw error; }
   }, requested.map(spec => spec.task).join(', '));
   try { return await startTasks(ctx, admission.specs, opts, true); }
-  finally { await releaseStarts(ctx, admission.ids); }
+  finally { admission.release(); await releaseStarts(ctx, admission.ids); }
 }
 
 async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions, admitted = false): Promise<NewResult[]> {
