@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'HOTFIX0264-F5', fixedIn: '0.26.2', symptom: 'Git refused dirty worktree removal even after the owner authorized the named task.', scenarios: [s('fix0227-gc.test.ts', '^HOTFIX0264-F5:')] },
   { id: 'HOTFIX0264-F4', fixedIn: '0.26.2', symptom: 'A config with 0.27.x keys prevented 0.26.x from loading during rollback.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F4:')] },
   { id: 'HOTFIX0264-F3', fixedIn: '0.26.2', symptom: 'A personal Trash item could be purged solely because it shared the basename of a closed task path.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F3:')] },
   { id: 'HOTFIX0264-F2', fixedIn: '0.26.2', symptom: 'Integration GC cut slow Git worktree removal at the 30-second admission deadline.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F2:')] },

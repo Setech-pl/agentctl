@@ -1,3 +1,4 @@
+import { recordJournal } from './journal.ts';
 import { GcSpace } from './gc-space.ts';
 import { moveToTrash, planTrashPurge, purgeTrashItem, type TrashItem } from './trash.ts';
 import { planRemoteGc, applyRemoteGc } from './host-gc.ts';
@@ -410,7 +411,11 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
           assertUnpinned();
           if (!runner.dryRun) await space.before(item.target);
-          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
+          const forceRemove = forced && risk.dirtyFiles > 0;
+          if (forceRemove || forced && risk.unpushedCommits > 0) await recordJournal(ctx, {
+            kind: 'gc-force-dirty', task: item.task, text: `Owner-authorized worktree removal: ${item.target} (${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits)`,
+          });
+          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forceRemove ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
           if (!plan.includeCache) throw new Error('cache deletion requires explicit include_cache: true');
