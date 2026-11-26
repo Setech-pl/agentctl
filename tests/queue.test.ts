@@ -750,3 +750,17 @@ for (const stage of ['worktree', 'setup'] as const) {
     if (stage === 'setup') assert.equal(requestedTimeout, 50);
   });
 }
+
+it('HOTFIX0264-F1: admission can wait beyond five seconds for a holder', async t => {
+  const s = setup('hotfix0264-wait');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  fs.mkdirSync(s.config.stateDir, { recursive: true });
+  fs.writeFileSync(file, String(process.pid));
+  const now = Date.now();
+  let reads = 0;
+  t.mock.method(Date, 'now', () => now + (reads++ ? 10_000 : 0));
+  const waiting = withStartLock(s.ctx, async () => 'committed');
+  // The first failed acquisition advances the clock. Release before the next poll.
+  fs.unlinkSync(file);
+  assert.equal(await waiting, 'committed');
+});

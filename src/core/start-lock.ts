@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Context } from './context.ts';
 import type { GlobalConfig, AgentName } from './config.ts';
-import { withFileLock } from './file-lock.ts';
+import { FileLockTimeout, withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
 import { withCommandStage } from './command-stage.ts';
 
@@ -23,7 +23,7 @@ export async function withStartLock<T>(ctx: Context, action: () => Promise<T>, t
   if (ctx.runner.dryRun) return action();
   let recovered: { pid?: number; task?: string; at?: string } | undefined;
   try {
-    return await withFileLock(path.join(ctx.config.stateDir, 'start.lock'), () => withCommandStage(30_000, undefined, action), 5000, false, {
+    return await withFileLock(path.join(ctx.config.stateDir, 'start.lock'), () => withCommandStage(30_000, undefined, action), 60_000, false, {
       task, staleMs: ctx.config.startLockStaleS * 1000, recovered: owner => { recovered = owner; },
     });
   } finally {
@@ -34,6 +34,24 @@ export async function withStartLock<T>(ctx: Context, action: () => Promise<T>, t
     }
   }
 }
+/** Setup is already done. Retry only lock acquisition, without replaying any state writes. */
+export async function commitStart<T>(ctx: Context, action: () => Promise<T>, task: string, signal?: AbortSignal): Promise<T> {
+  const lock = path.resolve(ctx.config.stateDir, 'start.lock');
+  for (;;) {
+    signal?.throwIfAborted();
+    let acquired = false;
+    try {
+      return await withStartLock(ctx, async () => {
+        acquired = true;
+        signal?.throwIfAborted();
+        return action();
+      }, task);
+    } catch (error) {
+      if (acquired || !(error instanceof FileLockTimeout) || error.file !== lock) throw error;
+    }
+  }
+}
+
 /** Caller holds start.lock: this durable write reserves capacity before checkout or the first TASK.md. */
 export async function reserveStarts(ctx: Context, tasks: { task: string; window: string; agent: AgentName; host?: string; owner?: string }[]): Promise<string[]> {
   if (ctx.runner.dryRun) return [];

@@ -7,7 +7,7 @@ import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
-import { releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
+import { commitStart, releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
 import { closeFailedStartWindow, keepFailedWindow, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
@@ -1377,12 +1377,12 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
       // no_agent intentionally writes no TASK.md. Commit its successful preparation and dependent metadata under the admission lock.
-      await withStartLock(ctx, async () => {
+      await commitStart(ctx, async () => {
         if (entry.noAgent) for (const dependent of readQueue(config)) {
           if (dependent.noAgent && dependent.directAuthor === entry.task) await writeEntry(ctx, { ...dependent, authorPrepared: true });
         }
         fs.rmSync(entryFile(config, starting), { force: true });
-      });
+      }, entry.task, opts.signal);
       fs.rmSync(queueLogFile(config, starting), { force: true });
       await opts.log?.(`queue: ${entry.task} started`);
       const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;

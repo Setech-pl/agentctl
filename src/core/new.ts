@@ -11,7 +11,7 @@ import { assertCandidateCheckout, assertReviewBase } from './review-freshness.ts
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
-import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
+import { commitStart, withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -289,12 +289,12 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
     // The reservation spans checkout/setup; its first TASK snapshot commits under the same global admission lock.
-    await withStartLock(ctx, async () => {
+    await commitStart(ctx, async () => {
       await runner.mkdir(taskDir(config, spec.window));
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
       if (spec.host) await ctx.hosts.trackHost(spec.host);
       await queuePrompt(ctx, record, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext), 'launching');
-    }, spec.task);
+    }, spec.task, opts.signal);
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 

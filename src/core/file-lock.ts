@@ -53,6 +53,10 @@ export function tryFileLock(file: string, recovery?: LockRecovery): (() => void)
   return undefined;
 }
 
+export class FileLockTimeout extends Error {
+  constructor(readonly file: string) { super(`Timed out waiting for ${file}`); }
+}
+
 const ownership = new AsyncLocalStorage<Map<string, { active: boolean }>>();
 export const taskLock = (file: string): string => path.join(path.dirname(path.resolve(file)), 'prompt-delivery.lock');
 
@@ -65,7 +69,7 @@ export async function withFileLock<T>(file: string, action: () => Promise<T>, ti
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file, recovery))) {
     checkResponseBudget();
-    if (Date.now() >= deadline || commandStageRemaining() <= 0) throw new Error(`Timed out waiting for ${file}`);
+    if (Date.now() >= deadline || commandStageRemaining() <= 0) throw new FileLockTimeout(file);
     await new Promise((resolve) => setTimeout(resolve, 10));
     if (stateWrite) checkResponseBudget();
   }
@@ -90,7 +94,7 @@ export function withFileLockSync<T>(file: string, action: () => T, timeoutMs = 2
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file))) {
     checkResponseBudget();
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    if (Date.now() >= deadline) throw new FileLockTimeout(file);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   }
   const lease = { active: true }, owned = new Map(ownership.getStore()); owned.set(file, lease);
