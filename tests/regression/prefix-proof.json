@@ -180,6 +180,19 @@
       "BASE-DEFAULT: missing bases name the local default without network or substitution"
     ]
   },
+  "CLAUDEHOOK0266": {
+    "rev": "v0.26.3",
+    "outcome": "FAILS",
+    "failed": 4,
+    "passed": 0,
+    "failing": [
+      "CLAUDEHOOK0266-SETTINGS: generated Claude settings hold only command hooks (SessionStart included) that 2.1.323 and 2.1.332 accept; foreign prompt-type SessionStart hooks are named at start",
+      "CLAUDEHOOK0266-DELIVERY: Claude 2.1.323 with no hook event at all: the first prompt is pasted on screen readiness and confirmed by its transcript",
+      "CLAUDEHOOK0266-DELIVERY: Claude 2.1.332 with no hook event at all: the first prompt is pasted on screen readiness and confirmed by its transcript",
+      "CLAUDEHOOK0266-DELIVERY: on an SSH host without hook receipts the mirror returns only the transcript that holds this attempt",
+      "CLAUDEHOOK0266-SETTINGS: generated Claude settings hold only command hooks (SessionStart included) that 2.1.323 and 2.1.332 accept; foreign prompt-type SessionStart hooks are named at start"
+    ]
+  },
   "CONSULT-f1": {
     "rev": "v0.21.0",
     "outcome": "FAILS",

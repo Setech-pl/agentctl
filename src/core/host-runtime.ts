@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { checkReportPath } from './report-path.ts';
 import { remoteMirrorScript } from './host-mirror.ts';
-import { codexMessages } from './transcript.ts';
+import { claudeMessages, codexMessages } from './transcript.ts';
 import { sameMessage } from './paste-wrapper.ts';
 import { kimiEvents } from './providers/kimi-events.ts';
 import { wireObject, wireProtocol, wireTime } from './providers/kimi-usage.ts';
@@ -175,8 +175,10 @@ export async function syncRemoteFiles(ctx: Context, record: TaskRecord): Promise
         if (receipt.evidence?.deliveryId === record.deliveryId) await ctx.runner.writeFile(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), JSON.stringify({ ...receipt.evidence, at: new Date(ctx.runner.now()).toISOString() }));
       }
     }
-    if (record.pendingPrompt && record.deliveryStartedAt && data.transcript && record.agent === 'codex') {
-      const seen = codexMessages(data.transcript).some(row => row.at >= Date.parse(record.deliveryStartedAt!) && sameMessage(row.text, record.pendingPrompt!, 'codex'));
+    if (record.pendingPrompt && record.deliveryStartedAt && data.transcript && (record.agent === 'codex' || record.agent === 'claude' || record.agent === 'glm')) {
+      const agent = record.agent;
+      const rows = agent === 'codex' ? codexMessages(data.transcript) : claudeMessages(data.transcript).filter(row => row.kind === 'user' && !row.ambiguous);
+      const seen = rows.some(row => row.at >= Date.parse(record.deliveryStartedAt!) && sameMessage(row.text, record.pendingPrompt!, agent));
       if (seen) await ctx.runner.writeFile(path.join(ctx.config.stateDir, record.window, 'delivery-evidence.json'), JSON.stringify({ deliveryId: record.deliveryId, accepted: true, at: new Date(ctx.runner.now()).toISOString() }));
     }
     if (data.wire && record.agent === 'kimi') {

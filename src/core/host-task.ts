@@ -7,7 +7,7 @@ import type { Context } from './context.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { parseProjectConfigText } from './config.ts';
 import { missingBaseFailure } from './git.ts';
-import { buildClaudeSettings } from './providers/claude-events.ts';
+import { buildClaudeSettings, unsupportedSessionStartHooks } from './providers/claude-events.ts';
 import { parseTomlNotify, tomlArray } from './providers/codex-events.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, fillPlaceholders } from './util.ts';
@@ -114,6 +114,12 @@ export async function installRemoteHooks(ctx: Context, spec: Pick<ResolvedSpec, 
     const file = path.posix.join(spec.remoteDir!, `${spec.agent}-settings.json`);
     await runner.writeFile(file, `${JSON.stringify(buildClaudeSettings(spec.task, ['node', script], undefined, record.attemptId, spec.agent), null, 2)}\n`);
     ctx.info(`${spec.task}: [${spec.host}] task-owned Claude hooks/settings installed idempotently in ${file} (owner account; existing user/project settings preserved)`);
+    try {
+      // Claude Code 2.1.332 rejects SessionStart hooks that are not command-type; agentctl does not edit the owner's file, it says where it is.
+      const user = await runner.exec('sh', ['-c', 'f="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"; if [ -f "$f" ]; then cat "$f"; fi'], { readOnly: true });
+      const found = user.code === 0 && user.stdout.trim() ? unsupportedSessionStartHooks([`[${spec.host}] ~/.claude/settings.json`], () => user.stdout) : [];
+      if (found.length) ctx.info(`${spec.task}: WARNING: SessionStart hooks that are not command-type in ${found.join(', ')}; Claude Code 2.1.332 rejects them at startup. The prompt is still delivered by screen readiness and confirmed by the transcript.`);
+    } catch { /* a warning only */ }
     return ['--settings', file];
   }
   if (spec.agent === 'codex') {
