@@ -298,22 +298,46 @@ The selection covers the full width of the list pane, including the gaps between
 
 Disk limits are in GiB. `disk.warn_gb` (50) and `disk.critical_gb` (20) classify available space per volume. `disk.min_free_start_gb` (30) holds local and queued starts below that threshold or when a fresh reading is unavailable. With automatic GC enabled, a measured local start hold also schedules a run and identifies it in the held reason.
 
-The owner enables automatic GC in `config.yaml`. Merge the following into the existing `disk` section. Set `dry_run: false` after reviewing the plan.
+The owner enables automatic GC in `config.yaml`. Merge the following into the existing `disk` section. This is the recommended safe start (0.26.4): run it with `dry_run: true` for 24 hours. In that mode watch only posts the plan (`Automatyczne GC — plan`) to the `agentctl` WALL channel and the journal. Check those plans and the run time (`czas … s`) in each entry, then set `dry_run: false`.
 
 ~~~yaml
 disk:
   auto_gc:
     enabled: true
-    dry_run: true
+    dry_run: true            # first 24 h: WALL plan only; then false
     trigger_free_gb: 50
     target_free_gb: 60
     older_than: 2d
-    categories: [closed_clean_worktrees, stale_node_modules, own_trash, closed_task_cache]
+    categories: [own_trash, stale_node_modules, closed_clean_worktrees, closed_task_cache]
     max_per_run_gb: 50
+    max_run_s: 300
+    ignored_ok: [node_modules, .cache/vite, dist, coverage, .turbo]
     cohorts_exclude: []
 ~~~
 
-Automatic GC defaults to off. The trigger defaults to `disk.warn_gb`, the target to the highest of the trigger, warning and start thresholds, and the budget to 50 GiB of estimated data per run. Watch checks the internal and configured external volumes independently. It processes categories in order, checks free blocks after each removal, and stops at the target, run budget, or exhaustion. Only verifiable agentctl data is eligible. Pinned, active, dirty, unpushed, linked, protected-branch and `keep_cache` data stays, as do reports and excluded cohorts. Before deleting, watch rechecks ownership, age and filesystem boundaries. Each changed plan or run result goes to the journal and the `agentctl` WALL channel.
+Automatic GC is off by default. Defaults:
+
+- The trigger defaults to `disk.warn_gb`.
+- The target defaults to the highest of the trigger, warning and start thresholds.
+- The budget is 50 GiB of estimated data per run.
+- `max_run_s` (default 300) is the wall-clock limit of one run.
+- `ignored_ok` lists git-ignored paths that a worktree may hold and still be removed. A bare name such as `node_modules` matches at any depth; a path with `/` such as `.cache/vite` is relative to the worktree root.
+
+Watch checks the internal and configured external volumes independently. It processes categories in order and checks each candidate only when it is the next one needed. It checks free blocks after each removal and stops at the target, the run budget, `max_run_s`, or when no candidates remain. One run shares one inventory of task records, one index of declared links and real symlinks, and one read of the reports. Inside `node_modules`, only the package level is read for symlinks. Every walk yields to the event loop, so the watch tick stays responsive.
+
+Only verifiable agentctl data is eligible. The following stays:
+
+- pinned, active, dirty, unpushed, linked, protected-branch and `keep_cache` data;
+- reports and excluded cohorts;
+- worktrees with ignored files outside `ignored_ok` (for example `.env` or `.cache/evidence`);
+- worktrees whose ignored files a report names;
+- everything a queued, starting or needs-attention task still needs: the tasks named by `review_of`, `after` and `base: "@TASK"`, the task itself (a retry reuses its worktree), and paths named in its spec or prompt.
+
+Before deleting, watch takes the same path claim as a start, under the start lock. It then rechecks the queue, ownership, age and filesystem boundaries. A start that needs the same path waits until the deletion ends. A path claim records its time and the start time of its process, so a reused PID cannot pin a path.
+
+Only watch runs automatic GC. When a CLI or MCP start meets a local disk hold, it leaves `auto-gc-kick.json` for the next watch tick and does not delete anything itself. Ctrl-C on watch lets the current item finish and stops before the next one. A config reload stops a run only when the `disk.auto_gc` settings changed.
+
+Each changed plan or run result goes to the journal and the `agentctl` WALL channel. It records the duration and the bytes freed according to `statfs`.
 
 Preview Trash with `agentctl gc --purge-trash`, then use `--apply` to confirm. In MCP, call `gc` with `purge_trash: true`, get the preview token (poll by `request_id` when watch prepares the plan), and confirm the same token. Receipts identify the exact items. Legacy candidates have a separate section and require agentctl ownership markers. Actual reclaimed space is recorded from free blocks on each affected filesystem. The owner may authorize named dirty worktrees with `--force-dirty TASK` or MCP `force_dirty: [TASK]`; those overrides are journaled.
 

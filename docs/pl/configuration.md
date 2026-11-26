@@ -298,22 +298,46 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 
 Progi są podawane w GiB. `disk.warn_gb` (50) i `disk.critical_gb` (20) określają poziom wolnego miejsca osobno dla każdego woluminu. `disk.min_free_start_gb` (30) wstrzymuje lokalne starty i starty z kolejki poniżej progu lub bez świeżego pomiaru. Gdy automatyczne GC jest włączone, brak miejsca przy starcie zleca też przebieg GC, co widać w powodzie wstrzymania.
 
-Właściciel włącza automatyczne GC w `config.yaml`. Dodaj poniższe ustawienia do istniejącej sekcji `disk`. Po przejrzeniu planu ustaw `dry_run: false`.
+Właściciel włącza automatyczne GC w `config.yaml`. Dodaj poniższe ustawienia do istniejącej sekcji `disk`. To zalecany bezpieczny start (0.26.4): przez pierwsze 24 godziny zostaw `dry_run: true`. W tym trybie watch tylko publikuje plan (`Automatyczne GC — plan`) na kanale WALL `agentctl` i w dzienniku. Przejrzyj te plany i czas przebiegu (`czas … s`) w każdym wpisie, a potem ustaw `dry_run: false`.
 
 ~~~yaml
 disk:
   auto_gc:
     enabled: true
-    dry_run: true
+    dry_run: true            # pierwsze 24 h: tylko plan na WALL; potem false
     trigger_free_gb: 50
     target_free_gb: 60
     older_than: 2d
-    categories: [closed_clean_worktrees, stale_node_modules, own_trash, closed_task_cache]
+    categories: [own_trash, stale_node_modules, closed_clean_worktrees, closed_task_cache]
     max_per_run_gb: 50
+    max_run_s: 300
+    ignored_ok: [node_modules, .cache/vite, dist, coverage, .turbo]
     cohorts_exclude: []
 ~~~
 
-Automatyczne GC jest domyślnie wyłączone. Domyślny próg uruchomienia to `disk.warn_gb`, cel to najwyższy z progów uruchomienia, ostrzeżenia i startu, a limit to 50 GiB szacowanych danych na przebieg. Watch sprawdza osobno dysk wewnętrzny i skonfigurowane woluminy zewnętrzne. Przechodzi kategorie w podanej kolejności, sprawdza wolne bloki po każdym usunięciu i kończy po osiągnięciu celu, limitu lub wyczerpaniu pozycji. Chroni przypięte i aktywne zadania, lokalne i niewysłane zmiany, linki, główne gałęzie, `keep_cache`, raporty i wykluczone kohorty. Przed usunięciem ponownie sprawdza własność, wiek i granice woluminu. Zmieniony plan albo wynik trafia do dziennika i kanału WALL `agentctl`.
+Automatyczne GC jest domyślnie wyłączone. Wartości domyślne:
+
+- próg uruchomienia to `disk.warn_gb`;
+- cel to najwyższy z progów uruchomienia, ostrzeżenia i startu;
+- limit to 50 GiB szacowanych danych na przebieg;
+- `max_run_s` (domyślnie 300) to limit czasu jednego przebiegu;
+- `ignored_ok` to lista ścieżek ignorowanych przez git, z którymi worktree nadal może zostać usunięte. Sama nazwa, np. `node_modules`, pasuje na każdej głębokości. Ścieżka z `/`, np. `.cache/vite`, liczy się od katalogu głównego worktree.
+
+Watch sprawdza osobno dysk wewnętrzny i skonfigurowane woluminy zewnętrzne. Przechodzi kategorie w podanej kolejności i sprawdza pozycję dopiero wtedy, gdy jest potrzebna jako następna. Po każdym usunięciu sprawdza wolne bloki. Kończy po osiągnięciu celu, limitu danych, `max_run_s` albo wyczerpaniu pozycji. Jeden przebieg korzysta z jednego spisu zadań, jednego indeksu linków i dowiązań symbolicznych oraz jednego odczytu raportów. W `node_modules` czyta dowiązania tylko na poziomie pakietów. Każde przeglądanie katalogów oddaje sterowanie pętli zdarzeń, więc tick watch nie jest blokowany.
+
+Usunąć można tylko dane, których właściciela w agentctl da się potwierdzić. Zostają:
+
+- przypięte i aktywne zadania, lokalne i niewysłane zmiany, linki, główne gałęzie i `keep_cache`;
+- raporty i wykluczone kohorty;
+- worktree z plikami ignorowanymi spoza `ignored_ok` (np. `.env` lub `.cache/evidence`);
+- worktree, których ignorowane pliki są wskazane w raporcie;
+- wszystko, czego potrzebuje zadanie w kolejce, w trakcie startu albo wymagające uwagi: zadania z `review_of`, `after` i `base: "@TASK"`, samo zadanie (ponowienie używa jego worktree) oraz ścieżki z jego specyfikacji lub promptu.
+
+Przed usunięciem watch zajmuje ścieżkę tak samo jak start, pod blokadą startu. Następnie ponownie sprawdza kolejkę, własność, wiek i granice woluminu. Start, który potrzebuje tej samej ścieżki, czeka na koniec usuwania. Zajęcie ścieżki zapisuje swój czas i czas startu procesu, więc ponownie użyty PID jej nie blokuje.
+
+Automatyczne GC uruchamia tylko watch. Gdy start z CLI lub MCP trafi na brak miejsca, zostawia `auto-gc-kick.json` dla następnego ticku watch i sam niczego nie usuwa. Ctrl-C w watch pozwala dokończyć bieżącą pozycję i zatrzymuje przebieg przed następną. Przeładowanie konfiguracji przerywa przebieg tylko wtedy, gdy zmieniły się ustawienia `disk.auto_gc`.
+
+Zmieniony plan albo wynik trafia do dziennika i kanału WALL `agentctl`. Wpis zawiera czas przebiegu i odzyskane bajty według `statfs`.
 
 Użyj `agentctl gc --purge-trash`, aby obejrzeć podgląd, a następnie `--apply`, aby zatwierdzić. W MCP wywołaj `gc` z `purge_trash: true`, pobierz token podglądu (przez `request_id`, gdy plan przygotowuje watch) i potwierdź tym tokenem. Zapis przeniesienia wskazuje konkretny element. Starsze pozycje pojawiają się osobno i wymagają znacznika własności agentctl. Faktyczny odzysk jest mierzony według wolnych bloków każdego woluminu. Właściciel może jawnie zatwierdzić usunięcie wskazanych worktree ze zmianami przez `--force-dirty TASK` lub MCP `force_dirty: [TASK]`. Zgoda trafia do dziennika.
 
