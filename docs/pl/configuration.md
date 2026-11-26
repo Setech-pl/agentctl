@@ -133,7 +133,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `agents.<agent>.flags` | list of strings · `[]` · g | Dodatkowe flagi; auto-accept zabronione. |
 | `agents.<agent>.effort_args` | list of strings · claude `['--effort', '{effort}']`, codex `['-c', 'model_reasoning_effort={effort}']` · g | Argumenty effort z {effort}; [] nic nie dodaje, Kimi używa konfiguracji natywnej. |
 | `agents.<agent>.ready_pattern` | regex · see below · g | Regex pola; geometria composera nadal sprawdzana. |
-| `agents.<agent>.ready_timeout` | seconds · `60` · g | Sekundy oczekiwania na gotowość. |
+| `agents.<agent>.ready_timeout` | seconds · `60` · g | Sekundy oczekiwania na gotowość (wartość bazowa; nadpisuje ją `providers_config.<p>.ready_timeout_s`, obie rosną z load1/rdzenie do 180 s). |
 | `agents.<agent>.trust_pattern` | regex · see below · g | Regex trust; nigdy automatycznie akceptowany. |
 | `agents.<agent>.dialog_pattern` | regex · claude and glm: the first-run onboarding screens (see below), codex `'Update available\|Skip until next version'` · g | Onboarding/update modal czekający na człowieka. |
 | `agents.<agent>.trust_timeout` | seconds · `600` · g | Sekundy oczekiwania na trust. |

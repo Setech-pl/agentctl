@@ -1,7 +1,7 @@
 import type { AgentName, GlobalConfig } from './config.ts';
 import { formatLocalTime } from './util.ts';
 export interface PeakWindow { days: string | string[]; from: string; to: string; tz: string }
-export interface ProviderSettings { command?: string; env?: Record<string, string>; peak?: PeakWindow[]; peakPolicy?: 'hold' | 'short_only' }
+export interface ProviderSettings { command?: string; env?: Record<string, string>; peak?: PeakWindow[]; peakPolicy?: 'hold' | 'short_only'; /** `providers_config.<p>.ready_timeout_s`: base ready timeout (load-scaled up to 180 s). */ readyTimeoutS?: number }
 export const DEFAULT_GLM_PEAK: PeakWindow[] = [{days: 'mon-fri', from: '14:00', to: '18:00', tz: 'Asia/Singapore'}];
 const WEEK = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 export function peakDays(value: unknown): number[] | undefined {

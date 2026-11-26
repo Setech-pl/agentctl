@@ -1158,8 +1158,12 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
         const value = raw.providers_config[agent], where = `config.providers_config.${agent}`;
         if (value === undefined) continue;
         if (!isObject(value)) {p.add(`${where} must be a mapping`); continue;}
-        checkKeys(value, agent === 'glm' ? ['command', 'env', 'peak', 'peak_policy'] : ['peak', 'peak_policy'], where, p);
+        checkKeys(value, agent === 'glm' ? ['command', 'env', 'peak', 'peak_policy', 'ready_timeout_s'] : ['peak', 'peak_policy', 'ready_timeout_s'], where, p);
         const settings: ProviderSettings = {};
+        if (value.ready_timeout_s !== undefined) {
+          if (typeof value.ready_timeout_s === 'number' && Number.isFinite(value.ready_timeout_s) && value.ready_timeout_s > 0) settings.readyTimeoutS = value.ready_timeout_s;
+          else p.add(`${where}.ready_timeout_s must be a positive number of seconds`);
+        }
         if (agent === 'glm') {
           const command = parseString(value.command, `${where}.command`, p);
           if (command) {

@@ -254,7 +254,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 | `agents.<agent>.flags` | list of strings | `[]` | g | Extra flags appended to the agent command line. |
 | `agents.<agent>.effort_args` | list of strings | claude `['--effort', '{effort}']`, codex `['-c', 'model_reasoning_effort={effort}']` | g | Flags that carry the effort; `{effort}` is replaced. `[]` passes nothing. |
 | `agents.<agent>.ready_pattern` | regex | see below | g | The agent shows its input box. |
-| `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern`. |
+| `agents.<agent>.ready_timeout` | seconds | `60` | g | How long `new` waits for `ready_pattern` (base value; `providers_config.<p>.ready_timeout_s` overrides it, and both scale with load1/cores up to 180 s). |
 | `agents.<agent>.trust_pattern` | regex | see below | g | The agent shows its folder-trust dialog. agentctl never answers it. |
 | `agents.<agent>.dialog_pattern` | regex | claude and glm: the first-run onboarding screens (see below), codex `'Update available\|Skip until next version'` | g | Another startup dialog a human must answer (the Codex "Update available" modal, Claude Code's first-run onboarding: theme picker, "Security notes … Press Enter to continue", login choice): `new` stops at it at once as needs-input (with a clear line and a notification, the window stays) instead of failing after `ready_timeout`; once you have answered it, watch carries on with folder trust, the input and the prompt. agentctl never answers it. Codex task windows also start with `-c check_for_update_on_startup=false`, so a current Codex does not show the modal at all. |
 | `agents.<agent>.trust_timeout` | seconds | `600` | g | How long `new` waits for you to answer the trust dialog. |
@@ -738,4 +738,5 @@ Usage accounting is separate (benchmark/statistics rows show `glm`). Z.ai docume
 | `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
 | `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |
 | `providers_config.<p>.peak_policy` | `hold` | hold or short_only; applies to new starts. |
+| `providers_config.<p>.ready_timeout_s` | `agents.<p>.ready_timeout` (60) | Base seconds a start waits for the agent's input prompt. It scales with load1/cores (factor 1–3) up to 180 s; a larger value is kept. One more capture is taken after the deadline, and a queued start waits a second time in the same window before it fails. |
 | `peak_ok` | `false` | Spec flag permitting a short_only peak start. |
