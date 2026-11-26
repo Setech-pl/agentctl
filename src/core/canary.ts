@@ -20,11 +20,15 @@ import { type DiskReport } from './disk.ts';
 import { insidePath } from './worktree-volume.ts';
 import { providerHoldFile } from './provider-hold.ts';
 import { activeProviders } from './providers/registry.ts';
+import { readJournal } from './journal.ts';
+import { pendingStarts } from './start-lock.ts';
 
 const chats = ['canarya', 'canaryb', 'canaryc', 'canaryd'];
 const notifier = { notify: async () => {} };
 const ID = 'CANARYFIX';
 const GC_COHORT = 'Canary-GC';
+const LEGACY_LAUNCHES = 200;
+const HUNG_RESUME = `${ID}-ROW-16`;
 const fixtureTasks = (scale: boolean) => scale ? 1500 : 12;
 const date = (at: number) => new Date(at).toISOString();
 const successReport = (verdict: string) => `Werdykt: ${verdict}\n\n<!-- agentctl:report-end -->\n`;
@@ -144,7 +148,8 @@ async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) 
   const wallCount = scale ? 150 : 0;
   if (scale) seedCanaryWall(world, Array.from({length: wallCount}, (_, i) => date(Date.UTC(2025, 10, 25, 12, 0, i))));
   for (let i = 0; i < count; i++) {
-    const task = `${ID}-ROW-${i}`, archived = i >= (scale ? 16 : 10) && i % 5 !== 0;
+    const legacy = scale && i >= 17 && i < 17 + LEGACY_LAUNCHES;
+    const task = `${ID}-ROW-${i}`, archived = !legacy && i !== 16 && i >= (scale ? 16 : 10) && i % 5 !== 0;
     const record = fixtureRecord(world, task, i === 6 ? 'codex' : i === 4 ? 'kimi' : 'claude');
     if (i < 6) {
       const screen = ['Working (esc to interrupt)', '❯ ', 'Quick safety check', 'Enter to select · Esc to cancel', 'Error: [provider.rate_limit] Canary fixture', 'Update available! Run: brew upgrade claude-code'][i];
@@ -161,6 +166,16 @@ async function seedFixture(world: CanaryWorld, scale: boolean, mirror: boolean) 
       record.supersededBy = `${ID}-ROW-1`;
     } else if (scale && i === 14) {
       record.host = 'offline-fixture';
+    } else if (scale && i === 16) {
+      const pane = runner.addPane(record.window, 'claude', 'fixture launch exited');
+      pane.exitCode = 12;
+      record.windowId = pane.id;
+      record.launchAt = date(runner.now());
+      record.promptDelivery = 'launching';
+      runner.hungResumeWindow = record.window;
+    } else if (legacy) {
+      record.windowId = `@${10000 + i}`;
+      record.promptDelivery = 'launching';
     } else if (i >= 9) {
       if (i % 7 === 0) record.cancelled = true;
       else record.closed = true;
@@ -268,6 +283,10 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   const metrics: CanaryMetrics = {ticks: 0, tasks: shape.count + mirrored, worktreeDirs: runner.worktrees.size,
     queued: shape.prepared.length, wall: shape.wallCount, started: 0, maxStartTicks: 0, maxSnapshotAgeMs: 0, maxMcpMs: 0,
     maxSkipped: 0, peakLoad1: 0, minLoad1: Infinity, states: []};
+  if (opts.scale) {
+    config.capacity.loadThreshold = 0.01;
+    config.queue.holdOnLoad = true;
+  }
   const readyAt = new Map<string, number>(), completed = new Set<string>();
   const stop = new AbortController();
   const signal = opts.signal ? AbortSignal.any([stop.signal, opts.signal]) : stop.signal;
@@ -296,7 +315,8 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   };
   const markEligible = (tick: number) => {
     for (const probe of shape.prepared) {
-      if (readyAt.has(probe.task) || probe.after && !completed.has(probe.after) || opts.scale && probe.agent === 'codex' && tick < 3) continue;
+      if (readyAt.has(probe.task) || probe.after && !completed.has(probe.after)
+        || opts.scale && tick < (probe.agent === 'codex' ? 3 : 2)) continue;
       readyAt.set(probe.task, tick);
     }
   };
@@ -311,8 +331,9 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     assert.ok(gap < 60_000, `watch publication gap: ${gap} ms`);
     previousSnapshot = snap.at;
     metrics.maxSnapshotAgeMs = Math.max(metrics.maxSnapshotAgeMs, age, gap);
-    metrics.states = [...new Set([...metrics.states, ...snap.rows.map(row => row.state)])].sort();
     assert.ok(age < 60_000 && !snap.degraded, `snapshot age ${age} ms, degraded=${snap.degraded ?? 'no'}`);
+    assert.ok(Array.isArray(snap.rows), 'watch snapshot has no task rows');
+    metrics.states = [...new Set([...metrics.states, ...snap.rows.map(row => row.state)])].sort();
     assert.ok(snap.rows.length >= metrics.tasks, `partial watch snapshot: ${snap.rows.length} < ${metrics.tasks}`);
     const heartbeat = JSON.parse(fs.readFileSync(watchHeartbeatPath(config), 'utf8')) as {consecutive?: Record<string, number>};
     metrics.maxSkipped = Math.max(metrics.maxSkipped, ...Object.values(heartbeat.consecutive ?? {}));
@@ -338,6 +359,11 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
       await renderCanaryHeader(config, snap.capacity.disk);
     }
     if (tick === 1 && opts.scale) {
+      assert.ok(shape.prepared.every(probe => !runner.launches.has(probe.task.toLowerCase())), 'opt-in load hold let an order start');
+      assert.ok(snap.queue.some(item => /obciążenie.*load1/i.test(item.startCondition)), 'load hold reason missing');
+      config.queue.holdOnLoad = false;
+    }
+    if (tick === 2 && opts.scale) {
       assert.ok(snap.queue.some(item => item.task === `${ID}-0-0` && /wstrzymane.*codex/i.test(item.startCondition)), 'manual hold missing from full queue data');
     }
     if (tick === 1) {
@@ -410,6 +436,13 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   assert.ok(metrics.maxStartTicks <= 2, 'queue start exceeded two ticks');
   assert.ok(runner.launches.has(extraTask.toLowerCase()) || opts.mirror && readQueue(config).some(entry => entry.task === extraTask && entry.status === 'queued'), `confirmed queue order never started: ${JSON.stringify(readSnapshot(config).queue.find(entry => entry.task === extraTask))}`);
   if (opts.scale) {
+    const events = readJournal(config);
+    assert.equal(events.filter(event => event.kind === 'launch-legacy').length, LEGACY_LAUNCHES, 'legacy launch events');
+    const legacyWindows = Array.from({length: LEGACY_LAUNCHES}, (_, i) => `${ID}-ROW-${17 + i}`.toLowerCase());
+    assert.ok(legacyWindows.every(window => !runner.launches.has(window)), 'legacy launch was retried');
+    assert.equal(runner.hungResumeAttempts, 1);
+    assert.ok(events.some(event => event.kind === 'launch-failed' && event.task === HUNG_RESUME && /ETIMEDOUT/.test(event.text)));
+    assert.ok(!pendingStarts(config).some(item => item.task === HUNG_RESUME), 'hung resume retained a reservation');
     const expected = ['background', 'cancelled', 'closed', 'dead', 'host-unreachable', 'limited', 'needs-attention', 'needs-input', 'needs-trust', 'orphan', 'overloaded', 'report-ready', 'superseded', 'waiting', 'working'];
     assert.deepEqual(metrics.states, expected, 'production fixture did not exercise every task state');
   }

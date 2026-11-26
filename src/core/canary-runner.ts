@@ -5,6 +5,7 @@ import { readTaskRecord, taskDir } from './taskstore.ts';
 import { sameMessage } from './paste-wrapper.ts';
 import { RealRunner, type ExecOptions, type ExecResult } from './runner.ts';
 import { insidePath } from './worktree-volume.ts';
+import { commandStageRemaining } from './command-stage.ts';
 
 export const CANARY_PROMPT = 'No-op release safety fixture.';
 const oid = 'a'.repeat(40);
@@ -17,7 +18,7 @@ const composer = (agent: string, text?: string) => agent === 'codex'
 const idle = (agent: string) => composer(agent);
 const busy = 'Working (esc to interrupt)';
 
-interface Pane { id: string; paneId: string; name: string; role: string; screen: string; paste?: string; ack?: boolean }
+interface Pane { id: string; paneId: string; name: string; role: string; screen: string; paste?: string; ack?: boolean; exitCode?: number }
 
 export class CanaryRunner extends RealRunner {
   readonly panes = new Map<string, Pane>();
@@ -25,6 +26,8 @@ export class CanaryRunner extends RealRunner {
   readonly launches = new Map<string, number>();
   readonly delivered = new Set<string>();
   readonly failedChecks = new Map<string, number>();
+  hungResumeWindow?: string;
+  hungResumeAttempts = 0;
   tick = 0;
   private sequence = 0;
   private readonly buffers = new Map<string, string>();
@@ -74,13 +77,13 @@ export class CanaryRunner extends RealRunner {
     return absent(`${cmd} is unavailable in the isolated canary runner`);
   }
 
-  private tmux(args: string[], opts: ExecOptions): ExecResult {
+  private async tmux(args: string[], opts: ExecOptions): Promise<ExecResult> {
     const sub = args[0] === '-L' || args[0] === '-S' ? args[2] : args[0];
     const target = args[args.indexOf('-t') + 1] ?? '';
     const buffer = args[args.indexOf('-b') + 1] ?? '';
     const pane = [...this.panes.values()].find(p => p.id === target || p.paneId === target || `=${this.session}:${p.name}` === target);
     const format = (p: Pane) => (args[args.indexOf('-F') + 1] ?? args.at(-1) ?? '').replace(/#\{([^}]+)\}/g, (_all, field: string) => ({
-      window_id: p.id, window_name: p.name, pane_id: p.paneId, pane_dead: '0', pane_dead_status: '', session_name: this.session,
+      window_id: p.id, window_name: p.name, pane_id: p.paneId, pane_dead: p.exitCode === undefined ? '0' : '1', pane_dead_status: String(p.exitCode ?? ''), session_name: this.session,
       '@agentctl-role': p.role, pane_current_command: 'fixture',
     })[field] ?? '');
     switch (sub) {
@@ -110,6 +113,12 @@ export class CanaryRunner extends RealRunner {
       case 'paste-buffer': if (pane) { pane.paste = this.buffers.get(buffer); this.buffers.delete(buffer); } return pane ? ok() : absent('can\'t find pane');
       case 'send-keys': {
         if (!pane) return absent('can\'t find pane');
+        if (pane.name === this.hungResumeWindow && args.includes('-l')) {
+          if (!Number.isFinite(commandStageRemaining())) throw Error('hung resume has no command deadline');
+          this.hungResumeAttempts++;
+          await this.sleep(50);
+          return absent('ETIMEDOUT in fixture tmux setup');
+        }
         const key = args.at(-1) ?? '';
         if (key === 'Enter' && pane.paste) {
           const window = [...this.panes].find(([, current]) => current === pane)?.[0];
