@@ -78,12 +78,12 @@ const SETTINGS: Record<ProviderId, AgentSettings> = {
     workingPattern: 'esc to interrupt',
     deliveryPattern: '^\\s*[•■]|● got:',
     interruptKey: 'Escape',
-    // Codex 0.166.0 footer: "GPT-6.1-Sol low · <dir> · <title>" and "? for shortcuts … ⚠ 1 warning · f2 to view".
+    // Codex 0.166.0 footer: "GPT-6.1-Sol low · <dir> · <title>" (0.167+: "GPT-6.2-Sol medium Fast · <dir>") and "? for shortcuts … ⚠ 1 warning · f2 to view".
     footerPatterns: [
       '\\? for shortcuts',
       '⚠ \\d+ warnings?',
       'f2 to view',
-      '^\\s*[\\w.-]+ (low|medium|high|xhigh|minimal|none) · ',
+      '^\\s*[\\w.-]+ (low|medium|high|xhigh|minimal|none)(?: [\\w.+-]+){0,2} · ',
       '^\\s*›\\s*(Ask Codex to do anything)?\\s*$',
       'Queued follow-up inputs|⇧.? (edit last queued message|to answer)',
     ],

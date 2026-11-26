@@ -12,7 +12,8 @@ import type { DeliveryAgent } from './paste-wrapper.ts';
 
 /** Structural border: its column and width must match the composer's top border. */
 const BORDER = /^[─━═╌╍┄┅┈┉]{3,}$/u;
-const CODEX_MODEL = /^  [\w.-]+ (?:low|medium|high|xhigh|minimal|none) · .+$/;
+/** Model row of the Codex footer: "GPT-6.1-Sol low · <dir>"; 0.167+ may add a service tier after the effort ("GPT-6.2-Sol medium Fast · <dir>"). */
+const CODEX_MODEL = /^  [\w.-]+ (?:low|medium|high|xhigh|minimal|none)(?: [\w.+-]+){0,2} · .+$/;
 const CODEX_STATUS = /^ *(?:⚠ \d+ warnings? · f2 to view)?$/;
 const CODEX_HINT = /^  (?:← for agents · )?(?:\? for shortcuts(?:\s+.*)?|tab to queue message)$/;
 const CODEX_BACKGROUND = /^\s*(?:[⏵•·]\s*)?\d+ background terminals? running(?:\s*·.*)?$/i;
@@ -26,9 +27,18 @@ const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 /** top is the structural upper edge: Claude border, or Codex prompt row; bottom (Kimi) is the row of the lower border. */
 export interface FieldCapture { area: string[]; readable: boolean; top?: number; bottom?: number; reason?: string }
 
+/**
+ * A capture as plain rows: no CSI/OSC escape sequences (a cursor or colour code before the marker), no carriage returns (CRLF).
+ * A plain `capture-pane -p` has neither; a styled capture or a relayed remote screen can.
+ */
+export function plainScreen(screen: string): string {
+  // eslint-disable-next-line no-control-regex
+  return screen.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g, '').replace(/\r/g, '');
+}
+
 /** Read the composer by its geometry, never by a footer-like line in its body. */
 export function inspectField(screen: string, agent?: DeliveryAgent): FieldCapture {
-  const lines = screen.split('\n').map(line => line.trimEnd());
+  const lines = plainScreen(screen).split('\n').map(line => line.trimEnd());
   if (agent === 'kimi') {
     const marker = lines.findLastIndex(line => /^\s*│ >(?:\s|│)/u.test(line));
     const top = marker - 1, border = /^(\s*)╭(─{3,})╮$/u.exec(lines[top] ?? '');
@@ -70,7 +80,7 @@ export function inspectField(screen: string, agent?: DeliveryAgent): FieldCaptur
   }
   // Compact startup screen: the banner, cwd and permissions precede the bottom composer.
   // No conversation/dialog rows are allowed in this startup-only shape.
-  const banner = lines.findIndex(line => /^  >_ OpenAI Codex \(v0\.(?:166|167)\.0\)$/.test(line));
+  const banner = lines.findIndex(line => /^  >_ OpenAI Codex \(v0\.1[67]\d\.\d+\)$/.test(line));
   if (banner >= 0 && /^     \S.*$/.test(lines[banner + 1] ?? '') &&
       /^  permissions: .+$/.test(lines[banner + 2] ?? '') && lastMarker > banner + 2 &&
       /^›(?:\s|$)/.test(lines[lastMarker]!) &&

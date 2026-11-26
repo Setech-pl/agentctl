@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- READY0263-COMPOSER: Codex 0.167+ starts recognise the ready composer when the footer shows a service tier (`GPT-6.2-Sol medium Fast · <dir>`), also with ANSI codes, CRLF or padding in the capture. / Start Codexa 0.167+ rozpoznaje gotowe pole wpisywania, gdy stopka pokazuje poziom usługi, także z kodami ANSI, CRLF i pustymi wierszami w zrzucie.
 - Watch proposes confirmation-bound GC after local integration, routing one WALL message to each affected task-owning chat. / Po lokalnej integracji watch proponuje GC wymagające potwierdzenia i wysyła jedną wiadomość WALL do każdego czatu, którego zadania obejmuje plan.
 - `merge_base_check` warns, waits for the author, or creates a local merge candidate against the current `main`/`master`. / `merge_base_check` ostrzega, czeka na aktualizację gałęzi autora lub tworzy lokalny merge do przeglądu względem aktualnej gałęzi `main` albo `master`.
 - `review: {mode: readonly-on-author}` shares a stopped author's local worktree with task-scoped Git hooks and a separate evidence directory. / Przegląd tylko do odczytu korzysta z lokalnego worktree zatrzymanego autora, z hookami Git zadania i osobnym katalogiem dowodów.
