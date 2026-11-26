@@ -33,7 +33,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `setup.from_task` | ID zadania · brak · s | Alias `link-from`. Próbuje sklonować `node_modules` metodą copy-on-write z odpowiadającego repozytorium lokalnego zadania. |
 | `setup.node_modules` | `clone` lub `off` · `off` · g p | Klonuje zgodne instalacje npm z `<AGENTCTL_HOME>/nm-store` w obrębie tego samego systemu plików. Repozytorium może zmienić ustawienie globalne. |
 | `close` | mapowanie · `{}` · g p | Ustawienia stosowane po zamknięciu zadania. |
-| `close.cleanup` | lista ścieżek względnych lub globów · `[]` · g p | Po zamknięciu zadania przenosi pasujące pliki ignorowane przez Git do kosza. Glob dopasowuje jeden segment ścieżki. Lista projektu zastępuje globalną. |
+| `close.cleanup` | lista ścieżek względnych lub globów · `[]` · g p | Po zamknięciu zadania usuwa pasujące pliki ignorowane przez Git zgodnie z `gc.delete_mode`. Glob dopasowuje jeden segment ścieżki. Lista projektu zastępuje globalną. |
 | `defaults` | mapping · `{}` · g p | Domyślne pola pominiętego zamówienia. |
 | `defaults.agent` | active provider · none · g p | Domyślny aktywny dostawca. |
 | `defaults.model` | string · `default` · g p | Domyślny model; default bez flagi. |
@@ -285,8 +285,10 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `disk.workers` | `2` | Wspólny limit workerów pomiarowych 1–8. |
 | `disk.measurement_timeout_s` | `600` | Deadline pomiaru; błąd zachowuje poprzednią wartość. |
 | `git` | mapping | Limity czasu startu. |
-| `git.timeout_s` | `600` | Timeout worktree add i każdego setup. |
+| `git.timeout_s` | `600` | Dodatni limit czasu etapu checkoutu Git w sekundach. |
 | `start_lock_stale_s` | `180` | Czas w sekundach przed odzyskaniem blokady bez właściciela. Blokadę po zakończonym PID można odzyskać od razu. |
+| `setup.timeout_s` | `900` | Łączny limit setupu zadania w sekundach. Ustaw go w globalnej mapie `setup`. Dotychczasowy zapis listy poleceń nadal działa. |
+| `gc.delete_mode` | `delete` | Usuwa wybrane pliki cache, stare node_modules i wyniki sprzątania po zamknięciu od razu. `trash` zapisuje ścieżkę po przeniesieniu do kosza systemowego i usuwa wskazany element. Worktree usuwa Git bez wymuszania. |
 | `gc` | mapowanie | Ustawienia sprzątania po integracji. |
 | `gc.after_integration` | `propose` | `propose` tworzy plan GC z identyfikatorem żądania po przesunięciu lokalnego `main`/`master` i przekazuje wiadomość WALL każdemu czatowi będącemu właścicielem zadań. `off` wyłącza propozycje. |
 | `mcp.client` | — | Opcjonalny wspólny sufiks kursora; domyślnie sesje niezależne. |

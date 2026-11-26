@@ -1,3 +1,5 @@
+import { linkBaseWarnings } from '../src/core/links.ts';
+import { RealRunner } from '../src/core/runner.ts';
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -87,14 +89,15 @@ it('P72 spec-derived backend links and previews compare target HEAD with its rep
   raw.header.repos = [{ path: app, worktree: `${app}-wt` }, { path: backend, worktree: `${backend}-new`, base }];
   raw.header.links = [{from: 'pkg', to: `${target}/packages/sim`}]; // explicit links still validate the chosen base
   const spec = resolveSpec(raw, { config });
-  assert.match(summarizeSpecs([spec]).join('\n'), /older than task base/);
-  const { ctx } = makeContext(config, { dryRun: true });
+  const runner = new RealRunner();
+  assert.match((await linkBaseWarnings(runner, spec.links, spec.repos)).join('\n'), /older than task base/);
+  const { ctx } = makeContext(config, { dryRun: true, readRunner: runner });
   assert.ok((await planQueueAdd(ctx, [raw])).warnings.some(w => w.includes('older than task base')));
   seedTask(config, 'ACTIVE', { repos: spec.repos, links: spec.links });
   const checks = await runDoctor(ctx.runner, () => config, app);
   assert.ok(checks.some(c => c.name === 'task links ACTIVE' && c.detail.includes('older than task base')));
   git('-C', target, 'checkout', '--detach', base);
-  assert.doesNotMatch(summarizeSpecs([resolveSpec(raw, { config })]).join('\n'), /older than task base/);
+  assert.doesNotMatch((await linkBaseWarnings(runner, spec.links, spec.repos)).join('\n'), /older than task base/);
   delete raw.header.links;
   fs.writeFileSync(path.join(app, '.agentctl.yaml'), "links:\n  - {from: pkg, to: '{worktree:backend}/packages/sim'}\n");
   assert.equal(resolveSpec(raw, { config }).links[0]?.to, `${backend}-new/packages/sim`);

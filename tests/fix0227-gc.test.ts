@@ -17,6 +17,7 @@ function fixture(name: string) {
   const tmux = new FakeTmux();
   const runner = new DiskRunner({ dryRun: false, startTime: Date.now(), respond: (cmd, args, opts) => {
     if (cmd !== 'git') return tmux.respond(cmd, args, opts);
+    if (args[2] === 'worktree' && args[3] === 'remove' && !args.includes('--force') && dirt.has(args.at(-1)!)) return { code: 1, stderr: 'worktree contains untracked files' };
     if (args.includes('status')) return { stdout: dirt.get(args[1]!) ?? '' };
     if (args.includes('rev-list')) return { stdout: String(ahead.get(args[1]!) ?? 0) };
     if (args.includes('@{upstream}')) return { code: 1 };
@@ -39,8 +40,10 @@ it('D1: cached MCP preview checks every repo including untracked files in the se
   assert.equal(gcView(plan).worktrees.total, 2);
   const forced = await planGc(f.ctx, { cachedSizes: true, forceDirty: ['TWO'] });
   assert.equal(forced.items.filter(i => i.kind === 'worktree').length, 2);
-  await applyGc(f.ctx, forced);
-  assert.ok(f.runner.commands.some(c => c.includes('worktree remove --force')));
+  const applied = await applyGc(f.ctx, forced);
+  assert.ok(f.runner.commands.some(c => c.includes(`worktree remove ${f.repos[1]!.worktree}`)));
+  assert.ok(!f.runner.commands.some(c => c.includes('worktree remove --force')));
+  assert.match(applied.failed.find(failure => failure.item.target === f.repos[1]!.worktree)?.reason ?? '', /untracked files/);
 });
 
 it('D1: unpushed commits and dirt created after preview are refused at apply', async () => {

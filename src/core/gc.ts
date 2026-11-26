@@ -1,3 +1,5 @@
+import { GcSpace } from './gc-space.ts';
+import { moveToTrash, planTrashPurge, purgeTrashItem, type TrashItem } from './trash.ts';
 import { planRemoteGc, applyRemoteGc } from './host-gc.ts';
 import { cacheProtection } from './gc-cache.ts';
 import { restoreDiskMeasurements } from './disk.ts';
@@ -29,13 +31,14 @@ import { readTaskRecordById } from './taskstore.ts';
  * of agentctl names; the history, the reports (*.md) and anything it does not recognise stay. Branches go only with `git branch -d`.
  */
 
-import { staleNodeModules, trashStaleNodeModules } from './node-modules-store.ts';
+import { staleNodeModules, removeStaleNodeModules } from './node-modules-store.ts';
 
-export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch' | 'node-modules';
+export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch' | 'node-modules' | 'trash';
 
 export interface GcItem {
   host?: string;
   hostFingerprint?: string;
+  trash?: TrashItem;
   kind: GcKind;
   task: string;
   /** The worktree, the file or folder in the cache, the state folder, or `<repo>#<branch>`. */
@@ -71,6 +74,7 @@ export interface GcPlan {
   integration?: IntegrationGcScope;
   /** An MCP plan may estimate sizes; safety checks are always fresh. */
   cachedSizes?: boolean;
+  deleteMode?: 'delete' | 'trash';
   autoCacheFreedBytes?: number;
   items: GcItem[];
   skipped: GcSkip[];
@@ -87,6 +91,7 @@ export interface GcPlan {
 }
 
 export interface GcOptions {
+  purgeTrash?: boolean;
   /** MCP estimates never wait for recursive size walks. */
   cachedSizes?: boolean;
   /** Age of the files next to the reports before they go; default 7 days. */
@@ -163,6 +168,13 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
+  if (opts.purgeTrash) {
+    if (opts.cohort || opts.branches || opts.olderThan || opts.includeCache || opts.keepCache?.length || opts.keep?.length || opts.forceDirty || opts.forceLinks) throw new AgentctlError('purge-trash selects only Trash items; remove other GC selection options');
+    const items = planTrashPurge(ctx).map(trash => ({
+      kind: 'trash' as const, task: '-', target: trash.target, bytes: 0, trash, detail: `original: ${trash.original}`,
+    }));
+    return { items, skipped: [], freeBytes: 0, olderThanMs: 0, unknownCacheDirs: 0 };
+  }
   if (opts.cachedSizes) restoreDiskMeasurements(ctx);
   else configureMeasurements(config.disk);
   const measurement = lastMeasurement;
@@ -363,10 +375,10 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
   const remote = await planRemoteGc(ctx, opts, olderThanMs);
   items.push(...remote.items); skipped.push(...remote.skipped);
-  if (cohort === undefined) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}; move to Trash` })));
-  const freeBytes = items.reduce((n, i) => n + (i.kind === 'node-modules' ? 0 : i.bytes), 0);
+  if (cohort === undefined) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}` })));
+  const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
-  return { keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+  return { deleteMode: config.gc.deleteMode, keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
 export interface GcResult {
@@ -381,18 +393,34 @@ export function gcResultLine(result: GcResult, cohort?: string): string {
   return `gc${cohort ? ` cohort ${cohort}` : ''}: ${trees} worktree usunięto, ${archived} zarchiwizowano, ${(result.freedBytes / 1024 ** 3).toFixed(2)} GiB${result.failed.length ? `, ${result.failed.length} niepowodzeń` : ''}`;
 }
 
-/** Do the plan: worktrees (`git worktree remove`, forced only for explicitly named tasks), cache entries, archive moves, then branches (`git branch -d`, never -D). */
-export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
-  if (plan.integration) return applyIntegrationGc(ctx, plan);
+/** Do the plan: worktrees (`git worktree remove`), cache entries, archive moves, then branches (`git branch -d`, never -D). */
+export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace()): Promise<GcResult> {
+  if (plan.integration) return applyIntegrationGc(ctx, plan, space);
   const { runner, config } = ctx;
   const result: GcResult = { done: [], failed: [], freedBytes: 0 };
-  const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch', 'node-modules'];
+  if (plan.deleteMode && plan.deleteMode !== config.gc.deleteMode) throw new AgentctlError('GC delete mode changed; preview again');
+  const staged: { item: GcItem; trash: TrashItem }[] = [];
+  const remove = async (item: GcItem): Promise<void> => {
+    if (config.gc.deleteMode === 'trash') staged.push({ item, trash: await moveToTrash(ctx, item.target) });
+    else if (!runner.dryRun) await runner.remove(item.target);
+  };
+  const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch', 'node-modules', 'trash'];
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
       try {
         if (kind === 'node-modules') {
-          const bytes = await trashStaleNodeModules(ctx, item.target, plan.olderThanMs);
-          result.done.push({ ...item, bytes });
+          await removeStaleNodeModules(ctx, item.target, plan.olderThanMs, async () => {
+            if (!runner.dryRun) await space.before(item.target);
+            await remove(item);
+          });
+          if (!staged.some(staging => staging.item === item)) result.done.push(item);
+          continue;
+        }
+        if (kind === 'trash') {
+          if (!item.trash || item.trash.target !== item.target) throw new Error('Missing Trash item identity');
+          if (!runner.dryRun) await space.before(item.target);
+          await purgeTrashItem(ctx, item.trash);
+          result.done.push(item);
           continue;
         }
         const assertUnpinned = () => {
@@ -406,8 +434,6 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           const done = await applyRemoteGc(ctx, item, plan.olderThanMs, plan);
           result.done.push(done); result.freedBytes += done.bytes; continue;
         }
-        // CLI measures removed bytes; MCP uses the watch estimate and never delays removal for accounting.
-        const bytes = kind === 'worktree' || kind === 'cache' ? plan.cachedSizes && kind === 'worktree' ? lastMeasurement(item.target)?.bytes ?? 0 : await sizeOf(item.target, { fresh: true, now: () => runner.now() }) : 0;
         if (kind === 'worktree') {
           const remove = async () => {
             if (item.dead) {
@@ -426,6 +452,7 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
             if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
             if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
             assertUnpinned();
+            if (!runner.dryRun) await space.before(item.target);
             const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
             if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
           };
@@ -439,7 +466,8 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           if (protection || plan.keepCache?.some(t => t.toLowerCase() === item.task.toLowerCase())) throw new Error(protection ?? 'keep_cache requested for task');
           if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
           assertUnpinned();
-          await runner.remove(item.target);
+          if (!runner.dryRun) await space.before(item.target);
+          await remove(item);
         } else if (kind === 'archive') {
           assertUnpinned();
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));
@@ -449,25 +477,33 @@ export async function applyGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         }
         if (kind === 'worktree' || kind === 'cache') removedMeasurement(item.target, runner.now());
-        result.done.push({ ...item, bytes });
-        result.freedBytes += bytes;
+        if (!staged.some(staging => staging.item === item)) result.done.push(item);
       } catch (e) {
         result.failed.push({ item, reason: errorMessage(e) });
       }
     }
   }
+  for (const { item, trash } of staged) {
+    try {
+      if (!runner.dryRun) await space.before(trash.target);
+      await purgeTrashItem(ctx, trash);
+      result.done.push(item);
+    } catch (e) { result.failed.push({ item, reason: errorMessage(e) }); }
+  }
+  result.freedBytes += await space.freed();
   return result;
 }
 
-const KIND_WORD: Record<GcKind, string> = { worktree: 'worktree', cache: 'cache', archive: 'archive', branch: 'branch', 'node-modules': 'node_modules store entry' };
+const KIND_WORD: Record<GcKind, string> = { worktree: 'worktree', cache: 'cache', archive: 'archive', branch: 'branch', 'node-modules': 'node_modules store entry', trash: 'Trash item' };
 
 export interface GcViewOptions { detail?: boolean; offset?: number; limit?: number }
 /** Bounded summaries with paginated safety facts and cache paths; combined details are opt-in. */
 export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const offset = opts.offset ?? 0, limit = Math.min(100, opts.limit ?? 10);
   const kinds: GcKind[] = ['worktree', 'archive', 'cache', 'branch'];
+  if (plan.items.some(item => item.kind === 'trash')) kinds.push('trash');
   if (plan.items.some(item => item.kind === 'node-modules')) kinds.push('node-modules');
-  const categories = kinds.map(kind => ({ category: kind === 'branch' ? 'merged branches' : kind === 'node-modules' ? 'node_modules store (Trash)' : kind, count: plan.items.filter(i => i.kind === kind).length, bytes: plan.items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0) }));
+  const categories = kinds.map(kind => ({ category: kind === 'branch' ? 'merged branches' : kind === 'node-modules' ? 'node_modules store' : kind, count: plan.items.filter(i => i.kind === kind).length, bytes: plan.items.filter(i => i.kind === kind).reduce((n, i) => n + i.bytes, 0) }));
   const reasons = new Map<string, { reason: string; count: number; bytes: number }>();
   for (const s of plan.skipped) { const key = s.reason.startsWith('newer than ') ? s.reason : s.reason.startsWith('links target ') ? 'links target in use (see detail)' : s.reason.replace(/also used by .*/, 'also used by unfinished task'); const group = reasons.get(key) ?? { reason: key, count: 0, bytes: 0 }; group.count++; group.bytes += s.bytes ?? 0; reasons.set(key, group); }
   const cohorts = new Map<string, { cohort: string; count: number; bytes: number; skipped: number; skippedBytes: number }>();
@@ -494,7 +530,7 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
     more: 'Full list: detail: true / --verbose; offset/limit paginate details and grouped summaries.' };
 }
 
-const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache: 'removed cache entries', archive: 'archived state folders', branch: 'deleted merged branches', 'node-modules': 'moved node_modules store entries to Trash' };
+const DONE_WORD: Record<GcKind, string> = { worktree: 'removed worktrees', cache: 'removed cache entries', archive: 'archived state folders', branch: 'deleted merged branches', 'node-modules': 'removed node_modules store entries', trash: 'purged Trash items' };
 
 export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResult | undefined } = {}): string[] {
   const view = gcView(plan, opts);
@@ -524,7 +560,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   const applied = opts.applied;
   lines.push('Cleaned up:');
   if (!applied.done.length) lines.push('Nothing was cleaned up.');
-  for (const kind of ['worktree', 'cache', 'archive', 'branch', 'node-modules'] as const) {
+  for (const kind of ['worktree', 'cache', 'archive', 'branch', 'node-modules', 'trash'] as const) {
     const done = applied.done.filter(i => i.kind === kind);
     if (done.length) lines.push(`  ${DONE_WORD[kind]}: ${done.length}, ${done.reduce((n, i) => n + i.bytes, 0)} bytes`);
   }

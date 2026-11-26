@@ -311,7 +311,7 @@ export async function runDoctor(
         if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
         else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
-        for (const warning of [...missingLinkTargets(record.links), ...(cachedOnly ? [] : linkBaseWarnings(record.links, record.repos))]) add(`task links ${record.task}`, 'warn', warning);
+        for (const warning of [...missingLinkTargets(record.links), ...(cachedOnly ? [] : await linkBaseWarnings(runner, record.links, record.repos))]) add(`task links ${record.task}`, 'warn', warning);
 
       }
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }

@@ -181,7 +181,7 @@ describe('gc: --apply', () => {
     const reportDir = path.join(w.config.cache, 'nc-1');
     assert.deepEqual(fs.readdirSync(reportDir).sort(), ['NC-1.md']);
     assert.ok(fs.existsSync(path.join(archiveDir(w.config), 'nc-1', 'TASK.md')), 'the state is in the archive');
-    assert.ok(result.freedBytes >= 1000 + 500 + 500);
+    assert.equal(result.freedBytes, 0, 'unchanged fixture volume counter');
     // history and the report stay: a second plan has nothing left but the removal of the (fake) worktree dir
     assert.match(renderGc(plan, { applied: result }).join('\n'), /Freed/);
   });
@@ -207,11 +207,11 @@ describe('gc: --apply', () => {
     assert.deepEqual(result.done.map(i => `${i.kind}:${i.task}`).sort(), ['archive:NC-1', 'archive:NC-2', 'cache:NC-1', 'worktree:NC-1']);
     const freed = /Freed ([\d.]+ [KMG]?B)/.exec(out)?.[1];
     assert.equal(freed, formatBytes(result.freedBytes));
-    assert.equal(result.freedBytes, result.done.reduce((n, i) => n + i.bytes, 0));
+    assert.equal(result.freedBytes, 0, 'unchanged fixture volume counter');
     assert.ok(!result.done.some(i => (i.kind === 'worktree' && i.task === 'NC-2') || i.target.endsWith('fresh.log')));
   });
 
-  it('reports current removed bytes after an old plan, excluding failed and skipped entries', async () => {
+  it('HOTFIX0263-DISK: reports free blocks gained on the volume, excluding estimates for failed and skipped entries', async t => {
     const w = world('apply-current-bytes');
     task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
     const plan = await planGc(w.ctx, { includeCache: true,});
@@ -219,11 +219,12 @@ describe('gc: --apply', () => {
     fs.writeFileSync(file, 'x'.repeat(47));
     fs.utimesSync(file, new Date('2026-01-01'), new Date('2026-01-01'));
     const failing = new DiskRunner({ dryRun: false, startTime: NOW, respond: (cmd, args, opts) => cmd === 'git' && args.includes('remove') ? { code: 1, stderr: 'kept' } : w.respond?.(cmd, args, opts) });
+    t.mock.method(fs.promises, 'statfs', async () => ({ bsize: 4096, bavail: fs.existsSync(file) ? 12 : 13 }));
     const result = await applyGc(new Context(failing, w.config, () => {}), plan);
-    assert.equal(result.freedBytes, 47);
+    assert.equal(result.freedBytes, 4096);
     assert.equal(result.failed.length, 1);
     const out = renderGc(plan, { applied: result }).join('\n');
-    assert.match(out, /Freed 47 B/);
+    assert.match(out, new RegExp(`Freed ${formatBytes(4096)}`));
     assert.doesNotMatch(out, /Could free|removed worktrees/);
     assert.match(out, /failed:.*kept/);
   });

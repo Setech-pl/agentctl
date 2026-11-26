@@ -1197,6 +1197,7 @@ agentctl gc [options]
 | `--verbose` | full details, paginated with --offset/--limit |  |
 | `--offset <n>` | page offset | default `0` |
 | `--limit <n>` | page size (1–100) | default `10` |
+| `--purge-trash` | preview previously trashed agentctl items; --apply confirms their removal |  |
 | `--include-cache` | owner-confirmed: also delete old, unreferenced task cache entries |  |
 | `--keep <tasks...>` | keep worktrees and cache for these task IDs in this GC run |  |
 | `--keep-cache <tasks...>` | keep all cache entries for these task IDs |  |

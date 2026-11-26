@@ -87,3 +87,13 @@ Po utracie serwera/sesji niedokończone zadania pokazują `needs-attention`, wsk
 <!-- tmux-dev-end -->
 
 Baza `main` nie istnieje: komunikat wskazuje lokalną gałąź domyślną (np. `master`) albo brak metadanych. Popraw `repos[].base` i ponów; agentctl nie zmienia jej automatycznie.
+
+## Watch przestał odpowiadać lub wystąpił timeout `start.lock`
+
+Sprawdź log watch i `agentctl events`. Zobaczysz etap, który się zatrzymał, odzyskanie blokady i wynik restartu. Po ponad trzech cyklach bez zakończenia etapu watch zapisuje jedno zdarzenie dla właściciela. Po dziesięciu minutach kończy działanie. Nadzorca tmux wznawia watch z rosnącą przerwą, do pięciu restartów w dziesięć minut. Po wyczerpaniu limitu sprawdź log i użyj `agentctl watch --tmux --restart`.
+
+Przerwany start wraca do kolejki i wykorzystuje kompletne, zweryfikowane worktree. Watch zachowuje rozpoczęte dostarczanie promptu i odmawia użycia niepewnego checkoutu. Zapis MCP przerwany w trakcie wykonywania otrzymuje błąd z poleceniem sprawdzenia skutków i wykonania nowego podglądu.
+
+## Odzyskiwanie miejsca ze starych wpisów w koszu
+
+`agentctl gc --purge-trash` pokazuje kandydatów i pierwotne ścieżki. Przejrzyj listę, wykonaj `agentctl gc --purge-trash --apply` i potwierdź. W MCP ustaw `purge_trash: true` i użyj podglądu oraz tokena potwierdzenia. GC pokazuje przyrost dostępnych bloków systemu plików. Równoległe zapisy mogą zmienić wynik pomiaru.

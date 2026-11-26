@@ -456,6 +456,7 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
 }
 
 interface GcPreviewArgs {
+  purge_trash?: boolean;
   request_id?: string;
   include_cache?: boolean;
   keep_cache?: string[];
@@ -475,9 +476,9 @@ async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false
     if (!('plan' in saved) || !saved.plan.integration) throw new AgentctlError('Integration GC preview unavailable; preview again.');
     return recheckIntegrationGc(ctx, saved.plan);
   }
-  const options = { olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
+  const options = { purgeTrash: args.purge_trash, olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
     forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep };
-  if (refreshHosts) await planRemoteGc(ctx, options, parseAge(args.older_than ?? '7d'));
+  if (refreshHosts && !args.purge_trash) await planRemoteGc(ctx, options, parseAge(args.older_than ?? '7d'));
   return planGc(ctx, { ...options, cachedSizes: true });
 }
 
@@ -1387,8 +1388,8 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, only with owner-confirmed include_cache: true, old unreferenced cache entries (keep_cache tasks stay); state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
-      'Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false).',
-    input: { include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+      'Use purge_trash: true to list previously trashed agentctl items. Use the separately allowed gc tool to apply the preview with confirm: true (branches default false).',
+    input: { purge_trash: z.boolean().optional(), include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
@@ -1794,7 +1795,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
+  extraWrite('gc', 'gc --apply [--purge-trash] [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), purge_trash: z.boolean().optional(), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { purgeTrash: a.purge_trash, cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
 );
 
 // ---- WALL (WALL-1): a message board of the owner's chats and agents. Its content is data, never instructions.
@@ -1999,7 +2000,12 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     const plan = scope as Awaited<ReturnType<typeof sendScope>>;
     return { target: plan.identity, message: plan.message?.id };
   }
-  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead }));
+  if (name === 'gc') {
+    const plan = scope as GcPlan;
+    return plan.items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead, trash }) =>
+      ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead, trash,
+        deleteMode: !host && (kind === 'cache' || kind === 'node-modules') ? plan.deleteMode : undefined }));
+  }
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
     if (!value || typeof value !== 'object') return value;

@@ -35,6 +35,7 @@ function existingAncestor(target: string): string {
   return current;
 }
 const FREE_SPACE_BUDGET_MS = 1000;
+const START_DISK_BUDGET_MS = 5000;
 type Statfs = typeof fs.promises.statfs;
 const pendingStats = new WeakMap<Statfs, Map<string, ReturnType<Statfs>>>();
 
@@ -310,17 +311,38 @@ export function worktreeVolumeLabel(repo: WorktreeVolume): string {
 }
 
 /** Fresh cheap filesystem admission, independent of recursive worktree measurements. Unknown space fails closed. */
-export function diskStartHold(config: Context['config'], worktrees: (string | DiskWorktree)[] = [], statfs = fs.statfsSync): string | undefined {
+function localStartVolumes(config: Context['config'], worktrees: (string | DiskWorktree)[]): {missing?: string; volumes: StartVolume[]} {
   const repos = worktrees.map(worktree => typeof worktree === 'string' ? { worktree } : worktree);
   if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), ...(config.worktreeMount ? { worktreeMount: resolvePath(config.worktreeMount) } : {}) });
   const missing = missingWorktreeVolume(repos);
-  if (missing) return `volume missing: ${missing}`;
+  if (missing) return {missing, volumes: []};
   const volumes = repos.map(repo => ({target: repo.worktree, floor: config.disk.minFreeStartGb, label: worktreeVolumeLabel(repo)}));
   if (config.nodeModules === 'clone' || repos.some(repo => repo.nodeModules === 'clone')) {
     const target = path.dirname(config.path);
     volumes.push({target, floor: config.disk.minFreeStartGb, label: `node_modules store volume ${target}`});
   }
-  return startVolumeHold([...volumes, ...stateVolumes(config)], statfs);
+  return {volumes: [...volumes, ...stateVolumes(config)]};
+}
+
+export function diskStartHold(config: Context['config'], worktrees: (string | DiskWorktree)[] = [], statfs = fs.statfsSync): string | undefined {
+  const plan = localStartVolumes(config, worktrees);
+  return plan.missing ? `volume missing: ${plan.missing}` : startVolumeHold(plan.volumes, statfs);
+}
+
+async function freshVolumeHold(ctx: Context, volumes: StartVolume[]): Promise<string | undefined> {
+  const samples = new Map<number, number | null>();
+  for (const {target, floor, label} of volumes) {
+    if (floor === 0) continue;
+    const ancestor = existingAncestor(target);
+    const dev = fs.statSync(ancestor, {throwIfNoEntry: false})?.dev;
+    if (dev === undefined) return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
+    if (!samples.has(dev)) samples.set(dev, (await freeSpace(ctx, ancestor, fs.promises.statfs, START_DISK_BUDGET_MS)).availableBytes);
+    const bytes = samples.get(dev);
+    if (bytes == null) return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
+    const gb = bytes / 1024 ** 3;
+    if (gb < floor) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${floor} GB (${label})`;
+  }
+  return undefined;
 }
 
 export function worktreeCostEstimates(ctx: Context, repos: {path: string}[], opts: {persistedOnly?: boolean} = {}) {
@@ -368,10 +390,13 @@ export function taskDiskStartHold(config: Context['config'], host: string | unde
   return gb < config.disk.minFreeStartGb ? `wstrzymane: dysk [${host}] ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB` : undefined;
 }
 
-/** Fresh remote work_dir counters before any worktree/setup mutation. */
+/** Fresh local and remote filesystem counters before any worktree/setup mutation. */
 export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: (string | DiskWorktree)[]): Promise<string | undefined> {
-  if (!host) return diskStartHold(ctx.config, worktrees);
-  const local = startVolumeHold(stateVolumes(ctx.config));
+  if (!host) {
+    const plan = localStartVolumes(ctx.config, worktrees);
+    return plan.missing ? `volume missing: ${plan.missing}` : freshVolumeHold(ctx, plan.volumes);
+  }
+  const local = await freshVolumeHold(ctx, stateVolumes(ctx.config));
   if (local) return local;
   const workDir = ctx.config.hosts[host]!.workDir;
   const mount = inferredWorktreeMount(workDir);

@@ -33,7 +33,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `setup.from_task` | task ID · none · s | `link-from` is an alias. Try a copy-on-write `node_modules` clone from a matching repository in this local task. |
 | `setup.node_modules` | `clone` or `off` · `off` · g p | Reuse compatible npm installs from `<AGENTCTL_HOME>/nm-store` on the same filesystem. The repository can override the global mode. |
 | `close` | mapping · `{}` · g p | Settings applied after closing a task. |
-| `close.cleanup` | list of relative paths or globs · `[]` · g p | Move matching ignored output to the OS Trash after closing the task. Globs match within one path component. A project list replaces the global one. |
+| `close.cleanup` | list of relative paths or globs · `[]` · g p | Delete matching Git-ignored output after closing the task, using `gc.delete_mode`. Globs match within one path component. A project list replaces the global one. |
 | `defaults` | mapping · `{}` · g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | active provider · none · g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string · `default` · g p | Model when the spec has none. `default` passes no model flag. |
@@ -284,9 +284,11 @@ The selection covers the full width of the list pane, including the gaps between
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
 | `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |
 | `disk.measurement_timeout_s` | `600` | Maximum execution time of a tree measurement. A timed-out worker is terminated and frees its slot; reads retain the last known value and report a measurement error. |
-| `git` | mapping | Worktree checkout and setup limits. |
-| `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
+| `git` | mapping | Worktree checkout limits. |
+| `git.timeout_s` | `600` | Positive timeout in seconds for the Git checkout stage. |
 | `start_lock_stale_s` | `180` | Seconds before reclaiming a lock without an owner. A lock with an exited PID can be reclaimed immediately. |
+| `setup.timeout_s` | `900` | Total setup budget in seconds for each task. Use the global setup mapping to set it. The existing command list syntax still works. |
+| `gc.delete_mode` | `delete` | Delete eligible cache, stale node_modules and close cleanup directly. `trash` records the resulting OS Trash path and purges the recorded item. Worktree removal is handled by Git without force. |
 | `gc` | mapping | Integration cleanup settings. |
 | `gc.after_integration` | `propose` | `propose` prepares a request-ID GC plan on local `main`/`master` advances and routes a WALL message to each owning chat. `off` disables proposals. |
 | `mcp.client` | — | Optional stable suffix to clientInfo.name that intentionally shares a cursor between sessions. Tool parameter client overrides it. By default each session consumes independently from its initialization checkpoint; new sessions inherit the client high-water mark. |

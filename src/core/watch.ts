@@ -18,7 +18,7 @@ import { journalOutputs } from './outputs.ts';
 import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
-import { WatchSteps } from './watch-steps.ts';
+import { WatchStalled, WatchSteps } from './watch-steps.ts';
 import { watchSnapshotPath, watchProgressPath } from './watch-snapshot.ts';
 import { atomicWriteFile, readStateWriteFailure, stateWriteFailure } from './atomic-file.ts';
 import { taskLock, withFileLock } from './file-lock.ts';
@@ -245,6 +245,7 @@ export interface TickOptions {
   /** Ctrl-C: ends the waits of the queued tasks that are being started. */
   signal?: AbortSignal | undefined;
   stepClock?: BudgetClock;
+  backgroundStarts?: boolean;
 }
 
 /**
@@ -260,7 +261,9 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     if (!item || done.has(name) || options.signal?.aborted) return;
     for (const dependency of item.needs) await execute(dependency);
     done.add(name);
-    await withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, item.run, options.stepClock));
+    const running = withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, item.run, options.stepClock));
+    if (options.backgroundStarts && (name === 'accepted MCP writes' || name === 'queue')) void running.catch(error => ctx.out(errorMessage(error)));
+    else await running;
   };
   let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
   const allRows = () => processed ?? observed;
@@ -274,7 +277,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
   stage('launch health', signal => checkLaunchHealth(ctx, memory.launchHealth, notifier, options.self, signal));
   // Admission observes slots and named dependencies. Full status and report processing are optional for it.
-  stage('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }), 'accepted MCP writes');
+  stage('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog, acceptedWrites: false }), 'accepted MCP writes');
   stage('WALL maintenance', () => maintainWall(ctx));
   stage('limit requests', () => maintainLimitRequests(ctx));
   const tickAt = ctx.runner.now();
@@ -538,14 +541,16 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     const r = await reloadConfig(ctx, store, 'watch', true);
     if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
   };
-  // After a restart of the Mac the tasks that were at work have a worktree and no window: say so once, when the watcher starts.
-  await memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', () => announceResumable(ctx, current));
+  let stalled = false;
   try {
+    // Inventory may be slow. Accept writes and recover interrupted starts from the first tick.
+    void memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', () => announceResumable(ctx, current));
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(ctx.config.watch.interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
       await reload();
-      await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal });
+      await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal,
+        backgroundStarts: !ctx.runner.dryRun && opts.maxTicks === undefined && !opts.onTick });
       if (!ctx.runner.dryRun && !opts.signal?.aborted) {
         try {
           atomicWriteFile(watchProgressPath(ctx.config), JSON.stringify({version, pid: process.pid, tick: tick + 1, startedAt, at: ctx.runner.now()}));
@@ -565,11 +570,14 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
         memory = new WatchMemory();
       }
     }
+  } catch (error) {
+    stalled = error instanceof WatchStalled;
+    throw error;
   } finally {
     fileWatcher?.close();
     memory.launchHealth.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
-    if (!(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
+    if (!stalled && !(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
       await memory.queue.idle();
       const restored = await restoreWindowNames(ctx, memory);
       if (restored > 0) ctx.out(`Window names restored (${restored}).`);

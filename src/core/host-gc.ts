@@ -107,9 +107,13 @@ export function remoteGcProgram(): void {
     const wanted = input.item;
     const item = items.find(i => i.kind === wanted.kind && i.task === wanted.task && i.target === wanted.target && i.repo === wanted.repo);
     if (!item) throw Error(skipped.find(s => s.target === wanted.target)?.reason ?? 'item no longer eligible');
+    const parent = p.dirname(item.target);
+    const available = () => { try { const stat = fs.statfsSync(parent); return stat.bavail * stat.bsize; } catch { return undefined; } };
+    const before = available();
     if (item.kind === 'worktree') git(item.repo!, ['worktree', 'remove', item.target]);
     else fs.rmSync(item.target, { recursive: true });
-    process.stdout.write(JSON.stringify(item));
+    const after = available();
+    process.stdout.write(JSON.stringify({ ...item, bytes: before === undefined || after === undefined ? 0 : Math.max(0, after - before) }));
   } else process.stdout.write(JSON.stringify({ items, skipped }));
 }
 

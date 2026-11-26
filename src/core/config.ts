@@ -179,7 +179,8 @@ export interface GlobalConfig extends Layer {
   disk: { minFreeStartGb: number; minFreeStateGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
   startLockStaleS: number;
-  gc: { afterIntegration: 'off' | 'propose' };
+  setupTimeoutS: number;
+  gc: { afterIntegration: 'off' | 'propose'; deleteMode: 'delete' | 'trash' };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
@@ -573,7 +574,7 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   if (report) layer.report = report;
   if (reports.length > 1) layer.reportAlt = reports.slice(1);
   if (isObject(obj.setup)) {
-    checkKeys(obj.setup, ['commands', 'node_modules'], `${where}.setup`, p);
+    checkKeys(obj.setup, where === 'config' ? ['commands', 'node_modules', 'timeout_s'] : ['commands', 'node_modules'], `${where}.setup`, p);
     if (obj.setup.commands !== undefined) layer.setup = parseSetup(obj.setup.commands, `${where}.setup.commands`, p);
     layer.nodeModules = parseEnumValue(obj.setup.node_modules, ['clone', 'off'] as const, `${where}.setup.node_modules`, p);
   } else if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
@@ -1365,14 +1366,21 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
   const hosts = parseHosts(raw.hosts, p);
   const quotas = parseChatQuotas(raw.quotas, p);
   const limitSettings = parseLimitSettings(raw.limits, providers, limits, quotas, p);
-  const startLockStaleS = raw.start_lock_stale_s ?? 180;
-  if (typeof startLockStaleS !== 'number' || !Number.isFinite(startLockStaleS) || startLockStaleS <= 0) p.add('config.start_lock_stale_s must be positive');
-  const gc: GlobalConfig['gc'] = { afterIntegration: 'propose' };
+  const positiveSeconds = (value: unknown, key: string, fallback: number): number => {
+    if (value === undefined) return fallback;
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+    p.add(`config.${key} must be positive`);
+    return fallback;
+  };
+  const startLockStaleS = positiveSeconds(raw.start_lock_stale_s, 'start_lock_stale_s', 180);
+  const setupTimeoutS = positiveSeconds(isObject(raw.setup) ? raw.setup.timeout_s : undefined, 'setup.timeout_s', 900);
+  const gc: GlobalConfig['gc'] = { afterIntegration: 'propose', deleteMode: 'delete' };
   if (raw.gc !== undefined) {
     if (!isObject(raw.gc)) p.add('config.gc must be a mapping');
     else {
-      checkKeys(raw.gc, ['after_integration'], 'config.gc', p);
+      checkKeys(raw.gc, ['after_integration', 'delete_mode'], 'config.gc', p);
       gc.afterIntegration = parseEnumValue(raw.gc.after_integration, ['off', 'propose'] as const, 'config.gc.after_integration', p) ?? gc.afterIntegration;
+      gc.deleteMode = parseEnumValue(raw.gc.delete_mode, ['delete', 'trash'] as const, 'config.gc.delete_mode', p) ?? gc.deleteMode;
     }
   }
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
@@ -1382,7 +1390,7 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS: startLockStaleS as number, wall, hosts, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS, setupTimeoutS, wall, hosts, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return effectiveLimitConfig(config, now);
