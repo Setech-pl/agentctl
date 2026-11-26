@@ -404,7 +404,7 @@ export function durableQueueCondition(config: GlobalConfig, entry: QueueEntry, n
 }
 
 function queueLoadHold(config: GlobalConfig): string | undefined {
-  if (config.capacity.loadThreshold === undefined) return undefined;
+  if (!config.queue.holdOnLoad || config.capacity.loadThreshold === undefined) return undefined;
   const machine = collectMachine(config);
   return machine.overloaded ? `obciążenie (load1 ${machine.loadAverage[0]!.toFixed(1)} > ${machine.threshold})` : undefined;
 }
@@ -1189,13 +1189,13 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${entry.task}: usunięto nieaktualny błąd startu z kolejki; okno zadania działa, watch obsługuje oczekujący prompt`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   }
   entries = readQueue(config);
-  const records = new Set([...listTaskRecords(config), ...listArchivedRecords(config)].map((r) => r.task));
   // A start that died with its watcher: the entry says "starting" and nothing here is doing it. Its task exists (the window is up,
   // the prompt may be missing) or not: either way it goes to "failed", where a human decides.
   for (const entry of entries) {
     if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
     if (entry.startingPid) { try { process.kill(entry.startingPid, 0); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
-    if (!entry.host && !records.has(entry.task)) {
+    const record = readTaskRecordById(config, entry.task);
+    if (!entry.host && !record) {
       const repos = entryWorktrees(config, entry);
       const mount = missingWorktreeVolume(repos) ?? await interruptedWorktreeVolume(ctx.runner, repos).catch(() => undefined);
       if (mount) {
@@ -1204,7 +1204,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
         continue;
       }
     }
-    if (records.has(entry.task)) {
+    if (record) {
       // The record and the queue must not disagree: the entry goes away with the record in place, a leftover never-ready
       // window is closed, and the task (worktree kept) lands in "to resume" like its siblings.
       const closed = await closeNeverReadyWindow(ctx, entry.task, { force: true }).catch(() => false);

@@ -146,7 +146,7 @@ Typy/domysły sprawdzono z [config.ts](../../src/core/config.ts), [spec.ts](../.
 | `agents.<agent>.limit_patterns` | list of regexes · see below · g | Regexy wyczerpania limitu. |
 | `agents.<agent>.background_patterns` | list of regexes · see below · g | Regexy własnych zadań tła. |
 | `capacity` | mapping · see below · g | Odczyty planu, estymacje i sondy. |
-| `capacity.load_threshold` | liczba dodatnia · 3 × logiczne CPU dla alertów · g | Próg obciążenia z jednej minuty. Jawnie ustawiony próg wstrzymuje też start z kolejki. |
+| `capacity.load_threshold` | liczba dodatnia · 3 × logiczne CPU dla alertów · g | Próg obciążenia z jednej minuty. Próg wstrzymuje przyjmowanie z kolejki po włączeniu `queue.hold_on_load: true`. |
 | `capacity.snapshot` | boolean · true · g | Snapshot przy zlecaniu; MCP stopki opcjonalne. |
 | `capacity.stale_minutes` | integer 1–10080 · 30 · g | Wiek ustawiający stale. |
 | `capacity.sample_limit` | integer 2–10000 · 2048 · g | Limit zapisanych odczytów. |
@@ -272,6 +272,7 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `wall.ref_roots` | list · `[~/Projects/cache]` · g | Dozwolone korzenie ścieżek refs; bez czytania i załączników. |
 | `queue.enabled` | boolean · `true` · g | Automatyczne starty przez watch. |
 | `queue.parallel_starts` | positive integer · `2` · g | Maksymalna liczba równoległych startów/setup. |
+| `queue.hold_on_load` | bool · `false` · g | Po włączeniu watch wstrzymuje kolejkę powyżej jawnego `capacity.load_threshold` i podaje powód. |
 | `cancel.grace` | seconds (0 or more) · `5` · g | Sekundy po przerwaniu przed zamknięciem. |
 | `collisions.enabled` | boolean · `true` · g | Wykrywanie wspólnych plików. |
 | `collisions.interval` | positive number · `300` · g | Odstęp kontroli. |

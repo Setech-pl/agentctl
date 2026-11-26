@@ -1,6 +1,6 @@
 import { channelMessages, wallAge } from './wall.ts';
 import { journalOutputs } from './outputs.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords, snapshotRecords, type TaskRecord } from './taskstore.ts';
 import { withFileLock } from './file-lock.ts';
 import fs from 'node:fs';
 import { foldHistory, readHistory } from './history.ts';
@@ -101,6 +101,7 @@ export interface EventsSummary {
   workingTasks?: string[];
   /** Tasks that wait for the user: needs-input, needs-trust, waiting. */
   needYou: string[];
+  needYouCount?: number;
   queued: number;
   queuedTasks?: string[];
   /** Reports ready and not pulled yet. */
@@ -129,15 +130,16 @@ export interface EventsReport {
   next_cursor: string;
 }
 
-export function chatEventScope(config: GlobalConfig, chat: string) {
-  const items = [...listArchivedRecords(config), ...listTaskRecords(config), ...readQueue(config)];
+export function chatEventScope(config: GlobalConfig, chat: string, records?: TaskRecord[], queue = readQueue(config)) {
+  const items = [...(records ?? [...listArchivedRecords(config), ...listTaskRecords(config)]), ...queue];
   const tasks = new Set(items.filter(item => item.owner === chat).map(item => item.task));
   const cohorts = new Set([
     ...Object.entries(config.quotas?.cohorts ?? {}).filter(([, owner]) => owner === chat).map(([cohort]) => cohort),
     ...items.filter(item => item.owner === chat && item.cohort).map(item => cohortKey(item.cohort!)),
   ]);
   return (item: { task?: string; cohort?: string | null; owner?: string }) =>
-    item.owner === chat || Boolean(item.task && tasks.has(item.task)) || Boolean(item.cohort && cohorts.has(cohortKey(item.cohort)));
+    item.owner?.startsWith('chat:') ? item.owner === chat
+      : Boolean(item.task && tasks.has(item.task)) || Boolean(item.cohort && cohorts.has(cohortKey(item.cohort)));
 }
 
 export async function collectEvents(ctx: Context, opts: { client: EventClient; since?: string | undefined; cohort?: string | undefined; keep?: boolean | undefined; cursor?: string; limit?: number; maxBytes?: number; chat?: string; /** WALL events only of these channels (the caller's subscriptions); undefined: every channel (the owner). */ wallIdentity?: string; wallOpenChannels?: ReadonlySet<string>; wallChannels?: ReadonlySet<string> | undefined }): Promise<EventsReport> {
@@ -145,9 +147,10 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
-  for (const record of listTaskRecords(config)) await journalOutputs(ctx, record, { readOnly: true });
+  const records = await snapshotRecords(config);
+  for (const record of records.current) await journalOutputs(ctx, record, { readOnly: true });
   const journal = readJournal(config, -1);
-  const redacted = secretRedactor([config, process.env, journal], new Set(listTaskRecords(config).map(r => r.task)))(journal);
+  const redacted = secretRedactor([config, process.env, journal], new Set(records.current.map(r => r.task)))(journal);
   const legacyGc = redacted.map(summarizeLegacyGc);
   const all = redacted.map((e, i) => legacyGc[i]?.entry ?? e);
   const key = cohort === null ? opts.client : `${opts.client}|cohort:${cohortKey(cohort)}`;
@@ -161,19 +164,23 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const wallStart = wallSaved?.startsWith('e2:') ? decodeCursor(wallSaved) : {...taskStart};
   if (wallStart.index < position.index || (wallStart.index === position.index && wallStart.offset < position.offset)) position = {...wallStart};
   const events: Array<JournalEntry & { fragment?: { offset: number; total: number; encoding: string } }> = [];
-  const rows = await collectStatus(ctx, { progress: false, archived: false, cachedOnly: true, shallowClosed: true });
-  const inScope = opts.chat ? chatEventScope(config, opts.chat) : undefined;
+  const rows = await collectStatus(ctx, { progress: false, archived: false, cachedOnly: true, shallowClosed: true, records: {current: records.current, archived: []} });
+  const orders = readQueue(config);
+  const inScope = opts.chat ? chatEventScope(config, opts.chat, records.all, orders) : undefined;
   const open = rows.filter((r) => !r.closed && !r.cancelled && !r.hidden && (!inScope || inScope(r)) && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort))));
   const accounting = accountTasks(open);
-  const queue = waiting(readQueue(config)).filter((e) => (!inScope || inScope(e)) && (cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort))));
+  const queue = waiting(orders).filter((e) => (!inScope || inScope(e)) && (cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort))));
   const ratingKey = `${config.path}|${opts.client}`;
+  const attention = open.filter(r => ['limited', 'needs-attention', 'needs-input', 'needs-trust', 'waiting'].includes(r.state)
+    || (r.reportCandidate && r.report !== 'yes'));
   const summary: EventsSummary = {
     active: accounting.active.length,
     activeTasks: accounting.active.slice(0, 6).map(r => r.task),
     ...(!ratingShown.has(ratingKey) ? { unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result && (!inScope || inScope(r))).length } : {}),
     working: accounting.working.length,
     workingTasks: accounting.working.slice(0, 6).map(r => r.task),
-    needYou: open.filter((r) => r.state === 'limited' || r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting' || (r.reportCandidate && r.report !== 'yes')).map((r) => `${r.task} (${r.state})${r.state === 'limited' ? `: ${r.usage_hint ?? 'limit wyczerpany'}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`),
+    needYou: attention.slice(0, 6).map((r) => `${r.task} (${r.state})${r.state === 'limited' ? `: ${r.usage_hint ?? 'limit wyczerpany'}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`.slice(0, 240)),
+    ...(attention.length > 6 ? {needYouCount: attention.length} : {}),
     queued: queue.length,
     queuedTasks: queue.slice(0, 6).map(e => e.task),
     reportsToPull: accounting.reports.slice(0, 6).map(r => r.task),
@@ -269,6 +276,8 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   'host-recovered': 'HOST OSIĄGALNY',
   'watch-resumed': 'WATCH',
   'watch-stage-restarted': 'WATCH',
+  'watch-stalled': 'WATCH',
+  'start-lock-recovered': 'BLOKADA STARTU',
   'ambiguous-verdict': 'NIEJASNY WERDYKT',
   'state-write-recovered': 'ZAPIS STANU',
   'tmux-lost': 'TMUX UTRACONY',
@@ -285,6 +294,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
   overloaded: 'PRZECIĄŻENIE',
   'overload-retry': 'PONOWIENIE',
   'queue-retry': 'PONOWIENIE STARTU',
+  'launch-legacy': 'START DO RĘCZNEGO WZNOWIENIA',
   'launch-failed': 'BŁĄD STARTU',
   'mcp-write': 'MCP',
   'disk-warn': 'DYSK',
@@ -326,7 +336,7 @@ export function summaryLine(s: EventsSummary): string {
   const reports = s.reportCount ?? s.reportsToPull.length;
   const parts = [`${s.active} aktywne${taskNames(s.activeTasks ?? [])}`, ...(s.working ? [`${s.working} pracuje${taskNames(s.workingTasks ?? [])}`] : []), `${s.queued} w kolejce${taskNames(s.queuedTasks ?? [])}`, reports > 0 ? `${reports} ${plural(reports, 'raport', 'raporty', 'raportów')} do pobrania${taskNames(s.reportsToPull)}` : 'brak raportów do pobrania'];
   if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
-  if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
+  if (s.needYou.length > 0) parts.push(`czeka na Ciebie${s.needYouCount ? ` (${s.needYouCount})` : ''}: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;
 }
 

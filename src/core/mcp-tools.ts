@@ -556,6 +556,10 @@ interface SetLimitsArgs extends Partial<Record<AgentName, number | string>> {
 }
 
 async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolResult> {
+  const version = /^(\d+)\.(\d+)/.exec(deps.server?.version ?? '');
+  if (version && Number(version[1]) === 0 && Number(version[2]) < 27) {
+    throw new AgentctlError('MCP < 0.27 cannot set limits. Quit (⌘Q) and reopen the chat app to use owner approval.');
+  }
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')}${args.queue_hold !== undefined ? ` queue_hold=${JSON.stringify(args.queue_hold)}` : ''} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
@@ -1936,6 +1940,7 @@ async function recordDeferred(deps: McpDeps, tool: string, args: Record<string, 
  * computed again and must be the same, then the tool runs as its confirm ran before. Throws with the reason when nothing was done.
  */
 export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promise<{ text: string }> {
+  if (request.tool === 'set_limits') throw new AgentctlError('Direct MCP limits changes are refused. Quit (⌘Q) and reopen the chat app to request owner approval.');
   const run = originalRuns.get(request.tool);
   if (!run || !DEFERRED_TOOLS.has(request.tool)) throw new AgentctlError(`${request.tool} is not a tool the watcher applies`);
   const applying: McpDeps = { ...deps, applying: true };

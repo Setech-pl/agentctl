@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import type { Context } from './context.ts';
 import type { GlobalConfig, AgentName } from './config.ts';
 import { withFileLock } from './file-lock.ts';
+import { recordJournal } from './journal.ts';
+import { withCommandStage } from './command-stage.ts';
 
 export interface StartReservation { owner?: string; host?: string; id: string; task: string; window: string; agent: AgentName; pid: number; at: string }
 const file = (config: Pick<GlobalConfig, 'stateDir'>) => path.join(config.stateDir, 'start-reservations.json');
@@ -17,8 +19,20 @@ export function pendingStarts(config: Pick<GlobalConfig, 'stateDir'>): StartRese
     });
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
 }
-export function withStartLock<T>(ctx: Context, action: () => Promise<T>): Promise<T> {
-  return ctx.runner.dryRun ? action() : withFileLock(path.join(ctx.config.stateDir, 'start.lock'), action);
+export async function withStartLock<T>(ctx: Context, action: () => Promise<T>, task = 'admission'): Promise<T> {
+  if (ctx.runner.dryRun) return action();
+  let recovered: { pid?: number; task?: string; at?: string } | undefined;
+  try {
+    return await withFileLock(path.join(ctx.config.stateDir, 'start.lock'), () => withCommandStage(30_000, undefined, action), 5000, false, {
+      task, staleMs: ctx.config.startLockStaleS * 1000, recovered: owner => { recovered = owner; },
+    });
+  } finally {
+    if (recovered) {
+      const text = `Usunięto nieaktywną blokadę start.lock (PID ${recovered.pid || 'brak'}, zadanie ${recovered.task ?? 'nieznane'}, od ${recovered.at ?? 'nieznane'}).`;
+      ctx.info(text);
+      void recordJournal(ctx, { kind: 'start-lock-recovered', text }).catch(() => undefined);
+    }
+  }
 }
 /** Caller holds start.lock: this durable write reserves capacity before checkout or the first TASK.md. */
 export async function reserveStarts(ctx: Context, tasks: { task: string; window: string; agent: AgentName; host?: string; owner?: string }[]): Promise<string[]> {

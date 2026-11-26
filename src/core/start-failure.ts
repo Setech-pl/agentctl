@@ -22,6 +22,8 @@ export interface LaunchExit {
 }
 
 export const launchIdentity = (record: TaskRecord): string => `${record.attemptId ?? record.started}:${record.launchAt ?? ''}:${record.windowId ?? ''}`;
+export const legacyLaunch = (record: TaskRecord): boolean =>
+  record.promptDelivery === 'launching' && Boolean(record.started && record.windowId) && !record.launchAt;
 const launchExitPath = (config: GlobalConfig, window: string): string => path.join(taskDir(config, window), 'launch-exit.json');
 const launchTailPath = (config: GlobalConfig, window: string): string => path.join(taskDir(config, window), 'launch-screen.txt');
 

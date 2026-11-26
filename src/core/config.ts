@@ -178,6 +178,7 @@ export interface GlobalConfig extends Layer {
   guideLang: 'en' | 'pl';
   disk: { minFreeStartGb: number; minFreeStateGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
   git: { timeoutS: number };
+  startLockStaleS: number;
   gc: { afterIntegration: 'off' | 'propose' };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
@@ -239,6 +240,8 @@ export interface BoardSelection {
 export interface QueueSettings {
   /** `false`: `watch` never starts a queued task (entries can still be added and listed). */
   enabled: boolean;
+  /** Hold automatic admission above capacity.load_threshold. */
+  holdOnLoad: boolean;
   /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
   parallelStarts: number;
   maxParallelSetups: number;
@@ -386,7 +389,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'close', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'launch', 'wall', 'hosts', 'quotas'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'start_lock_stale_s', 'launch', 'wall', 'hosts', 'quotas'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy', 'change_policy', 'profiles', 'schedule', 'active_profile', 'timed_overrides'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -398,7 +401,7 @@ export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'selection', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
 export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
-export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
+export const QUEUE_KEYS = ['enabled', 'hold_on_load', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
@@ -961,7 +964,7 @@ function parseMcp(v: unknown): McpSettings {
 }
 
 function parseQueue(v: unknown, p: Problems): QueueSettings {
-  const queue: QueueSettings = { enabled: true, parallelStarts: 2, maxParallelSetups: 2 };
+  const queue: QueueSettings = { enabled: true, holdOnLoad: false, parallelStarts: 2, maxParallelSetups: 2 };
   if (v === undefined || v === null) return queue;
   if (!isObject(v)) {
     p.add('config.queue must be a mapping like {enabled: true, parallel_starts: 2}');
@@ -971,6 +974,10 @@ function parseQueue(v: unknown, p: Problems): QueueSettings {
   if (v.enabled !== undefined) {
     if (typeof v.enabled === 'boolean') queue.enabled = v.enabled;
     else p.add('config.queue.enabled must be true or false');
+  }
+  if (v.hold_on_load !== undefined) {
+    if (typeof v.hold_on_load === 'boolean') queue.holdOnLoad = v.hold_on_load;
+    else p.add('config.queue.hold_on_load must be true or false');
   }
   if (v.parallel_starts !== undefined) {
     if (typeof v.parallel_starts === 'number' && Number.isInteger(v.parallel_starts) && v.parallel_starts > 0) queue.parallelStarts = v.parallel_starts;
@@ -1358,6 +1365,8 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
   const hosts = parseHosts(raw.hosts, p);
   const quotas = parseChatQuotas(raw.quotas, p);
   const limitSettings = parseLimitSettings(raw.limits, providers, limits, quotas, p);
+  const startLockStaleS = raw.start_lock_stale_s ?? 180;
+  if (typeof startLockStaleS !== 'number' || !Number.isFinite(startLockStaleS) || startLockStaleS <= 0) p.add('config.start_lock_stale_s must be positive');
   const gc: GlobalConfig['gc'] = { afterIntegration: 'propose' };
   if (raw.gc !== undefined) {
     if (!isObject(raw.gc)) p.add('config.gc must be a mapping');
@@ -1373,7 +1382,7 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, wall, hosts, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS: startLockStaleS as number, wall, hosts, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return effectiveLimitConfig(config, now);

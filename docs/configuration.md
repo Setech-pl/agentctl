@@ -208,6 +208,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 |---|---|---|---|---|
 | `queue.enabled` | boolean | `true` | g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
 | `queue.parallel_starts` | positive integer | `2` | g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
+| `queue.hold_on_load` | boolean | `false` | g | When true, the queue holds above the explicit load threshold and reports the reason. |
 
 ### `cancel`
 
@@ -378,7 +379,7 @@ In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `questi
 | `guide` | mapping (global), path (project) | `{lang: en}` globally | g, p | Global guide settings; project `.agentctl.yaml` uses `guide: docs/agent-dispatch.md` (repository-relative or `~/…`) as a trusted project overlay. A missing file warns in guide and doctor, and does not fail an order. |
 | `guide.lang` | en or pl | en | g | Default language for CLI, MCP and manager shared guide. |
 | `capacity` | mapping | see below | g | Dispatcher capacity settings. |
-| `capacity.load_threshold` | positive number | 3 × logical CPUs for alerts | g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. An explicit threshold also holds queue admission. Capacity JSON/text and status --detail include load (1/5/15 min) and free memory bytes. |
+| `capacity.load_threshold` | positive number | 3 × logical CPUs for alerts | g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. Queue admission uses the explicit threshold when `queue.hold_on_load: true` is set. Capacity JSON/text and status --detail include load (1/5/15 min) and free memory bytes. |
 | `capacity.snapshot` | boolean | true | g | Add both providers' capacity to new and queue responses. |
 | `capacity.stale_minutes` | integer 1–10080 | 30 | g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
 | `capacity.sample_limit` | integer 2–10000 | 2048 | g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |

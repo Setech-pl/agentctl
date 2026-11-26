@@ -21,6 +21,8 @@ export const CLI_MCP_EXCEPTIONS: Record<string, string> = {
   'dataset export': 'Owner-only local benchmark export; CLI only, no MCP tool.',
   up: 'Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI.',
   canary: 'Owner runs a local shadow replay over an explicitly named state directory.',
+  config: 'Local configuration compatibility commands for the owner.',
+  'config downgrade-check': 'Owner prepares the installed configuration for a manual rollback.',
   'upgrade-health': 'Internal health check invoked by the stable updater after restarting watch.',
   watch: 'Long-running terminal watcher, started and supervised locally.',
   board: 'Interactive terminal UI.',

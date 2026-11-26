@@ -273,6 +273,26 @@ export function readTaskRecord(config: GlobalConfig, window: string): TaskRecord
   return readRecordFile(taskFile(config, window));
 }
 
+/** Async header reads keep watch timers responsive when the state volume stalls. */
+export async function readRecordFileAsync(file: string): Promise<TaskRecord | undefined> {
+  const fd = await fs.promises.open(file, 'r').catch(() => undefined);
+  if (!fd) return;
+  try {
+    const chunks: Buffer[] = [];
+    for (let length = 0; length < 1024 * 1024;) {
+      const chunk = Buffer.alloc(4096);
+      const { bytesRead } = await fd.read(chunk);
+      if (bytesRead) chunks.push(chunk.subarray(0, bytesRead));
+      length += bytesRead;
+      const text = Buffer.concat(chunks).toString('utf8');
+      const header = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text);
+      if (header || !bytesRead) return parseTaskRecord(header?.[0] ?? text);
+      if (!text.startsWith('---\n') && !text.startsWith('---\r\n')) return;
+    }
+  } catch { /* missing/unreadable record */ }
+  finally { await fd.close().catch(() => undefined); }
+}
+
 /** The prompt the task started with: the text after the header, up to the first follow-up that `send` appended. */
 export function readTaskPrompt(config: GlobalConfig, window: string): string | undefined {
   let text: string;
@@ -453,20 +473,19 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
   }
   let names: string[] = [];
   try {
-    names = fs.readdirSync(dir).sort();
+    names = (await fs.promises.readdir(dir)).sort();
   } catch {
     names = [];
   }
   const prefix = `${dir}${path.sep}`;
   const seen = new Set<string>();
   const records: TaskRecord[] = [];
-  let done = 0;
-  for (const name of names) {
+  const scan = async (name: string) => {
     const file = path.join(dir, name, 'TASK.md');
     seen.add(file);
     let st: fs.BigIntStats | undefined;
     try {
-      st = fs.lstatSync(file, { bigint: true });
+      st = await fs.promises.lstat(file, { bigint: true });
     } catch {
       files.delete(file);
     }
@@ -474,22 +493,75 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
       const version = fileVersion(st);
       const hit = files.get(file);
       if (version !== undefined && hit?.version === version) {
-        if (hit.record) records.push(hit.record);
+        return hit.record;
       } else {
         let record: TaskRecord | undefined;
         try {
-          record = readRecordFile(file);
+          record = await readRecordFileAsync(file);
         } catch {
           record = undefined;
         }
         files.set(file, { version, record });
-        if (record) records.push(record);
+        return record;
       }
     }
-    if (++done % SCAN_CHUNK === 0) await new Promise((resolve) => setImmediate(resolve));
+  };
+  for (let i = 0; i < names.length; i += SCAN_CHUNK) {
+    const batch = await Promise.all(names.slice(i, i + SCAN_CHUNK).map(scan));
+    records.push(...batch.filter((record): record is TaskRecord => record !== undefined));
   }
   for (const key of files.keys()) if (key.startsWith(prefix) && !seen.has(key)) files.delete(key);
   return records;
+}
+
+/** A watcher-owned active-task index. Periodic reconciliation covers platforms that drop watch events. */
+export class TaskRecordIndex {
+  private readonly records = new Map<string, TaskRecord>();
+  private readonly changed = new Set<string>();
+  private root?: string;
+  private watcher?: fs.FSWatcher;
+  private reconcileAt = 0;
+
+  async current(config: GlobalConfig, now: number): Promise<TaskRecord[]> {
+    const root = config.stateDir;
+    if (this.root !== root || !this.watcher) {
+      this.close();
+      this.root = root;
+      try {
+        this.watcher = fs.watch(root, {recursive: true, persistent: false}, (_event, file) => {
+          if (!file) { this.reconcileAt = 0; return; }
+          const [window, leaf] = file.split(path.sep);
+          if (window && (!leaf || leaf === 'TASK.md')) this.changed.add(window);
+        });
+        this.watcher.on('error', () => this.close());
+      } catch { /* a missing state directory will be retried */ }
+    }
+    if (now >= this.reconcileAt) {
+      this.reconcileAt = now + 60_000;
+      const all = await scanRecordsIn(root);
+      this.records.clear();
+      for (const record of all) this.records.set(record.window, record);
+    }
+    const changes = [...this.changed];
+    this.changed.clear();
+    for (let i = 0; i < changes.length; i += SCAN_CHUNK) {
+      await Promise.all(changes.slice(i, i + SCAN_CHUNK).map(async window => {
+        const record = await readRecordFileAsync(taskFile(config, window));
+        if (record) this.records.set(window, record);
+        else this.records.delete(window);
+      }));
+    }
+    return [...this.records.values()];
+  }
+
+  close(): void {
+    this.watcher?.close();
+    this.watcher = undefined;
+    this.root = undefined;
+    this.reconcileAt = 0;
+    this.records.clear();
+    this.changed.clear();
+  }
 }
 
 /**

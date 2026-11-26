@@ -169,9 +169,9 @@ export class Tmux {
   }
 
   /** Type a command line into the window's shell and press Enter. */
-  async typeCommand(window: string, commandLine: string): Promise<void> {
-    await this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), '-l', '--', commandLine]);
-    await this.pressEnter(window);
+  async typeCommand(window: string, commandLine: string): Promise<ExecResult> {
+    const pasted = await this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), '-l', '--', commandLine]);
+    return pasted.code === 0 ? this.pressEnter(window) : pasted;
   }
 
   /** Send one named key (e.g. Escape) to the window. */

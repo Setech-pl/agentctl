@@ -9,7 +9,7 @@ import { applyInstanceLabel } from './instance.ts';
 import { beginTitle } from './title.ts';
 import { packageVersion } from './version.ts';
 import { recordMachineLoad } from './machine.ts';
-import { checkLaunchHealth } from './launch-health.ts';
+import { checkLaunchHealth, LaunchHealthMemory } from './launch-health.ts';
 import { limitedTick } from './limited.ts';
 import { drainPromptQueue } from './prompt-queue.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
@@ -20,8 +20,9 @@ import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
 import { WatchSteps } from './watch-steps.ts';
 import { watchSnapshotPath, watchProgressPath } from './watch-snapshot.ts';
-import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
+import { atomicWriteFile, readStateWriteFailure, stateWriteFailure } from './atomic-file.ts';
 import { taskLock, withFileLock } from './file-lock.ts';
+import { fenceLegacyLimits } from './config-compat.ts';
 import type { BudgetClock } from './response-budget.ts';
 import { withoutResponseBudget } from './response-budget.ts';
 import fs from 'node:fs';
@@ -51,7 +52,7 @@ import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
-import { listTaskRecords, readTaskRecord, setHeaderField, taskFile } from './taskstore.ts';
+import { findRecordAnywhere, readRecordFileAsync, readTaskRecord, setHeaderField, snapshotRecords, taskFile } from './taskstore.ts';
 import { syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
 import { errorMessage, formatDuration } from './util.ts';
@@ -90,6 +91,7 @@ export class WatchMemory {
   readonly decorated = new Map<string, string>();
   /** Queued tasks this watcher is in the middle of starting. */
   readonly queue = new QueueMemory();
+  readonly launchHealth = new LaunchHealthMemory();
   /** The pairs of colliding tasks already announced, and when git was last asked. */
   readonly collisions = new CollisionMemory();
   readonly recoveredWrites = new Set<string>();
@@ -98,18 +100,22 @@ export class WatchMemory {
 /** Revalidate the last complete task state under its normal lock. Watch then derives fresh updates from the current task. */
 async function recoverTaskWrites(ctx: Context, memory: WatchMemory, signal: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;
-  const retryable = (file: string) => /^(ENOSPC:|write error: Partial result: response budget exhausted)/.test(stateWriteFailure(file)?.reason ?? '');
-  for (const record of listTaskRecords(ctx.config)) {
+  const retryable = async (file: string) => /^(ENOSPC:|write error: Partial result: response budget exhausted)/.test((await readStateWriteFailure(file))?.reason ?? '');
+  const records = await memory.launchHealth.records.current(ctx.config, ctx.runner.now());
+  const recover = async (record: typeof records[number]) => {
     if (signal.aborted) return;
     const file = taskFile(ctx.config, record.window);
-    if (!retryable(file)) continue;
+    if (!await retryable(file) || signal.aborted) return;
     await withFileLock(taskLock(file), async () => {
-      if (!retryable(file)) return;
+      if (signal.aborted || !await retryable(file)) return;
       atomicWriteFile(file, fs.readFileSync(file));
       memory.recoveredWrites.add(record.task);
     }, 100).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOSPC') ctx.out(`state recovery ${record.task}: ${errorMessage(error)}`);
     });
+  };
+  for (let i = 0; i < records.length && !signal.aborted; i += 25) {
+    await Promise.all(records.slice(i, i + 25).map(recover));
   }
 }
 
@@ -156,7 +162,7 @@ export function detectTransitions(memory: WatchMemory, rows: StatusRow[], nowMs:
 
 /** The history gets a record when a report is ready (`history.jsonl`); the same report is recorded once. */
 async function recordReport(ctx: Context, task: string): Promise<void> {
-  const record = listTaskRecords(ctx.config).find((r) => r.task === task);
+  const record = findRecordAnywhere(ctx.config, task);
   if (record) { await recordEvent(ctx, record, 'report'); await journalOutputs(ctx, record); }
 }
 
@@ -259,14 +265,14 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
   const allRows = () => processed ?? observed;
   const activeRows = () => allRows()?.filter(r => !r.closed && !r.cancelled);
-  const collect = () => collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true});
+  const collect = async () => collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await snapshotRecords(ctx.config)});
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
   };
   stage('state write recovery', signal => recoverTaskWrites(ctx, memory, signal));
   stage('accepted MCP writes', () => applyAcceptedWrites(ctx, notifier, { ...options, log: startLog }));
-  stage('launch health', signal => checkLaunchHealth(ctx, notifier, options.self, signal));
+  stage('launch health', signal => checkLaunchHealth(ctx, memory.launchHealth, notifier, options.self, signal));
   // Admission observes slots and named dependencies. Full status and report processing are optional for it.
   stage('queue', () => queueTick(ctx, memory.queue, notifier, { self: options.self, signal: options.signal, log: startLog }), 'accepted MCP writes');
   stage('WALL maintenance', () => maintainWall(ctx));
@@ -308,7 +314,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     let changed = false;
     for (const row of allRows) {
       if (signal.aborted) break;
-      const record = !row.closed && !row.cancelled ? readTaskRecord(ctx.config, row.windowName) : undefined;
+      const record = !row.closed && !row.cancelled && !row.archived ? await readRecordFileAsync(taskFile(ctx.config, row.windowName)) : undefined;
       if (row.tmuxLost || row.launchExit || row.state === 'host-unreachable') continue;
       if (record?.host && record.promptDelivery === 'launching' && row.window === 'alive') {
         await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'prompt_delivery', 'pending');
@@ -330,11 +336,12 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     if (signal.aborted) return;
     if (changed) allRows = await collect();
     const byWindow = new Map(allRows.map(row => [row.windowName, row.state]));
-    for (const record of listTaskRecords(ctx.config)) if (!signal.aborted && !record.closed && !record.cancelled && (!record.host || !ctx.hosts.connection(record.host).unreachable)) await drainPromptQueue(ctx, record.window, byWindow.get(record.window));
+    const current = await memory.launchHealth.records.current(ctx.config, ctx.runner.now());
+    for (const record of current) if (!signal.aborted && !record.closed && !record.cancelled && (!record.host || !ctx.hosts.connection(record.host).unreachable)) await drainPromptQueue(ctx, record.window, byWindow.get(record.window));
     // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
     if (!signal.aborted && await syncWaitingReports(ctx, allRows)) allRows = await collect();
     const ready = new Set(allRows.filter(row => row.state === 'report-ready').map(row => row.task));
-    for (const record of listTaskRecords(ctx.config)) if (!signal.aborted && (ready.has(record.task) || record.closed || record.cancelled)) await journalOutputs(ctx, record);
+    for (const record of current) if (!signal.aborted && (ready.has(record.task) || record.closed || record.cancelled)) await journalOutputs(ctx, record);
     if (!signal.aborted) processed = allRows;
   }, 'status collection');
   for (const [name, run] of [
@@ -451,7 +458,7 @@ export class WatchRestart extends Error {}
  * waiting tasks, a new `mcp.allow` is known to the server on its next call); a file that does not load leaves the previous settings in force
  * and is reported once in the log, and `status` and `doctor` say so.
  */
-export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch'): Promise<ConfigRefresh> {
+export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch', guardLegacyLimits = false): Promise<ConfigRefresh> {
   const before = ctx.config;
   const log = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
@@ -460,6 +467,7 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
   const refresh = async () => {
     const outcome = store.refresh(ctx.runner.now());
     if (outcome.config !== before) ctx.setConfig(outcome.config);
+    if (guardLegacyLimits && !outcome.config.reloadWarning) await fenceLegacyLimits(ctx);
     await announceLimitConfigChange(ctx, before, outcome.config).catch(error => log(`config: ${errorMessage(error)}`));
     return outcome;
   };
@@ -477,7 +485,7 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
 
 /** One notification "N zadań do wznowienia" when the watcher starts and tasks can be resumed (`agentctl resume`). Returns how many. */
 export async function announceResumable(ctx: Context, notifier: Notifier): Promise<number> {
-  const n = (await findResumable(ctx)).length;
+  const n = (await findResumable(ctx)).filter(candidate => !candidate.explicitOnly).length;
   if (n === 0) return 0;
   const text = resumeText(n);
   await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  resume: ${text}\n`);
@@ -516,7 +524,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
   }
   const applyReload = async (): Promise<void> => {
     const before = ctx.config.notify;
-    const r = await reloadConfig(ctx, store);
+    const r = await reloadConfig(ctx, store, 'watch', true);
     if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
   };
   // After a restart of the Mac the tasks that were at work have a worktree and no window: say so once, when the watcher starts.
@@ -541,11 +549,14 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
         await postMessage(ctx, OWNER_IDENTITY, {kind: 'info', channel: 'agentctl', to: 'owner', subject: 'Watch wznowił pętlę etapów', body: text}).catch(error => ctx.out(errorMessage(error)));
         if (opts.onStall) opts.onStall();
         await memory.queue.idle();
+        memory.launchHealth.close();
+        await memory.launchHealth.idle();
         memory = new WatchMemory();
       }
     }
   } finally {
     fileWatcher?.close();
+    memory.launchHealth.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
     if (!(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
       await memory.queue.idle();

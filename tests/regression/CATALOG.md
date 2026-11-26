@@ -10,6 +10,15 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REVIEW0256-RESUME | A hung launch-health retry could keep the watch tick and start reservation open. | `tests/review0256.test.ts` (`^REVIEW0256-RESUME:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| REVIEW0256-LOAD | An alert threshold blocked all queue admission without an opt-in. | `tests/review0256.test.ts` (`^REVIEW0256-LOAD:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| REVIEW0256-INDEX | Launch health repeatedly parsed unchanged task headers and the full journal. | `tests/review0256.test.ts` (`^REVIEW0256-INDEX:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| REVIEW0256-LEGACY | A legacy interrupted launch could replay its prompt automatically after upgrading. | `tests/review0256.test.ts` (`^REVIEW0256-LEGACY:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| REVIEW0256-DOWNGRADE | Rollback to 0.26 could fail to parse config or retain timed reservations indefinitely. | `tests/review0256.test.ts` (`^REVIEW0256-DOWNGRADE:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| REVIEW0256-MCP | A pre-0.27 MCP server could write limits directly and bypass owner approval. | `tests/review0256.test.ts` (`^REVIEW0256-MCP:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| REVIEW0256-EVENTS | Every chat-scoped events read rescanned task headers synchronously. | `tests/review0256.test.ts` (`^REVIEW0256-EVENTS:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
+| FIX-5246F46 | Interrupted pre-checkouts appeared in task status before a worktree existed. | `tests/review0256.test.ts` (`^FIX-5246F46:`) | 0.27.1 | fails on 5246f46^ (1 failing of 1) |
+| FIX-331D4A3 | A tmux server restart could turn a resume into an original prompt replay. | `tests/tmux-loss.test.ts` (`^lost server/session stays visible`) | 0.27.1 | fails on 331d4a3^ (1 failing of 1) |
 | W110-MCP-AGE | Queue and limits discarded a healthy snapshot just after a nominal tick was missed. | `tests/watch-snapshot.test.ts` (`^W110-MCP-AGE:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | UPGRADE0272 | A clone upgrade could leave a failing candidate installed instead of restoring the previous stable copy. | `tests/update.test.ts` (`^a failed post-upgrade check`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | W102-VOLUME | State and external worktree disks shared the same start floor. | `tests/disk0248.test.ts` (`^W102-VOLUME:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |

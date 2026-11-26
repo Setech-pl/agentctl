@@ -26,6 +26,15 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REVIEW0256-RESUME', fixedIn: '0.27.2', symptom: 'A hung launch-health retry could keep the watch tick and start reservation open.', scenarios: [s('review0256.test.ts', '^REVIEW0256-RESUME:')] },
+  { id: 'REVIEW0256-LOAD', fixedIn: '0.27.2', symptom: 'An alert threshold blocked all queue admission without an opt-in.', scenarios: [s('review0256.test.ts', '^REVIEW0256-LOAD:')] },
+  { id: 'REVIEW0256-INDEX', fixedIn: '0.27.2', symptom: 'Launch health repeatedly parsed unchanged task headers and the full journal.', scenarios: [s('review0256.test.ts', '^REVIEW0256-INDEX:')] },
+  { id: 'REVIEW0256-LEGACY', fixedIn: '0.27.2', symptom: 'A legacy interrupted launch could replay its prompt automatically after upgrading.', scenarios: [s('review0256.test.ts', '^REVIEW0256-LEGACY:')] },
+  { id: 'REVIEW0256-DOWNGRADE', fixedIn: '0.27.2', symptom: 'Rollback to 0.26 could fail to parse config or retain timed reservations indefinitely.', scenarios: [s('review0256.test.ts', '^REVIEW0256-DOWNGRADE:')] },
+  { id: 'REVIEW0256-MCP', fixedIn: '0.27.2', symptom: 'A pre-0.27 MCP server could write limits directly and bypass owner approval.', scenarios: [s('review0256.test.ts', '^REVIEW0256-MCP:')] },
+  { id: 'REVIEW0256-EVENTS', fixedIn: '0.27.2', symptom: 'Every chat-scoped events read rescanned task headers synchronously.', scenarios: [s('review0256.test.ts', '^REVIEW0256-EVENTS:')] },
+  { id: 'FIX-5246F46', fixedIn: '0.27.1', symptom: 'Interrupted pre-checkouts appeared in task status before a worktree existed.', scenarios: [s('review0256.test.ts', '^FIX-5246F46:')] },
+  { id: 'FIX-331D4A3', fixedIn: '0.27.1', symptom: 'A tmux server restart could turn a resume into an original prompt replay.', scenarios: [s('tmux-loss.test.ts', '^lost server/session stays visible')] },
   { id: 'W110-MCP-AGE', fixedIn: '0.27.2', symptom: 'Queue and limits discarded a healthy snapshot just after a nominal tick was missed.', scenarios: [s('watch-snapshot.test.ts', '^W110-MCP-AGE:')] },
   { id: 'UPGRADE0272', fixedIn: '0.27.2', symptom: 'A clone upgrade could leave a failing candidate installed instead of restoring the previous stable copy.', scenarios: [s('update.test.ts', '^a failed post-upgrade check')] },
   { id: 'W102-VOLUME', fixedIn: '0.27.2', symptom: 'State and external worktree disks shared the same start floor.', scenarios: [s('disk0248.test.ts', '^W102-VOLUME:')] },

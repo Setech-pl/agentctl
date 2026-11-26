@@ -250,6 +250,8 @@ Both are always readable without mcp.allow. MCP new/queue responses omit capacit
 | `pull` | `get_report`, `pull_ready` |  |
 | `close` | `close` |  |
 | `cancel` | `cancel` |  |
+| `config` | — | Local configuration compatibility commands for the owner. |
+| `config downgrade-check` | — | Owner prepares the installed configuration for a manual rollback. |
 | `upgrade-health` | — | Internal health check invoked by the stable updater after restarting watch. |
 | `canary` | — | Owner runs a local shadow replay over an explicitly named state directory. |
 | `watch` | — | Long-running terminal watcher, started and supervised locally. |
@@ -390,9 +392,10 @@ CLI arguments and options are generated in [commands.md](commands.md). MCP argum
 - `pull`: `--ready`, `--all`, `--cohort &lt;name&gt;`
 - `close`: `--pulled`, `--cohort &lt;name&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
 - `cancel`: `--cohort &lt;name&gt;`, `--reason &lt;text&gt;`, `--rm-worktree`, `-y, --yes`, `--dry-run`
+- `config downgrade-check`: `--to &lt;version&gt;`
 - `upgrade-health`: `--expect &lt;version&gt;`, `--since &lt;ms&gt;`
 - `canary`: `--from &lt;home&gt;`, `--minutes &lt;minutes&gt;`
-- `watch`: `--tmux`, `--restart`, `--no-status-line`
+- `watch`: `--tmux`, `--restart`, `--no-status-line`, `--supervise`
 - `board`: `--restart`, `--tmux`
 - `report`: `--from &lt;path&gt;`, `--force`, `--json`, `--dry-run`
 - `away status`: `--json`

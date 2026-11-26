@@ -83,6 +83,7 @@ import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
 import type { Notifier, NotifyResult } from './core/notify.ts';
 import { ensureWatchWindow, runWatch, WatchRestart, WATCH_RESTART_CODE, WATCH_WINDOW } from './core/watch.ts';
+import { runWatchWorker, superviseWatch, watchWorkerHeartbeat } from './core/watch-supervisor.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { MANAGER_STATE_TEXT, MANAGER_WINDOW, managerAddress, managerAdvice, startManager, stopManager } from './core/manager.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
@@ -156,7 +157,7 @@ export function defaultDeps(): CliDeps {
     loadConfig: () => loadGlobalConfig(),
     confirm: process.stdin.isTTY ? askOnTerminal : undefined,
     readClipboard: () => readClipboard(new RealRunner()),
-    watchCommand: () => `while :; do AGENTCTL_WATCH_SUPERVISED=1 ${selfCommand('watch')}; status=$?; [ "$status" = ${WATCH_RESTART_CODE} ] || exit "$status"; done`,
+    watchCommand: () => selfCommand('watch --supervise'),
     statusLineCommand: () => selfCommand('status --tmux-line'),
     boardCommand: () => selfCommand('board'),
     selfArgv,
@@ -1480,6 +1481,20 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     );
 
   program
+    .command('config')
+    .description('Inspect configuration compatibility.')
+    .command('downgrade-check')
+    .description('List configuration incompatible with 0.26 and remove expired timed limit overrides.')
+    .requiredOption('--to <version>', '0.26.x, 0.26.0 or 0.26.1')
+    .action(guarded(async (opts: {to: string}) => {
+      const {downgradeCheck} = await import('./core/config-compat.ts');
+      const result = await downgradeCheck(contextFor(false, {migrate: false}), opts.to);
+      line(result.incompatible.length ? `Config keys rejected by ${opts.to}: ${result.incompatible.join(', ')}` : `Config keys are compatible with ${opts.to}.`);
+      if (result.pruned.length) line(`Removed expired overrides: ${result.pruned.join(', ')}`);
+      if (result.reservations.length) line(`0.26 ignores expiry for ${result.reservations.join(', ')}. Release timed reservations before switching.`);
+    }));
+
+  program
     .command('upgrade-health', {hidden: true})
     .description('Check a newly restarted stable watcher from agentctl-update.')
     .requiredOption('--expect <version>', 'expected candidate version')
@@ -1521,8 +1536,9 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
     .option('--restart', 'with --tmux: restart the window identified by its stable role')
     .option('--no-status-line', 'with --tmux: leave the status bar of the session alone')
+    .addOption(new Option('--supervise').hideHelp())
     .action(
-      guarded(async (opts: { tmux?: boolean; statusLine?: boolean; restart?: boolean }) => {
+      guarded(async (opts: { tmux?: boolean; statusLine?: boolean; restart?: boolean; supervise?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
           if (opts.restart) await ctx.tmux.killRole('watch');
@@ -1530,19 +1546,30 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return;
         }
         const interrupt = deps.interruptSignal?.();
+        const endHeartbeat = watchWorkerHeartbeat();
         try {
+          if (opts.supervise) {
+            await superviseWatch(ctx, () => runWatchWorker(deps.selfArgv?.() ?? selfArgv(), interrupt?.signal), interrupt?.signal);
+            return;
+          }
           const note = await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
             await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx),
-              ...(process.env.AGENTCTL_WATCH_SUPERVISED === '1' ? {onStall: () => { throw new WatchRestart(); }} : {}) });
+              ...(process.env.AGENTCTL_WATCH_WORKER === '1' || process.env.AGENTCTL_WATCH_SUPERVISED === '1' ? {onStall: () => { throw new WatchRestart(); }} : {}) });
           });
           if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
         } catch (e) {
-          if (e instanceof WatchRestart) { exitCode = WATCH_RESTART_CODE; return; }
+          if (e instanceof WatchRestart) {
+            endHeartbeat();
+            if (ctx.runner instanceof RealRunner) process.exit(WATCH_RESTART_CODE);
+            exitCode = WATCH_RESTART_CODE;
+            return;
+          }
           await (await makeNotifier(ctx)).notify('agentctl', `watch failed: ${errorMessage(e).split('\n')[0]}; restart: agentctl watch --tmux --restart`).catch(() => undefined);
           throw e;
         } finally {
+          endHeartbeat();
           interrupt?.dispose();
         }
       }),

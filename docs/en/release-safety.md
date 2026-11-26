@@ -34,3 +34,7 @@ Subsequent clone upgrades can use `agentctl-update --ref vX.Y.Z` directly. The u
 Put the verdict on the first report line. Recognized leading tokens are `PASS with findings` (PARTIAL for dependencies), `PASS`, `PARTIAL`, `FAIL`, `BLOCKED` and `GO`, plus the existing review aliases. Trailing detail is accepted. A complete report in an idle pane becomes report-ready. Watch records ambiguous verdicts and names terminal `after` dependencies that cannot supply one. A schema-1 `agentctl-outputs` block may include `deferred: [{cell: smoke, where: pc}]`. Top-level keys starting with `x_` are ignored.
 
 In `set_limits` chat quotas, `{chat: nc, codex: 0}` blocks new Codex starts for that chat. Set `codex: "off"` or `codex: null` to clear its provider quota. The global provider limit still governs admission. State and cache volumes use `disk.min_free_state_gb` (default 5 GiB); each checkout volume uses `disk.min_free_start_gb` (default 30 GiB).
+
+## Manual rollback to 0.26
+
+Run `agentctl config downgrade-check --to 0.26.x` before switching versions. The command lists keys rejected by 0.26.0 and removes expired timed limit overrides. Use `--to 0.26.1` to check for that specific patch. Release any reported timed reservations before switching because 0.26 does not expire them. After an upgrade, quit the Claude app with ⌘Q and reopen it so each chat loads the new MCP server. Watch blocks direct limit writes by pre-0.27 servers.

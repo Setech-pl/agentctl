@@ -6,7 +6,7 @@ import { errorMessage } from './util.ts';
 import { watchHeartbeatPath } from './watch-snapshot.ts';
 
 export const WATCH_STEP_TIMEOUT_MS = 20_000;
-const RESTART_AFTER_MS = 10 * 60_000;
+export const WATCH_STALL_MS = 10 * 60_000;
 const clock: BudgetClock = {
   now: Date.now,
   schedule(expire, delay) {
@@ -32,7 +32,10 @@ export class WatchSteps {
   }
 
   stalled(now: number): string[] {
-    return [...this.skipped].filter(([, state]) => now - state.since >= RESTART_AFTER_MS).map(([name]) => name);
+    return [...new Set([
+      ...[...this.running].filter(([, since]) => now - since >= WATCH_STALL_MS).map(([name]) => name),
+      ...[...this.skipped].filter(([, state]) => now - state.since >= WATCH_STALL_MS).map(([name]) => name),
+    ])];
   }
 
   async run<T>(ctx: Context, log: string, name: string, step: (signal: AbortSignal) => Promise<T>, timer = clock): Promise<T | undefined> {

@@ -34,3 +34,7 @@ Przy kolejnych aktualizacjach używaj `agentctl-update --ref vX.Y.Z`. Skrypt zac
 Zacznij raport od werdyktu w pierwszym wierszu. Rozpoznawane są `PASS with findings` (PARTIAL dla zależności), `PASS`, `PARTIAL`, `FAIL`, `BLOCKED` i `GO` oraz dotychczasowe warianty werdyktów przeglądu. Możesz dopisać szczegóły w tym samym wierszu. Gotowy raport przy bezczynnym oknie oznacza report-ready. Watch odnotowuje niejasny werdykt oraz zakończone zależności `after` bez werdyktu. W bloku `agentctl-outputs` wersji 1 można podać `deferred: [{cell: smoke, where: pc}]`. Klucze najwyższego poziomu z prefiksem `x_` są pomijane.
 
 W kwocie czatu `set_limits` wartość `{chat: nc, codex: 0}` blokuje starty Codex dla tego czatu. `codex: "off"` albo `codex: null` usuwa kwotę tego dostawcy dla czatu. Nadal obowiązuje limit globalny. Woluminy stanu i cache obowiązuje `disk.min_free_state_gb` (domyślnie 5 GiB), a woluminy worktree `disk.min_free_start_gb` (domyślnie 30 GiB).
+
+## Ręczny powrót do 0.26
+
+Przed zmianą wersji uruchom `agentctl config downgrade-check --to 0.26.x`. Polecenie wskazuje klucze odrzucane przez 0.26.0 i usuwa wygasłe limity czasowe. Użyj `--to 0.26.1`, aby sprawdzić tę konkretną wersję. Zwolnij wskazane rezerwacje czasowe przed zmianą wersji, bo 0.26 ich nie wygasza. Po aktualizacji zamknij Claude przez ⌘Q i otwórz aplikację ponownie, aby każdy czat uruchomił nowy serwer MCP. Watch blokuje bezpośrednią zmianę limitów z serwerów sprzed 0.27.

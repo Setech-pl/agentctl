@@ -68,6 +68,8 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`pull`](#agentctl-pull) | Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window). --ready: all new reports at once. |
 | [`close`](#agentctl-close) | Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first. |
 | [`cancel`](#agentctl-cancel) | Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first. |
+| [`config`](#agentctl-config) | Inspect configuration compatibility. |
+| [`config downgrade-check`](#agentctl-config-downgrade-check) | List configuration incompatible with 0.26 and remove expired timed limit overrides. |
 | [`upgrade-health`](#agentctl-upgrade-health) | Check a newly restarted stable watcher from agentctl-update. |
 | [`canary`](#agentctl-canary) | Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux. |
 | [`watch`](#agentctl-watch) | Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died. |
@@ -1393,6 +1395,28 @@ agentctl cancel TASK-43                             # a queued task: taken out o
 agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N
 ```
 
+## agentctl config
+
+Inspect configuration compatibility.
+
+Subcommands: `config downgrade-check`.
+
+```
+agentctl config [options] [command]
+```
+
+## agentctl config downgrade-check
+
+List configuration incompatible with 0.26 and remove expired timed limit overrides.
+
+```
+agentctl config downgrade-check [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--to <version>` | 0.26.x, 0.26.0 or 0.26.1 | required |
+
 ## agentctl upgrade-health
 
 Check a newly restarted stable watcher from agentctl-update.
@@ -1444,6 +1468,7 @@ agentctl watch [options]
 | `--tmux` | run it in window "watch" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session |  |
 | `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--no-status-line` | with --tmux: leave the status bar of the session alone |  |
+| `--supervise` |  |  |
 
 Examples:
 

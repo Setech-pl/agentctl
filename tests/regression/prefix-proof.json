@@ -571,6 +571,26 @@
       "FIELD0256-STALE: a cached snapshot drops a reading as its reset passes"
     ]
   },
+  "FIX-331D4A3": {
+    "rev": "331d4a3^",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "lost server/session stays visible with recovery, one durable event per loss",
+      "lost server/session stays visible with recovery, one durable event per loss"
+    ]
+  },
+  "FIX-5246F46": {
+    "rev": "5246f46^",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIX-5246F46: an interrupted checkout before a worktree exists stays under queue ownership",
+      "FIX-5246F46: an interrupted checkout before a worktree exists stays under queue ownership"
+    ]
+  },
   "FLOW-CLOSE": {
     "rev": "v0.25.3",
     "outcome": "FAILS",
@@ -1435,6 +1455,76 @@
     "failing": [
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures",
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
+    ]
+  },
+  "REVIEW0256-DOWNGRADE": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-DOWNGRADE: check lists incompatible keys and prunes only expired overrides",
+      "REVIEW0256-DOWNGRADE: check lists incompatible keys and prunes only expired overrides"
+    ]
+  },
+  "REVIEW0256-EVENTS": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-EVENTS: scoped events reuse headers and respect recorded chat ownership",
+      "REVIEW0256-EVENTS: scoped events reuse headers and respect recorded chat ownership"
+    ]
+  },
+  "REVIEW0256-INDEX": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-INDEX: repeated launch checks keep task reads and journal parsing bounded",
+      "REVIEW0256-INDEX: repeated launch checks keep task reads and journal parsing bounded"
+    ]
+  },
+  "REVIEW0256-LEGACY": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-LEGACY: dead legacy launching tasks are journaled once and wait for a named resume",
+      "REVIEW0256-LEGACY: dead legacy launching tasks are journaled once and wait for a named resume"
+    ]
+  },
+  "REVIEW0256-LOAD": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-LOAD: configured load alert does not hold admission unless opted in",
+      "REVIEW0256-LOAD: configured load alert does not hold admission unless opted in"
+    ]
+  },
+  "REVIEW0256-MCP": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-MCP: starting watch fences old direct limits writers and identifies their version",
+      "REVIEW0256-MCP: starting watch fences old direct limits writers and identifies their version"
+    ]
+  },
+  "REVIEW0256-RESUME": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-RESUME: a stalled tmux launch leaves the tick and releases its reservation",
+      "REVIEW0256-RESUME: a stalled tmux launch leaves the tick and releases its reservation"
     ]
   },
   "ROWSEL0252": {

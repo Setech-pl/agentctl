@@ -146,7 +146,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `agents.<agent>.limit_patterns` | list of regexes · see below · g | The usage limit is used up (state `limited`). A message has to open its line, so a diff or a quoted sentence is not taken for one. |
 | `agents.<agent>.background_patterns` | list of regexes · see below · g | The agent waits for its own shells or monitors (state `background`). |
 | `capacity` | mapping · see below · g | Dispatcher capacity settings. |
-| `capacity.load_threshold` | positive number · 3 × logical CPUs for alerts · g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. An explicit threshold also holds queue admission. |
+| `capacity.load_threshold` | positive number · 3 × logical CPUs for alerts · g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. Queue admission uses the explicit threshold when `queue.hold_on_load: true` is set. |
 | `capacity.snapshot` | boolean · true · g | Add both providers' capacity to new and queue responses. |
 | `capacity.stale_minutes` | integer 1–10080 · 30 · g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
 | `capacity.sample_limit` | integer 2–10000 · 2048 · g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |
@@ -272,6 +272,7 @@ The selection covers the full width of the list pane, including the gaps between
 | `wall.ref_roots` | list · `[~/Projects/cache]` · g | A path in `refs` must be under one of these; nothing is read from it (refs only, no attachments). |
 | `queue.enabled` | boolean · `true` · g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
 | `queue.parallel_starts` | positive integer · `2` · g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
+| `queue.hold_on_load` | bool · `false` · g | When true, the queue holds above the explicit load threshold and reports the reason. |
 | `cancel.grace` | seconds (0 or more) · `5` · g | Time between the interrupt key and the closing of the window of a task that is cancelled while it works. `0`: the window is closed at once. |
 | `collisions.enabled` | boolean · `true` · g | `false`: no `COLLIDE` column, no marker on the board, no notification. `agentctl overlap` still works. |
 | `collisions.interval` | positive number · `300` · g | Seconds between two checks by `watch`. |

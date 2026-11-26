@@ -79,6 +79,7 @@ describe('queue: adding', () => {
     await s.runner.sleep(53_000);
     const memory = new WatchMemory();
     await watchTick(s.ctx, memory, s.notifier);
+    await memory.launchHealth.idle();
     await memory.queue.idle();
     const retry = s.tmux.windows.find(w => w.name.endsWith(window))!;
     assert.ok(retry && retry.id !== first.id, 'the original task gets one fresh window');
@@ -131,7 +132,7 @@ describe('queue: adding', () => {
   it('FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible', async t => {
     let load = 0;
     t.mock.method(os, 'loadavg', () => [load, 0, 0]);
-    const s = setup('hold-notice', 'limits: {claude: 1}\ncapacity: {load_threshold: 10, codex_refresh: false}\n');
+    const s = setup('hold-notice', 'limits: {claude: 1}\ncapacity: {load_threshold: 10, codex_refresh: false}\nqueue: {hold_on_load: true}\n');
     assert.equal((await runCli(s.config, s.runner, ['limits', 'reserve', 'claude=1', '--note', 'owner review'])).code, 0);
     await add(s, specOf(s.repo, 'RESERVED'));
     assert.deepEqual(await s.tick(), []);
