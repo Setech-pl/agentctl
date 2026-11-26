@@ -35,6 +35,18 @@ test('FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or
   const enteredStatus = new Promise<void>(resolve => { entered = resolve; });
   let captures = 0;
   const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  const memory = new WatchMemory(), notifier = {notify: async () => {}};
+  const stepClock = {now: () => runner.now(), schedule(fn: () => void) {
+    expire = fn;
+    return () => { expire = undefined; };
+  }};
+  const tick = () => watchTick(ctx, memory, notifier, {stepClock});
+  const snapshot = () => JSON.parse(fs.readFileSync(watchSnapshotPath(config), 'utf8'));
+  // A stalled sweep must preserve the last good 1,200 rows with their original timestamp.
+  await tick();
+  const baseline = snapshot();
+  assert.equal(baseline.rows?.length, 1200);
   const exec = runner.exec.bind(runner);
   runner.exec = async (cmd: string, args: string[], opts?: ExecOptions) => {
     if (cmd === 'tmux' && args[0] === 'capture-pane' && args.includes(busy.id)) {
@@ -46,20 +58,12 @@ test('FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or
     }
     return exec(cmd, args, opts);
   };
-  const ctx = new Context(runner, config, () => {});
   const repo = scratch.sub('admission/repo');
   for (const [seq, task, status] of [[1, 'ACCEPTED', 'accepted'], [2, 'WAITING', 'queued']] as const) {
     await saveEntry(ctx, {seq, order: seq, task, status, unvalidated: status === 'accepted', priority: 'normal',
       agent: 'claude', model: 'opus', effort: 'high', after: [], queuedAt: new Date(runner.now()).toISOString(),
       spec: `---\ntask: ${task}\nagent: claude\nrepos: [{path: ${repo}, worktree: ${repo}-${task.toLowerCase()}}]\n---\nStart fixture.\n`});
   }
-  const memory = new WatchMemory(), notifier = {notify: async () => {}};
-  const stepClock = {now: () => runner.now(), schedule(fn: () => void) {
-    expire = fn;
-    return () => { expire = undefined; };
-  }};
-  const tick = () => watchTick(ctx, memory, notifier, {stepClock});
-  const snapshot = () => JSON.parse(fs.readFileSync(watchSnapshotPath(config), 'utf8'));
   const first = tick();
   try {
     await enteredStatus;
@@ -69,7 +73,10 @@ test('FIELD0253-ADMISSION: a late 1200-task status sweep cannot stop accepted or
     await memory.queue.idle();
     assert.ok(tmux.windows.some(w => w.name.endsWith('accepted')), JSON.stringify(readQueue(config)));
     assert.deepEqual(readQueue(config).map(e => e.task), ['WAITING']);
-    assert.equal(snapshot().degraded, 'status collection');
+    const degraded = snapshot();
+    assert.equal(degraded.degraded, 'status collection');
+    assert.equal(degraded.at, baseline.at);
+    assert.deepEqual(degraded.rows, baseline.rows);
     const doctor = MCP_TOOLS.find(tool => tool.name === 'doctor')!;
     assert.match((await doctor.run({context: () => ctx, notify: async () => {}}, {})).text, /status collection.*od 2026-/);
 

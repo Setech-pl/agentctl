@@ -25,8 +25,25 @@ it('REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results
     ran.push(name);
     return name === 'smoke-node22' || name === 'prodshape' ? 1 : 0;
   }, ['node22', 'node26']);
-  assert.deepEqual(ran, ['smoke-node22', 'smoke-node26', 'doctor-node26', 'regression', 'prodshape']);
-  assert.deepEqual(failures, ['smoke-node22 (1)', 'prodshape (1)']);
+  assert.ok(ran.includes('prodshape') && ran.includes('smoke-node26') && ran.includes('doctor-node26'));
+  assert.deepEqual(failures.sort(), ['prodshape (1)', 'smoke-node22 (1)']);
+});
+it('REL0272-PRODSHAPE-ORDER: measure before long independent regression and smoke suites', async () => {
+  const { runReleaseChecks } = await import('../scripts/gate.ts');
+  const ran: string[] = [];
+  const failures = await runReleaseChecks(['scripts/live-a.ts', 'prodshape'], async name => {
+    ran.push(name);
+    return name === 'prodshape' ? 1 : 0;
+  }, ['node26']);
+  assert.deepEqual(ran, ['prodshape', 'smoke-node26', 'doctor-node26', 'regression', 'scripts/live-a.ts']);
+  assert.deepEqual(failures, ['prodshape (1)']);
+});
+it('REL0272-PRESSURE-START: initial synthetic load accounts for existing host pressure', async () => {
+  const prodshape = await import('../scripts/prodshape.ts');
+  const {initialPressureWorkers} = prodshape;
+  assert.equal(initialPressureWorkers(18, 0), 44);
+  assert.equal(initialPressureWorkers(18, 21), 23);
+  assert.equal(initialPressureWorkers(18, 98), 5);
 });
 it('REL0272-PRESSURE-POLICY: load workers keep their configured nice level outside the Darwin background group', async () => {
   const { pressureWorkerArgs } = await import('../scripts/prodshape.ts');
@@ -50,13 +67,13 @@ it('REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without
   assert.equal(additionalPressureWorkers(18, 80, 120), -10);
   assert.equal(additionalPressureWorkers(18, 20, 120), -2);
 });
-it('plans tiers in order, keeping both runtimes sequential and live last', () => {
+it('plans tiers in order, keeping both runtimes sequential and package-dependent live tests last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);
   assert.deepEqual(planTier('full', [], []), ['tests Node 22.14.0 (full)', 'tests Node 26 (full)', 'regression scenarios (tests/regression/CATALOG.md)']);
   const plan = planTier('release', [], ['scripts/live-a.ts', 'scripts/live-b.ts']);
-  assert.equal(plan.length, 10); assert.match(plan[6]!, /^regression scenarios/); assert.match(plan[2]!, /smoke Node 22/); assert.match(plan[5]!, /doctor.*Node 26/);
-  assert.deepEqual(plan.slice(-3, -1), ['scripts/live-a.ts', 'scripts/live-b.ts']);
-  assert.equal(planTier('release', [], ['scripts/live-a.ts'], true).at(-2), 'SKIP live entries');
+  assert.equal(plan.length, 10); assert.match(plan[7]!, /^regression scenarios/); assert.match(plan[3]!, /smoke Node 22/); assert.match(plan[6]!, /doctor.*Node 26/);
+  assert.deepEqual(plan.slice(-2), ['scripts/live-a.ts', 'scripts/live-b.ts']);
+  assert.equal(planTier('release', [], ['scripts/live-a.ts'], true).at(-1), 'SKIP live entries');
   assert.equal(parseArgs(['quick', '--base', 'HEAD~1']).base, 'HEAD~1');
   assert.throws(() => parseArgs(['full', '--base'])); assert.throws(() => parseArgs(['unknown']));
 });

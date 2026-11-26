@@ -26,6 +26,10 @@ export function additionalPressureWorkers(cores: number, workers: number, load1:
   return load1 < 2 * cores + 4 ? Math.max(0, Math.min(step, 6 * cores - workers)) : 0;
 }
 
+export function initialPressureWorkers(cores: number, load1: number): number {
+  return Math.max(Math.ceil(cores / 4), 2 * cores + 8 - Math.floor(load1));
+}
+
 function installStopHandlers() {
   const stop = new AbortController();
   const abort = () => stop.abort();
@@ -143,7 +147,7 @@ async function main() {
   };
   let pressureTimer: NodeJS.Timeout | undefined;
   const warmPressure = async (signal: AbortSignal) => {
-    addWorkers(2 * cores + 8, 19);
+    addWorkers(initialPressureWorkers(cores, load()), 19);
     const warm = Date.now();
     adjustedAt = warm;
     while (load() < target + 4 && !signal.aborted) {

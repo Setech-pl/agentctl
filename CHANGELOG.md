@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Watch checks unchanged queue entries by file version and continues reading task headers while one file is delayed. Writing watch progress no longer rechecks every active task. / Watch sprawdza niezmienione wpisy kolejki po wersji pliku i czyta kolejne nagłówki podczas opóźnionego odczytu. Zapis postępu nie powoduje ponownego sprawdzania aktywnych zadań.
 - Watch publishes complete rows before launching maintenance and shares its task inventory with usage sampling. The first tick still includes loading the initial inventory. / Watch publikuje pełne wiersze przed pracami pomocniczymi i używa wspólnego indeksu do odczytu zużycia. Pierwszy przebieg obejmuje początkowy odczyt indeksu.
 - Confirmed GC revalidates task headers asynchronously and keeps cohort summaries in the event stream. Trash purge carries measured results by volume. / Potwierdzone GC sprawdza nagłówki asynchronicznie i zachowuje podsumowania kohort w zdarzeniach. Opróżnianie kosza zwraca pomiary według woluminu.
 

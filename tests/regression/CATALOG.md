@@ -10,6 +10,11 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-HEADER-PIPELINE | One slow task header held up every later batch in a cold or incremental inventory. | `tests/watch-snapshot.test.ts` (`^REL0272-HEADER-PIPELINE:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
+| REL0272-INDEX-ROOT-WRITES | A durable snapshot or progress write in the state directory caused another metadata check of every active task. | `tests/watch-snapshot.test.ts` (`^REL0272-INDEX-ROOT-WRITES:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
+| REL0272-QUEUE-IO | Multiple watch stages synchronously reopened the same unchanged queued specs on the first tick. | `tests/queue.test.ts` (`^REL0272-QUEUE-IO:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
+| REL0272-PRODSHAPE-ORDER | The timed canary began after long independent tests, when contention could have doubled since the gate started. | `tests/gate.test.ts` (`^REL0272-PRODSHAPE-ORDER:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
+| REL0272-PRESSURE-START | The CPU injector spawned a full empty-host batch even when ambient load already exceeded the target several times. | `tests/gate.test.ts` (`^REL0272-PRESSURE-START:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
 | REL0272-DISK-ASYNC | A watch disk snapshot synchronously resolved each worktree filesystem before publishing. | `tests/watch-snapshot.test.ts` (`^REL0272-DISK-ASYNC:`) | 0.27.2 | fails on 2aff93d417d52478679a3e1a29bf2bade7c4012d (1 failing of 1) |
 | REL0272-COLD-SNAPSHOT | An initial status timeout still published a new rowless degraded file when there was no last good snapshot. | `tests/watch-snapshot.test.ts` (`^REL0272-COLD-SNAPSHOT:`) | 0.27.2 | fails on 2aff93d417d52478679a3e1a29bf2bade7c4012d (1 failing of 1) |
 | REL0272-MAINTENANCE | A long usage observation could delay the complete status publication for an entire stage budget. | `tests/watch-snapshot.test.ts` (`^REL0272-MAINTENANCE:`) | 0.27.2 | fails on 2aff93d417d52478679a3e1a29bf2bade7c4012d (1 failing of 1) |

@@ -470,9 +470,19 @@ export function invalidateTaskRecord(file: string): void {
   for (const index of activeRecordIndexes.get(root) ?? []) index.markChanged(path.basename(directory));
 }
 
-/** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
+// Yield during synchronous board reads. Watch's asynchronous reads keep a bounded number of files open.
 const SCAN_CHUNK = 25;
-const ASYNC_SCAN_CHUNK = 96;
+const ASYNC_SCAN_CONCURRENCY = 96;
+
+async function scanNames<T>(names: readonly string[], scan: (name: string) => Promise<T>): Promise<T[]> {
+  const results = new Array<T>(names.length);
+  let next = 0;
+  const worker = async () => {
+    for (let index = next++; index < names.length; index = next++) results[index] = await scan(names[index]!);
+  };
+  await Promise.all(Array.from({length: Math.min(ASYNC_SCAN_CONCURRENCY, names.length)}, worker));
+  return results;
+}
 
 async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[]> {
   let files = recordScanCache.get(dir);
@@ -515,14 +525,11 @@ async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[
       }
     }
   };
-  const batchSize = asyncIO ? ASYNC_SCAN_CHUNK : SCAN_CHUNK;
-  for (let i = 0; i < names.length; i += batchSize) {
-    const namesInBatch = names.slice(i, i + batchSize);
-    if (asyncIO) {
-      const batch = await Promise.all(namesInBatch.map(scan));
-      records.push(...batch.filter((record): record is TaskRecord => record !== undefined));
-    } else {
-      for (const name of namesInBatch) {
+  if (asyncIO) {
+    for (const record of await scanNames(names, scan)) if (record) records.push(record);
+  } else {
+    for (let i = 0; i < names.length; i += SCAN_CHUNK) {
+      for (const name of names.slice(i, i + SCAN_CHUNK)) {
         const record = await scan(name);
         if (record) records.push(record);
       }
@@ -586,30 +593,25 @@ export class TaskRecordIndex {
       // A new or moved state directory is visible even before the recursive watcher delivers its callback.
       const names = new Set(await fs.promises.readdir(root).catch(() => []));
       if (this.generation !== generation) return [];
-      for (const [window, record] of this.records) {
-        if (!names.has(window)) this.records.delete(window);
-        else if (!record.closed && !record.cancelled && !record.supersededBy) this.changed.add(window);
-      }
+      for (const window of this.records.keys()) if (!names.has(window)) this.records.delete(window);
       for (const window of names) if (!this.records.has(window)) this.changed.add(window);
     }
     this.rootVersion = version;
     const changes = [...this.changed];
     this.changed.clear();
-    for (let i = 0; i < changes.length; i += ASYNC_SCAN_CHUNK) {
-      await Promise.all(changes.slice(i, i + ASYNC_SCAN_CHUNK).map(async window => {
-        const file = path.join(root, window, 'TASK.md');
-        const stat = await fs.promises.lstat(file, {bigint: true}).catch(() => undefined);
-        const version = stat && fileVersion(stat);
-        const files = recordScanCache.get(root);
-        const cached = files?.get(file);
-        const record = !stat ? undefined : version !== undefined && cached?.version === version ? cached.record : await readRecordFileAsync(file);
-        if (this.generation !== generation) return;
-        if (stat) files?.set(file, {version, record});
-        else files?.delete(file);
-        if (record) this.records.set(window, record);
-        else this.records.delete(window);
-      }));
-    }
+    await scanNames(changes, async window => {
+      const file = path.join(root, window, 'TASK.md');
+      const stat = await fs.promises.lstat(file, {bigint: true}).catch(() => undefined);
+      const version = stat && fileVersion(stat);
+      const files = recordScanCache.get(root);
+      const cached = files?.get(file);
+      const record = !stat ? undefined : version !== undefined && cached?.version === version ? cached.record : await readRecordFileAsync(file);
+      if (this.generation !== generation) return;
+      if (stat) files?.set(file, {version, record});
+      else files?.delete(file);
+      if (record) this.records.set(window, record);
+      else this.records.delete(window);
+    });
     return [...this.records.values()];
   }
 

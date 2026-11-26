@@ -6,6 +6,7 @@ import { Context } from '../src/core/context.ts';
 import { runDoctor } from '../src/core/doctor.ts';
 import { collectDisk } from '../src/core/disk.ts';
 import { MCP_TOOLS, publishDegradedMcpSnapshot, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
+import { snapshotRecords, TaskRecordIndex } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
@@ -18,6 +19,63 @@ function deferred<T>() {
 
 const diskStats = (free: number) => ({ bavail: free, blocks: 1000, bsize: 1024 ** 3 });
 const snapshotFile = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
+
+it('REL0272-HEADER-PIPELINE: a slow early header does not delay reading the remaining inventory', async t => {
+  const config = makeConfig(scratch.sub('header-pipeline'));
+  for (let i = 0; i < 110; i++) seedTask(config, `PIPE-${String(i).padStart(3, '0')}`);
+  const entered = deferred<void>(), held = deferred<void>();
+  let openedLast = false;
+  t.mock.method(fs.promises, 'lstat', async (file: fs.PathLike) => fs.lstatSync(file, {bigint: true}));
+  t.mock.method(fs.promises, 'open', async (file: string) => {
+    const task = path.basename(path.dirname(file));
+    if (task === 'pipe-000') {
+      entered.resolve();
+      await held.promise;
+    }
+    if (task === 'pipe-109') openedLast = true;
+    const contents = fs.readFileSync(file);
+    let offset = 0;
+    return {async read(buffer: Buffer) {
+      const bytesRead = contents.copy(buffer, 0, offset);
+      offset += bytesRead;
+      return {bytesRead, buffer};
+    }, async close() {}};
+  });
+  const reading = snapshotRecords(config, true);
+  try {
+    await entered.promise;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.ok(openedLast, 'an early stalled header held an entire batch open');
+  } finally {
+    held.resolve();
+    assert.equal((await reading).current.length, 110);
+  }
+});
+
+it('REL0272-INDEX-ROOT-WRITES: snapshot and progress writes do not recheck unchanged active tasks', async t => {
+  const config = makeConfig(scratch.sub('index-root-writes'));
+  for (let i = 0; i < 4; i++) seedTask(config, `INDEX-${i}`);
+  const index = new TaskRecordIndex();
+  t.after(() => index.close());
+  const watch = fs.watch;
+  t.mock.method(fs, 'watch', (file: fs.PathLike) => watch(file));
+  const stat = fs.promises.stat;
+  let version = 1n;
+  t.mock.method(fs.promises, 'stat', async (file: fs.PathLike) => {
+    const meta = await stat(file, {bigint: true});
+    if (file === config.stateDir) meta.ctimeNs = version;
+    return meta;
+  });
+  assert.equal((await index.current(config, 0)).length, 4);
+  fs.writeFileSync(path.join(config.stateDir, 'watch-progress.json'), '{}');
+  version++;
+  const observed = t.mock.method(fs.promises, 'lstat');
+  assert.equal((await index.current(config, 1)).length, 4);
+  assert.equal(observed.mock.calls.filter(call => path.basename(path.dirname(String(call.arguments[0]))).startsWith('index-')).length, 0);
+  seedTask(config, 'NEW-INDEXED');
+  version++;
+  assert.ok((await index.current(config, 2)).some(task => task.task === 'NEW-INDEXED'));
+});
 
 it('REL0272-COLD-SNAPSHOT: an initial scan failure does not publish a rowless replacement', () => {
   const config = makeConfig(scratch.sub('cold-degraded'));

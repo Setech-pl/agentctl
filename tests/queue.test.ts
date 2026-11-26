@@ -65,6 +65,36 @@ async function add(s: Setup, text: string, opts: { agent?: 'claude' | 'codex' } 
   return (await commitQueueAdd(s.ctx, plan.items, opts)).map((e) => e.task);
 }
 
+it('REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independent replacements', async t => {
+  const {ctx, config, repo} = setup('read-cache');
+  await saveEntry(ctx, {seq: 1, order: 1, task: 'CACHE-ORDER', status: 'queued', priority: 'normal',
+    agent: 'claude', model: 'opus', effort: 'high', after: ['WAIT-1'], queuedAt: new Date().toISOString(), spec: specOf(repo, 'CACHE-ORDER')});
+  const dir = queueDir(config);
+  const file = path.join(dir, fs.readdirSync(dir).find(name => name.endsWith('.json'))!);
+  const read = fs.readFileSync;
+  const stat = fs.statSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (target: fs.PathOrFileDescriptor, options: Parameters<typeof read>[1]) => {
+    if (target === file) reads++;
+    return read(target, options);
+  });
+  t.mock.method(fs, 'statSync', (target: fs.PathLike, options: Parameters<typeof stat>[1]) => {
+    const meta = stat(target, options);
+    if (target === file && meta && 'ctimeNs' in meta && typeof meta.ctimeNs === 'bigint') meta.ctimeNs |= 1n;
+    return meta;
+  });
+  const [first] = readQueue(config);
+  assert.ok(first);
+  first.after.push('CLIENT-CHANGE');
+  assert.deepEqual(readQueue(config)[0]!.after, ['WAIT-1']);
+  assert.equal(reads, 1);
+  const tmp = path.join(dir, '.replacement');
+  fs.writeFileSync(tmp, JSON.stringify({...first, priority: 'high'}));
+  fs.renameSync(tmp, file);
+  assert.equal(readQueue(config)[0]!.priority, 'high');
+  assert.equal(reads, 2);
+});
+
 describe('queue: adding', () => {
   it('FIELD0256-LAUNCH: Codex exits within grace, retries once and remains resumable with its cause', async () => {
     const s = setup('launch-health', 'limits: {codex: 1}\ncapacity: {codex_refresh: false}\n');

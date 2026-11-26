@@ -42,12 +42,13 @@ export function assertClean(opts: Options, dirty: boolean): void {
   if (opts.tier !== 'quick' && dirty && !opts.allowDirty) throw new Error(`${opts.tier} refuses a dirty tree; use --allow-dirty to record the exception`);
 }
 export function planTier(tier: Tier, tests: string[], live: string[], skipLive = false, node26Only = false): string[] {
-  // Every tier ends its checks with the regression catalog: a known, fixed bug that comes back fails the build.
+  // Every tier runs the regression catalog: a known, fixed bug that comes back fails the build.
   const regression = 'regression scenarios (tests/regression/CATALOG.md)';
   if (tier === 'quick') return ['typecheck', 'build', 'git diff --check', regression, `tests current: ${tests.join(' ') || '(none)'}`];
   if (tier === 'full') return [...(node26Only ? [] : ['tests Node 22.14.0 (full)']), 'tests Node 26 (full)', regression];
-  if (tier === 'prodshape') return [regression, 'prodshape watch and MCP canary'];
-  return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live), 'prodshape watch and MCP canary'];
+  const prodshape = 'prodshape watch and MCP canary';
+  if (tier === 'prodshape') return [prodshape, regression];
+  return ['build', 'pack', prodshape, 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live)];
 }
 /** Static relative import closure plus exact test naming. Unknown inputs always widen to the full suite. */
 export function affectedTests(changed: string[], sources: Record<string, string>, tests: string[]): { tests: string[]; uncertain: boolean } {
@@ -85,10 +86,12 @@ export async function runReleaseChecks(live: string[], runCheck: (name: string) 
     if (code !== 0) failures.push(`${name} (${code})`);
     return code === 0;
   };
+  // Run the timed workload before the longer independent smoke, regression and live suites.
+  if (live.includes('prodshape')) await check('prodshape');
   for (const runtime of runtimes) {
     if (await check(`smoke-${runtime}`)) await check(`doctor-${runtime}`);
   }
-  for (const name of ['regression', ...live]) await check(name);
+  for (const name of ['regression', ...live.filter(name => name !== 'prodshape')]) await check(name);
   return failures;
 }
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();

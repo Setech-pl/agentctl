@@ -15,6 +15,7 @@ import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, f
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
 import { closeFailedStartWindow, keepFailedWindow, LaunchExited, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
 import { withFileLock } from './file-lock.ts';
+import { fileVersion } from './file-version.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
@@ -162,20 +163,31 @@ function parseEntry(text: string): QueueEntry | undefined {
   };
 }
 
+interface CachedQueueEntry { version: string; entry: QueueEntry | undefined }
+let queueCache: { dir: string; files: Map<string, CachedQueueEntry> } | undefined;
+
 /** Every entry, in the order the queue serves them: waiting ones (high priority first, then by order), the ones being started, the failed ones last. */
 export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
+  const dir = queueDir(config);
   let names: string[];
   try {
-    names = fs.readdirSync(queueDir(config));
+    names = fs.readdirSync(dir);
   } catch {
     return [];
   }
+  const previous = queueCache?.dir === dir ? queueCache.files : undefined;
+  const files = new Map<string, CachedQueueEntry>();
   const holds = readHoldNotices(config);
   const entries: QueueEntry[] = [];
   for (const name of names.sort()) {
     if (!name.endsWith('.json')) continue;
     try {
-      const entry = parseEntry(fs.readFileSync(path.join(queueDir(config), name), 'utf8'));
+      const file = path.join(dir, name);
+      const version = fileVersion(fs.statSync(file, {bigint: true}));
+      const cached = previous?.get(name);
+      const parsed = cached && cached.version === version ? cached.entry : parseEntry(fs.readFileSync(file, 'utf8'));
+      if (version !== undefined) files.set(name, {version, entry: parsed});
+      const entry = parsed && structuredClone(parsed);
       if (entry) {
         const hold = holds[holdNoticeKey(entry)];
         entries.push(!entry.holdNotified && hold ? {...entry, holdNotified: true, holdReason: hold} : entry);
@@ -184,6 +196,7 @@ export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
       // removed between the listing and the read
     }
   }
+  queueCache = {dir, files};
   const rank = (e: QueueEntry): number => (e.status === 'queued' || e.status === 'accepted' ? 0 : e.status === 'starting' ? 1 : 2);
   return entries.sort((a, b) => rank(a) - rank(b) || (a.status === 'queued' && b.status === 'queued' ? Number(b.priority === 'high') - Number(a.priority === 'high') : 0) || a.order - b.order || a.seq - b.seq);
 }
