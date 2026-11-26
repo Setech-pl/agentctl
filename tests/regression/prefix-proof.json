@@ -781,6 +781,70 @@
       "HOTFIX0263-WATCH: stalled stage exits and the restarted watcher reconciles request and start"
     ]
   },
+  "HOTFIX0264-F1": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F1: admission can wait beyond five seconds for a holder",
+      "HOTFIX0264-F1: a prepared queue start retries the TASK.md commit without replaying setup",
+      "HOTFIX0264-F1: admission can wait beyond five seconds for a holder",
+      "HOTFIX0264-F1: a prepared queue start retries the TASK.md commit without replaying setup"
+    ]
+  },
+  "HOTFIX0264-F2": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F2: integration removal receives the Git timeout without the admission lock",
+      "HOTFIX0264-F2: integration removal receives the Git timeout without the admission lock",
+      "HOTFIX0264-F2: prompt delivery can settle past the admission deadline and still presses Enter",
+      "HOTFIX0264-F2: prompt delivery can settle past the admission deadline and still presses Enter"
+    ]
+  },
+  "HOTFIX0264-F3": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy has its own section",
+      "HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy has its own section"
+    ]
+  },
+  "HOTFIX0264-F4": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F4: a 0.27.x config loads with one warning and ordinary settings still apply",
+      "HOTFIX0264-F4: a 0.27.x config loads with one warning and ordinary settings still apply"
+    ]
+  },
+  "HOTFIX0264-F5": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F5: only the explicitly approved dirty removal uses force and is journaled",
+      "HOTFIX0264-F5: only the explicitly approved dirty removal uses force and is journaled"
+    ]
+  },
+  "HOTFIX0264-F6": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners after 30 seconds",
+      "HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners after 30 seconds"
+    ]
+  },
   "L1": {
     "rev": "v0.19.0",
     "outcome": "IMPORT-ERROR",

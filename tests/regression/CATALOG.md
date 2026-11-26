@@ -10,6 +10,12 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| HOTFIX0264-F6 | Reused PIDs could pin start.lock indefinitely and empty owners took three minutes to clear. | `tests/queue.test.ts` (`^HOTFIX0264-F6:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |
+| HOTFIX0264-F5 | Git refused dirty worktree removal even after the owner authorized the named task. | `tests/fix0227-gc.test.ts` (`^HOTFIX0264-F5:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |
+| HOTFIX0264-F4 | A config with 0.27.x keys prevented 0.26.x from loading during rollback. | `tests/disk0248.test.ts` (`^HOTFIX0264-F4:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |
+| HOTFIX0264-F3 | A personal Trash item could be purged solely because it shared the basename of a closed task path. | `tests/disk0248.test.ts` (`^HOTFIX0264-F3:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |
+| HOTFIX0264-F2 | Integration GC cut slow Git worktree removal at the 30-second admission deadline. | `tests/disk0248.test.ts` (`^HOTFIX0264-F2:`)<br>`tests/p15-send.test.ts` (`^HOTFIX0264-F2:`) | 0.26.2 | fails on v0.26.1 (2 failing of 2) |
+| HOTFIX0264-F1 | Start-lock contention failed callers after five seconds and could fail a queued start after setup. | `tests/queue.test.ts` (`^HOTFIX0264-F1:`) | 0.26.2 | fails on v0.26.1 (2 failing of 2) |
 | HOTFIX0263-START | Hung checkout or setup retained a setup slot and delayed unrelated queued tasks. | `tests/queue.test.ts` (`^HOTFIX0263-START:`) | 0.26.1 | fails on v0.26.0 (2 failing of 2) |
 | HOTFIX0263-LOCK | An old admission lock with no live owner kept starts from proceeding. | `tests/queue.test.ts` (`^HOTFIX0263-LOCK:`) | 0.26.1 | fails on v0.26.0 (1 failing of 1) |
 | HOTFIX0263-WATCH | A stalled watch stayed down or left interrupted starts in the failed queue. | `tests/disk0248.test.ts` (`^HOTFIX0263-WATCH:`) | 0.26.1 | fails on v0.26.0 (1 failing of 1) |

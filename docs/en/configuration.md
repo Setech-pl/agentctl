@@ -280,11 +280,36 @@ The selection covers the full width of the list pane, including the gaps between
 | `git.timeout_s` | `600` | Positive timeout in seconds for the Git checkout stage. |
 | `start_lock_stale_s` | `180` | Reclaim a start lock older than this many seconds when its PID is gone or the owner field is empty. |
 | `setup.timeout_s` | `900` | Total setup budget in seconds for each task. Use the global setup mapping to set it. The existing command list syntax still works. |
-| `gc.delete_mode` | `delete` | Delete eligible cache, stale node_modules and close cleanup directly. `trash` records the resulting OS Trash path and purges the recorded item. Worktree removal is handled by Git without force. |
+| `gc.delete_mode` | `delete` | Delete eligible cache, stale node_modules and close cleanup directly. `trash` records the resulting OS Trash path and purges the recorded item. Git only forces removal for explicitly authorized dirty task IDs. |
 | `gc` | mapping | Integration cleanup settings. |
 | `gc.after_integration` | `propose` | `propose` prepares a request-ID GC plan on local `main`/`master` advances and routes a WALL message to each owning chat. `off` disables proposals. |
 | `mcp.client` | — | Optional stable suffix to clientInfo.name that intentionally shares a cursor between sessions. Tool parameter client overrides it. By default each session consumes independently from its initialization checkpoint; new sessions inherit the client high-water mark. |
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
+
+## Disk management
+
+Disk limits are in GiB. `disk.warn_gb` (50) and `disk.critical_gb` (20) classify available space per volume. `disk.min_free_start_gb` (30) holds local and queued starts below that threshold or when a fresh reading is unavailable. With automatic GC enabled, a measured local start hold also schedules a run and identifies it in the held reason.
+
+The owner enables automatic GC in `config.yaml`. Merge the following into the existing `disk` section. Set `dry_run: false` after reviewing the plan.
+
+~~~yaml
+disk:
+  auto_gc:
+    enabled: true
+    dry_run: true
+    trigger_free_gb: 50
+    target_free_gb: 60
+    older_than: 2d
+    categories: [closed_clean_worktrees, stale_node_modules, own_trash, closed_task_cache]
+    max_per_run_gb: 50
+    cohorts_exclude: []
+~~~
+
+Automatic GC defaults to off. The trigger defaults to `disk.warn_gb`, the target to the highest of the trigger, warning and start thresholds, and the budget to 50 GiB of estimated data per run. Watch checks the internal and configured external volumes independently. It processes categories in order, checks free blocks after each removal, and stops at the target, run budget, or exhaustion. Only verifiable agentctl data is eligible. Pinned, active, dirty, unpushed, linked, protected-branch and `keep_cache` data stays, as do reports and excluded cohorts. Before deleting, watch rechecks ownership, age and filesystem boundaries. Each changed plan or run result goes to the journal and the `agentctl` WALL channel.
+
+Preview Trash with `agentctl gc --purge-trash`, then use `--apply` to confirm. In MCP, call `gc` with `purge_trash: true`, get the preview token (poll by `request_id` when watch prepares the plan), and confirm the same token. Receipts identify the exact items. Legacy candidates have a separate section and require agentctl ownership markers. Actual reclaimed space is recorded from free blocks on each affected filesystem. The owner may authorize named dirty worktrees with `--force-dirty TASK` or MCP `force_dirty: [TASK]`; those overrides are journaled.
+
+MCP GC writes require `gc` in `mcp.allow`. Set `mcp.gc_scope` to `all` (default), `own-cohort` (the configured chat may apply plans only to cohorts it exclusively owns), or `owner` (GC writes through the owner CLI). With `own-cohort`, supply `as: "chat:<name>"` or use a client mapped in `wall.chats`. A confirmed plan is checked again when watch applies it.
 
 ## Example
 

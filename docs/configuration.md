@@ -415,7 +415,7 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 
 `capacity` (including JSON/MCP), MCP `status`, CLI `status`, `doctor`, and the board show disk facts. Unknown readings are `null` / `n/d`. Filesystems holding the global worktree root, known projects' `.agentctl.yaml` roots, recorded worktrees, cache and state are deduplicated by device. `statfs` falls back to `df -kP`. Worktree sizes are cached for five minutes; symlinks are not followed. The watcher checks every five minutes, persists the previous level, and records `disk-warn`, `disk-critical`, `disk-ok` once per transition. These events can be selected in `notify.ntfy.events`.
 
-A critical reading warns before `new` or queue insertion. The terminal asks y/N (`--yes` acknowledges the warning); MCP shows it before confirmation. It does not impose a capacity limit or switch providers.
+The start gate holds starts below `disk.min_free_start_gb` (30 GiB by default). See [disk management](en/configuration.md#disk-management) for automatic GC, Trash purge and MCP scope.
 
 MCP write permissions accept exact tool names and explicit groups: `queue:*`, `cohort`, `manager:*`. Existing `queue` still permits only insertion. All previous names keep their permission scope. Group membership is generated in docs/mcp.md; reads remain available without allow.
 
