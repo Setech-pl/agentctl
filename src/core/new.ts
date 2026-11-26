@@ -1,3 +1,4 @@
+import { claimStartPaths } from './start-paths.ts';
 import { prepareRemoteTask, installRemoteHooks } from './host-task.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { refreshExpiredStartPlan } from './usage-limits.ts';
@@ -12,8 +13,7 @@ import { assertCandidateCheckout, assertReviewBase } from './review-freshness.ts
 import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
-import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
-import { withWorktreeLocks } from './worktree-locks.ts';
+import { commitStart, withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
 import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -149,14 +149,21 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
   ctx.info(`${spec.task}: setup done (${todo.map(({ repo }) => path.basename(repo.path)).join(', ')}), output in ${logFile}`);
 }
 
-/** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
-export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
-  const reused = opts.reuse ? requested.filter(spec => !spec.host).flatMap(spec => spec.repos.map(repo => repo.worktree)) : [];
-  return withWorktreeLocks(ctx, reused, () => newTasksLocked(ctx, requested, opts));
+function localStartPaths(specs: ResolvedSpec[]): string[] {
+  return specs.filter(spec => !spec.host).flatMap(spec => [
+    spec.report, ...spec.repos.map(repo => repo.worktree), ...spec.links.map(link => link.to),
+  ]);
 }
 
-async function newTasksLocked(ctx: Context, requested: ResolvedSpec[], opts: NewOptions): Promise<NewResult[]> {
-  if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
+/** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
+export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
+  if (ctx.runner.dryRun) return startTasks(ctx, requested, opts);
+  if (opts.noAgent) {
+    const specs = await planBatch(ctx, requested, opts);
+    const release = await withStartLock(ctx, () => claimStartPaths(ctx, 'start', localStartPaths(specs)));
+    try { return await startTasks(ctx, specs, opts, true); }
+    finally { release(); }
+  }
   // A person answering a capacity question must never own the global lock.
   const interactive = Boolean(ctx.confirm && (!opts.noSwitch || opts.overflow));
   const planned = interactive ? await planBatch(ctx, requested, opts) : requested;
@@ -172,10 +179,12 @@ async function newTasksLocked(ctx: Context, requested: ResolvedSpec[], opts: New
       if (held?.startsWith('volume missing: ')) throw new WorktreeVolumeError(held.slice(16), spec.task, true);
       if (held) throw new AgentctlError(held, 'Free disk space before starting setup.');
     }
-    return { specs, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) };
+    const release = await claimStartPaths(ctx, 'start', localStartPaths(specs));
+    try { return { specs, release, ids: opts.queueReservation ? [] : await reserveStarts(ctx, specs) }; }
+    catch (error) { release(); throw error; }
   }, requested.map(spec => spec.task).join(', '));
   try { return await startTasks(ctx, admission.specs, opts, true); }
-  finally { await releaseStarts(ctx, admission.ids); }
+  finally { admission.release(); await releaseStarts(ctx, admission.ids); }
 }
 
 async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions, admitted = false): Promise<NewResult[]> {
@@ -302,12 +311,12 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     // The cohort is made by its first task; a name that exists keeps the spelling it had.
     if (spec.cohort) record.cohort = (await touchCohort(ctx, spec.cohort)).name;
     // The reservation spans checkout/setup; its first TASK snapshot commits under the same global admission lock.
-    await withStartLock(ctx, async () => {
+    await commitStart(ctx, async () => {
       await runner.mkdir(taskDir(config, spec.window));
       await runner.writeFile(taskFile(config, spec.window), renderTaskMd(record, spec.prompt));
       if (spec.host) await ctx.hosts.trackHost(spec.host);
       await queuePrompt(ctx, record, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext), 'launching');
-    }, spec.task);
+    }, spec.task, opts.signal);
     // The agent's own folder: only the report goes there (agentctl's state is in state_dir).
     await runner.mkdir(path.dirname(spec.report));
 

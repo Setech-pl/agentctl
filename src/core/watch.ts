@@ -420,7 +420,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('cohorts', async () => { if (processed) await cohortTick(ctx, notifier, processed, startLog, (await inventory()).current); }, 'task delivery and reports');
   stage('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
   stage('machine load', () => recordMachineLoad(ctx));
-  stage('disk alerts', async () => diskTick(ctx, notifier, startLog, (await inventory()).all, disk));
+  stage('disk alerts', async signal => diskTick(ctx, notifier, startLog, (await inventory()).all, disk, signal));
   stage('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
   stage('usage', () => usageTick(ctx, notifier, startLog));
   stage('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });

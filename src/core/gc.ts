@@ -1,5 +1,8 @@
-import { GcSpace } from './gc-space.ts';
-import { moveToTrash, planTrashPurge, purgeTrashItem, type TrashItem } from './trash.ts';
+import { claimGcPath, pathsOverlap } from './start-paths.ts';
+import { pendingStarts } from './start-lock.ts';
+import { recordJournal } from './journal.ts';
+import { GcSpace, type GcVolumeFreed } from './gc-space.ts';
+import { moveToTrash, planTrashPurge, purgeTrashItem, trashOwners, type TrashItem } from './trash.ts';
 import { planRemoteGc, applyRemoteGc } from './host-gc.ts';
 import { cacheProtection } from './gc-cache.ts';
 import { restoreDiskMeasurements } from './disk.ts';
@@ -16,10 +19,9 @@ import { formatBytes } from './pull.ts';
 import { archiveDir, listArchivedRecords, listTaskRecords, snapshotRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, cohortKey, errorMessage } from './util.ts';
-import { applyIntegrationGc } from './integration-gc.ts';
+import { applyIntegrationGc, protectLinkedWorktrees } from './integration-gc.ts';
 import type { IntegrationGcScope } from './integration-gc.ts';
 import { readQueue } from './queue.ts';
-import { pendingStarts, withStartLock } from './start-lock.ts';
 import { readLaunchExit } from './start-failure.ts';
 import { readJournal } from './journal.ts';
 import { inspectReport } from './report-state.ts';
@@ -31,7 +33,7 @@ import { readTaskRecordById } from './taskstore.ts';
  * of agentctl names; the history, the reports (*.md) and anything it does not recognise stay. Branches go only with `git branch -d`.
  */
 
-import { staleNodeModules, removeStaleNodeModules } from './node-modules-store.ts';
+import { staleNodeModules, removeStaleNodeModules, storeOwnsPath } from './node-modules-store.ts';
 
 export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch' | 'node-modules' | 'trash';
 
@@ -72,6 +74,7 @@ export interface GcSkip {
 
 export interface GcPlan {
   integration?: IntegrationGcScope;
+  automatic?: { device: string };
   /** An MCP plan may estimate sizes; safety checks are always fresh. */
   cachedSizes?: boolean;
   deleteMode?: 'delete' | 'trash';
@@ -91,6 +94,7 @@ export interface GcPlan {
 }
 
 export interface GcOptions {
+  localKinds?: ReadonlySet<GcKind>;
   purgeTrash?: boolean;
   /** MCP estimates never wait for recursive size walks. */
   cachedSizes?: boolean;
@@ -168,10 +172,11 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
+  const selected = (kind: GcKind) => !opts.localKinds || opts.localKinds.has(kind);
   if (opts.purgeTrash) {
     if (opts.cohort || opts.branches || opts.olderThan || opts.includeCache || opts.keepCache?.length || opts.keep?.length || opts.forceDirty || opts.forceLinks) throw new AgentctlError('purge-trash selects only Trash items; remove other GC selection options');
     const items = planTrashPurge(ctx).map(trash => ({
-      kind: 'trash' as const, task: '-', target: trash.target, bytes: 0, trash, detail: `original: ${trash.original}`,
+      kind: 'trash' as const, task: '-', target: trash.target, bytes: 0, trash, detail: `original: ${trash.original}${trash.legacyMarker ? `; legacy marker: ${trash.legacyMarker}` : ''}`,
     }));
     return { items, skipped: [], freeBytes: 0, olderThanMs: 0, unknownCacheDirs: 0 };
   }
@@ -186,8 +191,8 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const archived = new Set(archivedRecords.map(r => r.window));
   const currentNames = new Set(currentRecords.map(r => r.window));
   const all: TaskRecord[] = [...currentRecords, ...archivedRecords.filter(r => !currentNames.has(r.window))];
-  const [local, remoteWindows] = await Promise.all([ctx.localTmux.listWindows(), ctx.hosts.windows(false, inventory.current)]);
-  const live = new Set([...local, ...remoteWindows.map(window => window.plain)]);
+  const [local, remoteWindows] = await Promise.all([ctx.localTmux.listWindows(), opts.localKinds ? [] : ctx.hosts.windows(false, inventory.current)]);
+  const live = new Set([...local, ...remoteWindows.map(window => window.plain), ...pendingStarts(config).filter(start => !start.host).map(start => start.window)]);
   const dead = deadWorktreeScope(ctx, live);
   const finished = (r: TaskRecord): boolean => (r.closed === true || r.cancelled === true || archived.has(r.window)) && !live.has(r.window);
   const items: GcItem[] = [];
@@ -197,9 +202,9 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const others = all.filter((r) => !finished(r) || kept(r));
   for (const r of all.filter(r => finished(r) && kept(r) && (cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(cohort)))) {
     const reason = r.pin ? 'pinned task' : 'keep requested for task';
-    for (const repo of r.repos) if (!same(repo.path, repo.worktree) && fs.existsSync(repo.worktree)) skipped.push({task: r.task, kind: 'worktree', target: repo.worktree, bytes: await size(repo.worktree), reason});
+    for (const repo of r.repos) if (selected('worktree') && !same(repo.path, repo.worktree) && fs.existsSync(repo.worktree)) skipped.push({task: r.task, kind: 'worktree', target: repo.worktree, bytes: await size(repo.worktree), reason});
     const dir = r.report ? path.dirname(path.resolve(r.report)) : path.join(path.resolve(config.cache), r.window);
-    if (dir.startsWith(`${path.resolve(config.cache)}${path.sep}`) && fs.existsSync(dir)) skipped.push({task: r.task, kind: 'cache', target: dir, bytes: await size(dir), reason});
+    if (selected('cache') && dir.startsWith(`${path.resolve(config.cache)}${path.sep}`) && fs.existsSync(dir)) skipped.push({task: r.task, kind: 'cache', target: dir, bytes: await size(dir), reason});
   }
   const references = knownLinkReferences(config, inventory);
   const removing = new Set<string>();
@@ -211,8 +216,8 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   };
 
   // 1. worktrees
-  const deadRecords = currentRecords.filter(r => !kept(r) && (cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(cohort)) && dead(r));
-  for (const record of [...mine, ...deadRecords]) {
+  const deadRecords = opts.localKinds ? [] : currentRecords.filter(r => !kept(r) && (cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(cohort)) && dead(r));
+  for (const record of selected('worktree') ? [...mine, ...deadRecords] : []) {
     const deadTask = deadRecords.includes(record);
     if (record.reviewMode) continue; // Borrowed worktrees are owned by the author record.
     for (const repo of record.repos) {
@@ -261,7 +266,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   // worktrees nobody of agentctl owns: only said, never removed
   const repos = [...new Set(all.flatMap((r) => r.repos.map((x) => path.resolve(x.path))))];
   const known = new Set(all.flatMap((r) => r.repos.map((x) => path.resolve(x.worktree))));
-  for (const repo of repos) {
+  for (const repo of selected('worktree') ? repos : []) {
     for (const wt of (await listingOf(repo)) ?? []) {
       const p = path.resolve(wt.path);
       if (p === repo || known.has(p)) continue;
@@ -272,7 +277,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   // 2. what lies next to the reports (the *.md stay)
   const cacheRoot = path.resolve(config.cache);
   const seenCache = new Set<string>();
-  for (const record of mine) {
+  for (const record of selected('cache') ? mine : []) {
     const dir = record.report ? path.dirname(path.resolve(record.report)) : path.join(cacheRoot, record.window);
     if (dir === cacheRoot || !dir.startsWith(`${cacheRoot}${path.sep}`) || seenCache.has(dir)) continue;
     seenCache.add(dir);
@@ -316,7 +321,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
 
   // 3. state of closed tasks -> archive
-  for (const record of mine) {
+  for (const record of selected('archive') ? mine : []) {
     if (!record.closed || archived.has(record.window)) continue;
     const dir = taskDir(config, record.window);
     if (fs.existsSync(path.join(archiveDir(config), record.window))) {
@@ -375,18 +380,110 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     if (record?.cohort) item.cohort = record.cohort;
     if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await size(item.target);
   }
-  const remote = await planRemoteGc(ctx, opts, olderThanMs, inventory);
-  items.push(...remote.items); skipped.push(...remote.skipped);
-  if (cohort === undefined) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}` })));
+  if (!opts.localKinds) {
+    const remote = await planRemoteGc(ctx, opts, olderThanMs, inventory);
+    items.push(...remote.items); skipped.push(...remote.skipped);
+  }
+  if (cohort === undefined && selected('node-modules')) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}` })));
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
   return { deleteMode: config.gc.deleteMode, keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+}
+
+function currentLocalRecords(ctx: Context): TaskRecord[] {
+  const current = listTaskRecords(ctx.config);
+  const windows = new Set(current.map(record => record.window));
+  return [...current, ...listArchivedRecords(ctx.config).filter(record => !windows.has(record.window))].filter(record => !record.host);
+}
+
+async function inspectAutomaticTree(target: string, device: string): Promise<{ bytes: number; newest: number }> {
+  const stat = await fs.promises.lstat(target);
+  if (String(stat.dev) !== device) throw new Error('different filesystem or nested mount; kept');
+  let bytes = Math.max(stat.size, stat.blocks * 512), newest = stat.mtimeMs;
+  if (stat.isDirectory()) {
+    for await (const entry of await fs.promises.opendir(target)) {
+      const child = await inspectAutomaticTree(path.join(target, entry.name), device);
+      bytes += child.bytes;
+      newest = Math.max(newest, child.newest);
+    }
+  }
+  return { bytes, newest };
+}
+
+/** Extra safeguards for unattended deletion. The same facts are checked again with the path claimed. */
+export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number): Promise<number> {
+  const { config, runner } = ctx;
+  const stat = fs.lstatSync(item.target);
+  if (stat.isSymbolicLink() || String(stat.dev) !== device || String(fs.statSync(path.dirname(item.target)).dev) !== device ||
+      (process.getuid && stat.uid !== process.getuid())) throw new Error('unsafe owner, symlink or filesystem boundary; kept');
+  const real = fs.realpathSync(item.target);
+  if (real !== path.join(fs.realpathSync(path.dirname(item.target)), path.basename(item.target))) throw new Error('path resolved outside its directory');
+  const records = currentLocalRecords(ctx);
+  const excluded = new Set(config.disk.autoGc.cohortsExclude.map(cohortKey));
+  const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(config).filter(start => !start.host).map(start => start.window)]);
+  const source = item.trash?.original ?? item.target;
+  const isStore = (item.kind === 'node-modules' || item.kind === 'trash') && storeOwnsPath(config, source);
+  const owners = item.kind === 'trash' ? trashOwners(ctx, source, records) : item.kind === 'worktree'
+    ? records.filter(record => record.repos.some(repo => pathsOverlap(location(repo.worktree), real)))
+    : item.kind === 'cache' ? records.filter(record => record.report && pathsOverlap(location(path.dirname(record.report)), real)) : [];
+  if (!owners.length && !isStore) throw new Error('no verifiable agentctl owner');
+  for (const owner of owners) {
+    if (owner.pin || owner.keepCache) throw new Error('pinned / keep_cache task');
+    if (owner.cohort && excluded.has(cohortKey(owner.cohort))) throw new Error('cohort excluded by owner');
+    if ((!owner.closed && !owner.cancelled) || live.has(owner.window)) throw new Error('active task');
+    const finishedAt = Date.parse(owner.closedAt ?? owner.cancelledAt ?? '');
+    if (Number.isFinite(finishedAt) && runner.now() - finishedAt < olderThanMs) throw new Error('task closed too recently');
+  }
+  if (isStore && records.some(record => record.cohort && excluded.has(cohortKey(record.cohort)) &&
+      record.repos.some(repo => storeOwnsPath(config, source, repo.path)))) throw new Error('cohort excluded by owner');
+  if (knownLinkReferences(config).some(ref => ref.target === '*' || pathsOverlap(location(ref.target.replace(/\/\*$/, '')), location(source)))) throw new Error('links target in use');
+  if (item.kind === 'worktree') {
+    const registered = item.repo && await listWorktrees(ctx, item.repo);
+    const row = registered && registered.find(worktree => same(worktree.path, item.target));
+    if (!row || same(registered[0]!.path, item.target) || row.branch && PROTECTED.has(row.branch)) throw new Error('not a registered task worktree or protected branch');
+    const owner = owners.find(record => record.task === item.task);
+    if (!owner || owner.reviewMode || !owner.repos.some(repo => !same(repo.path, repo.worktree) && same(repo.path, item.repo!) && same(repo.worktree, item.target))) throw new Error('worktree ownership changed');
+  }
+  if (item.kind === 'cache') {
+    const root = fs.realpathSync(config.cache);
+    const under = path.relative(path.resolve(config.cache), path.resolve(item.target));
+    if (real !== path.join(root, under) || !real.startsWith(root + path.sep) || !owners.some(owner => owner.task === item.task)) throw new Error('cache path is outside the owned cache');
+    for (const owner of owners) {
+      const protection = cacheProtection(owner, item.target);
+      if (protection) throw new Error(protection);
+    }
+  }
+  if (item.kind === 'trash') {
+    if (!item.trash) throw new Error('missing Trash identity');
+    for (const owner of owners) {
+      if (owner.report && pathsOverlap(path.resolve(owner.report), source)) throw new Error('contains or is a task report');
+      const worktree = owner.repos.find(repo => path.resolve(repo.worktree) === source);
+      if (worktree) {
+        const head = await git(ctx, ['-C', item.target, 'rev-parse', '--abbrev-ref', 'HEAD']);
+        if (head.code !== 0 || PROTECTED.has(head.out)) throw new Error('cannot verify worktree branch or protected branch');
+        const risk = await worktreeRisk(ctx, item.target, worktree.base);
+        if (risk.dirtyFiles || risk.unpushedCommits) throw new Error('dirty/unpushed worktree; owner decision');
+      } else if (owner.report && pathsOverlap(path.dirname(path.resolve(owner.report)), source)) {
+        const protection = cacheProtection(owner, source);
+        if (protection) throw new Error(protection);
+      }
+    }
+  }
+  const roots = [...new Set(records.flatMap(record => record.repos.flatMap(repo => [repo.path, repo.worktree])))];
+  const knownRoots = new Set(roots.filter(root => fs.existsSync(root)).map(location));
+  if (!(await protectLinkedWorktrees(knownRoots, [item])).length) throw new Error('links target in use');
+  const tree = await inspectAutomaticTree(item.target, device);
+  if (item.kind !== 'node-modules' && runner.now() - tree.newest < olderThanMs) throw new Error('contents changed too recently');
+  const current = fs.lstatSync(item.target);
+  if (current.ino !== stat.ino || current.dev !== stat.dev || current.birthtimeMs !== stat.birthtimeMs) throw new Error('path changed during verification');
+  return tree.bytes;
 }
 
 export interface GcResult {
   done: GcItem[];
   failed: { item: GcItem; reason: string }[];
   freedBytes: number;
+  freedByVolume?: GcVolumeFreed[];
 }
 
 export function gcResultLine(result: GcResult, cohort?: string): string {
@@ -403,13 +500,24 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
   if (plan.deleteMode && plan.deleteMode !== config.gc.deleteMode) throw new AgentctlError('GC delete mode changed; preview again');
   const staged: { item: GcItem; trash: TrashItem }[] = [];
   const remove = async (item: GcItem): Promise<void> => {
-    if (config.gc.deleteMode === 'trash') staged.push({ item, trash: await moveToTrash(ctx, item.target) });
+    if (config.gc.deleteMode === 'trash') {
+      const trash = await moveToTrash(ctx, item.target);
+      if (plan.automatic) await purgeTrashItem(ctx, trash);
+      else staged.push({ item, trash });
+    }
     else if (!runner.dryRun) await runner.remove(item.target);
   };
   const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch', 'node-modules', 'trash'];
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
+      let release: (() => void) | undefined;
       try {
+        if (plan.automatic) {
+          if (!config.disk.autoGc.enabled || config.disk.autoGc.dryRun || !ctx.config.disk.autoGc.enabled || ctx.config.disk.autoGc.dryRun) throw new Error('automatic GC disabled or dry run');
+          release = await claimGcPath(ctx, item.target, async () => {});
+          const bytes = await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs);
+          if (bytes > item.bytes) throw new Error('size grew after planning; kept within max_per_run_gb');
+        }
         if (kind === 'node-modules') {
           await removeStaleNodeModules(ctx, item.target, plan.olderThanMs, async () => {
             if (!runner.dryRun) await space.before(item.target);
@@ -437,29 +545,33 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           result.done.push(done); result.freedBytes += done.bytes; continue;
         }
         if (kind === 'worktree') {
-          const remove = async () => {
-            if (item.dead) {
-              const record = readTaskRecordById(config, item.task);
-              if (!record || !record.repos.some(r => same(r.worktree, item.target)) || !deadWorktreeScope(ctx, new Set(await ctx.tmux.listWindows()))(record)) throw new Error('dead task changed since preview; kept');
-              if (record.report && fs.existsSync(record.report) && location(record.report).startsWith(`${location(item.target)}${path.sep}`)) throw new Error('dead worktree contains a report; kept');
-              const head = await git(ctx, ['-C', item.target, 'rev-parse', '--abbrev-ref', 'HEAD']);
-              if (head.code !== 0 || PROTECTED.has(head.out)) throw new Error('dead worktree checkout changed or is protected; kept');
-            }
-            const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
-            if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
-            const users = linkUsers(item.target, knownLinkReferences(config));
-            if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
-            const risk = await worktreeRisk(ctx, item.target, item.base, item.dead);
-            const forced = !item.dead && permitsDirty(plan.forceDirty, item.task);
-            if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
-            if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
-            assertUnpinned();
-            if (!runner.dryRun) await space.before(item.target);
-            const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
-            if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
-          };
-          if (item.dead) await withStartLock(ctx, remove);
-          else await remove();
+          release ??= await claimGcPath(ctx, item.target, async () => {
+            const starts = pendingStarts(config);
+            if (starts.some(start => start.task === item.task)) throw new Error('worktree is being resumed; kept');
+          });
+          if (item.dead) {
+            const record = readTaskRecordById(config, item.task);
+            if (!record || !record.repos.some(r => same(r.worktree, item.target)) || !deadWorktreeScope(ctx, new Set(await ctx.tmux.listWindows()))(record)) throw new Error('dead task changed since preview; kept');
+            if (record.report && fs.existsSync(record.report) && location(record.report).startsWith(`${location(item.target)}${path.sep}`)) throw new Error('dead worktree contains a report; kept');
+            const head = await git(ctx, ['-C', item.target, 'rev-parse', '--abbrev-ref', 'HEAD']);
+            if (head.code !== 0 || PROTECTED.has(head.out)) throw new Error('dead worktree checkout changed or is protected; kept');
+          }
+          const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
+          if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
+          const users = linkUsers(item.target, knownLinkReferences(config));
+          if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
+          const risk = await worktreeRisk(ctx, item.target, item.base, item.dead);
+          const forced = !item.dead && permitsDirty(plan.forceDirty, item.task);
+          if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
+          if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
+          if (!runner.dryRun) await space.before(item.target);
+          const forceRemove = forced && risk.dirtyFiles > 0;
+          if (forceRemove || forced && risk.unpushedCommits > 0) await recordJournal(ctx, {
+            kind: 'gc-force-dirty', task: item.task, text: `Owner-authorized worktree removal: ${item.target} (${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits)`,
+          });
+          assertUnpinned();
+          const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forceRemove ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
+          if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
           if (!plan.includeCache) throw new Error('cache deletion requires explicit include_cache: true');
           const record = [...listTaskRecords(config), ...listArchivedRecords(config)].find(r => r.task === item.task);
@@ -467,8 +579,8 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           const protection = cacheProtection(record, item.target);
           if (protection || plan.keepCache?.some(t => t.toLowerCase() === item.task.toLowerCase())) throw new Error(protection ?? 'keep_cache requested for task');
           if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
-          assertUnpinned();
           if (!runner.dryRun) await space.before(item.target);
+          assertUnpinned();
           await remove(item);
         } else if (kind === 'archive') {
           assertUnpinned();
@@ -482,7 +594,7 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
         if (!staged.some(staging => staging.item === item)) result.done.push(item);
       } catch (e) {
         result.failed.push({ item, reason: errorMessage(e) });
-      }
+      } finally { release?.(); }
     }
   }
   for (const { item, trash } of staged) {
@@ -492,7 +604,8 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
       result.done.push(item);
     } catch (e) { result.failed.push({ item, reason: errorMessage(e) }); }
   }
-  result.freedBytes += await space.freed();
+  result.freedByVolume = await space.freedByVolume();
+  result.freedBytes += result.freedByVolume.reduce((bytes, volume) => bytes + (volume.freedBytes ?? 0), 0);
   return result;
 }
 
@@ -522,7 +635,10 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const skippedGroup = (name: string, test: (s: GcSkip) => boolean) => { const entries = plan.skipped.filter(test); return { name, count: entries.length, bytes: entries.reduce((n, s) => n + (s.bytes ?? 0), 0), ...page(entries) }; };
   const dirty = (s: GcSkip) => Boolean(s.dirtyFiles || s.unpushedCommits) && /uncommitted changes/.test(s.reason);
   const pinned = (s: GcSkip) => /^(pinned|keep requested)/.test(s.reason);
-  const sections = { remove: { name: 'Would remove', count: plan.items.length, bytes: plan.freeBytes, ...page(plan.items) }, uncommitted: skippedGroup('Skipped (uncommitted changes)', dirty), pinned: skippedGroup('Skipped (pinned)', pinned), other: skippedGroup('Skipped (other)', s => !dirty(s) && !pinned(s)) };
+  const legacy = plan.items.filter(item => item.trash?.legacyMarker);
+  const remove = plan.items.filter(item => !item.trash?.legacyMarker);
+  const sections = { remove: { name: 'Would remove', count: remove.length, bytes: remove.reduce((n, item) => n + item.bytes, 0), ...page(remove) },
+    ...(legacy.length ? { legacyTrash: { name: 'Legacy Trash with ownership markers', count: legacy.length, bytes: legacy.reduce((n, item) => n + item.bytes, 0), ...page(legacy) } } : {}), uncommitted: skippedGroup('Skipped (uncommitted changes)', dirty), pinned: skippedGroup('Skipped (pinned)', pinned), other: skippedGroup('Skipped (other)', s => !dirty(s) && !pinned(s)) };
   return { hosts, sections, autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
     cache: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'cache').map(i => ({ ...i, action: 'reason' in i ? 'keep' : 'delete' }))),
     worktrees: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'worktree').map(i => ({ task: i.task, repo: i.repo, target: i.target, dirtyFiles: i.dirtyFiles ?? null, unpushedCommits: i.unpushedCommits ?? null, detail: 'reason' in i ? i.reason : i.detail }))),
@@ -568,6 +684,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   }
   for (const f of applied.failed) lines.push(`  failed: ${f.item.target}: ${f.reason}`);
   lines.push(`Freed ${formatBytes(applied.freedBytes)} (removed ${applied.done.length}, failed ${applied.failed.length}; skipped entries were left in place).`);
+  for (const volume of applied.freedByVolume ?? []) lines.push(`  ${volume.path}: ${volume.freedBytes === null ? 'unavailable' : formatBytes(volume.freedBytes)}`);
   if (plan.skipped.length) {
     lines.push(`Skipped (left in place): ${plan.skipped.length}, ${view.skipped.bytes} bytes`);
     for (const reason of view.skipped.reasons.items) lines.push(`  skipped: ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);

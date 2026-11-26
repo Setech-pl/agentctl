@@ -1,3 +1,4 @@
+import { kickAutoGc } from './auto-gc.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { probeHosts } from './host-health.ts';
@@ -243,7 +244,7 @@ export async function refreshDiskMeasurements(ctx: Context, records?: TaskRecord
   } finally { refreshing.delete(key); }
 }
 const sampled = new Map<string, number>();
-export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>, records?: TaskRecord[], collect = () => collectDisk(ctx, undefined, {records})): Promise<void> {
+export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>, records?: TaskRecord[], collect = () => collectDisk(ctx, undefined, {records}), signal?: AbortSignal): Promise<void> {
   const background = (label: string, work: Promise<void>) => {
     void work.catch(error => log?.(`${label}: ${error instanceof Error ? error.message : String(error)}`)).catch(() => undefined);
   };
@@ -254,6 +255,10 @@ export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: st
   sampled.set(file, ctx.runner.now());
   await withFileLock(`${file}.lock`, async () => {
     const report = await collect();
+    kickAutoGc(ctx, report.volumes.flatMap(volume =>
+      !volume.host && volume.device && volume.samplePath && volume.availableBytes !== null
+        ? [{ device: volume.device, path: volume.mount ?? volume.samplePath }] : []),
+    { ...(log ? { log } : {}), ...(signal ? { signal } : {}) });
     let previous: Record<string, DiskLevel> = {};
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
     const next = { ...previous };
@@ -356,7 +361,11 @@ async function freshVolumeHold(ctx: Context, volumes: StartVolume[]): Promise<st
     const bytes = samples.get(dev);
     if (bytes == null) return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
     const gb = bytes / 1024 ** 3;
-    if (gb < floor) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${floor} GB (${label})`;
+    if (gb >= floor) continue;
+    const held = `wstrzymane: dysk ${Math.floor(gb)} GB < ${floor} GB (${label})`;
+    if (!ctx.config.disk.autoGc.enabled || ctx.runner.dryRun) return held;
+    kickAutoGc(ctx, [{path: inferredWorktreeMount(target) ?? ancestor, device: String(dev)}], {held: true});
+    return held + '; zlecono auto_gc';
   }
   return undefined;
 }

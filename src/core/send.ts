@@ -5,7 +5,7 @@ import { liveWindows } from './plan.ts';
 import { checkWindowLimit } from './checks.ts';
 import fs from 'node:fs';
 import type { Context } from './context.ts';
-import { enqueuePrompt, drainPromptQueue, readPromptQueue } from './prompt-queue.ts';
+import { enqueuePrompt, drainPromptQueue, readPromptQueue, withPromptQueueLock } from './prompt-queue.ts';
 import { deliveryNote, submitDraft } from './prompt-delivery.ts';
 import type { SubmitDraftResult } from './prompt-delivery.ts';
 import { classifyScreen } from './state.ts';
@@ -24,11 +24,6 @@ export interface SendItem {
 
 /** Paste a follow-up prompt into existing windows and log it in TASK.md. */
 export async function sendPrompts(ctx: Context, items: SendItem[]): Promise<SendResult[]> {
-  if (ctx.runner.dryRun) return sendPromptsUnlocked(ctx, items);
-  return withStartLock(ctx, () => sendPromptsUnlocked(ctx, items));
-}
-
-async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<SendResult[]> {
   const { runner, tmux, config } = ctx;
   if (!runner.dryRun) {
     const tool = items.some(i => !readTaskRecord(config, i.window)?.host) ? await runner.exec('tmux', ['-V'], { readOnly: true }) : { code: 0 };
@@ -51,17 +46,24 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<Sen
     let outcome: SendResult['outcome'];
     let messageId: string | undefined;
     if (record && record.agent !== 'unknown' && !runner.dryRun) {
-      const live = await liveWindows(ctx);
-      if (live.some(w => w.window === item.window && w.counted === false)) {
-        const full = checkWindowLimit(record.agent, config.limits[record.agent], live, config.session) ?? checkHostLimit(config, { ...record, agent: record.agent }, live) ?? chatQuotaWait(config, { ...record, agent: record.agent }, live);
-        if (full) {
-          warning = `${full} report-ready follow-up not sent; close a working window or raise the limit first.`;
-          results.push({ task: item.task, message: warning, warning }); ctx.info(warning); continue;
-        }
+      const { agent } = record;
+      const admission = await withPromptQueueLock(ctx, item.window, async () => {
+        const screen = agent === 'codex' ? await ctx.tmux.capture(item.window, undefined, undefined, record.windowId, true) : undefined;
+        const waitForTurnEnd = agent === 'codex' && (screen?.code !== 0 || ['working', 'background'].includes(classifyScreen(screen.stdout, config.agents.codex)) || readPromptQueue(ctx, item.window).length > 0 || Boolean(record.pendingPrompt));
+        return withStartLock(ctx, async () => {
+          const live = await liveWindows(ctx);
+          if (live.some(w => w.window === item.window && w.counted === false)) {
+            const full = checkWindowLimit(agent, config.limits[agent], live, config.session) ?? checkHostLimit(config, { ...record, agent }, live) ?? chatQuotaWait(config, { ...record, agent }, live);
+            if (full) return { full };
+          }
+          return { queued: await enqueuePrompt(ctx, item.window, item.prompt, { waitForTurnEnd }) };
+        });
+      });
+      if (!admission.queued) {
+        warning = `${admission.full} report-ready follow-up not sent; close a working window or raise the limit first.`;
+        results.push({ task: item.task, message: warning, warning }); ctx.info(warning); continue;
       }
-      const screen = record.agent === 'codex' ? await ctx.tmux.capture(item.window, undefined, undefined, record.windowId, true) : undefined;
-      const waitForTurnEnd = record.agent === 'codex' && (screen?.code !== 0 || ['working', 'background'].includes(classifyScreen(screen.stdout, config.agents.codex)) || readPromptQueue(ctx, item.window).length > 0 || Boolean(record.pendingPrompt));
-      const queued = await enqueuePrompt(ctx, item.window, item.prompt, { waitForTurnEnd });
+      const queued = admission.queued;
       await drainPromptQueue(ctx, item.window);
       const fresh = readTaskRecord(config, item.window);
       const waiting = readPromptQueue(ctx, item.window);
@@ -82,9 +84,13 @@ async function sendPromptsUnlocked(ctx: Context, items: SendItem[]): Promise<Sen
         else if (note) message = note;
       }
     } else {
-      await tmux.submitPrompt(item.window, item.prompt);
-      const file = taskFile(config, item.window);
-      if (fs.existsSync(file)) await runner.appendFile(file, renderFollowUp(item.prompt, new Date(runner.now()).toISOString()));
+      const submit = async () => {
+        await tmux.submitPrompt(item.window, item.prompt);
+        const file = taskFile(config, item.window);
+        if (fs.existsSync(file)) await runner.appendFile(file, renderFollowUp(item.prompt, new Date(runner.now()).toISOString()));
+      };
+      if (runner.dryRun) await submit();
+      else await withPromptQueueLock(ctx, item.window, submit);
     }
     results.push({ task: item.task, message, ...(warning ? { warning } : {}), ...(outcome ? { outcome, message_id: messageId } : {}) });
     ctx.info(`${item.task}: ${message}`);
@@ -116,8 +122,7 @@ export interface DraftResult { task: string; message: string; outcome: SubmitDra
 export async function submitDrafts(ctx: Context, items: { task: string; window: string }[], options: { token?: string } = {}): Promise<DraftResult[]> {
   const results: DraftResult[] = [];
   for (const item of items) {
-    // The preview (no token) only reads the screen: it takes no start.lock, so it answers while a watcher delivers or starts (P93b).
-    const done = ctx.runner.dryRun || !options.token ? await submitDraft(ctx, item.window, options) : await withStartLock(ctx, () => submitDraft(ctx, item.window, options));
+    const done = await submitDraft(ctx, item.window, options);
     if (done.outcome !== 'refused') ctx.info(`${item.task}: ${done.message}`);
     results.push({ task: item.task, message: done.message, outcome: done.outcome, keySent: done.keySent === true, deliveryId: done.deliveryId, field: done.field, screenState: done.screenState, token: done.token, ...(done.outcome === 'submitted' || done.outcome === 'ready' ? {} : { warning: done.message }), ...(done.outcome === 'refused' ? { refused: true } : {}) });
   }

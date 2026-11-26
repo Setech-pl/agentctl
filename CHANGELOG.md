@@ -76,6 +76,15 @@ Field fixes for launch recovery and operator reads / Poprawki wznowień i widok�
 ## [0.27.0] - 2026-11-22
 
 Owner-controlled limits and proportional chat quotas / Limity właściciela i proporcjonalne kwoty czatów. [Release notes (EN)](docs/release-notes/0.27.0.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.0.pl.md).
+
+## [0.26.2] - 2026-11-26
+
+- Retry the prepared start commit under contention, recover expired start locks, and keep prompt delivery and long Git removal outside admission. / Ponawiaj zapis przygotowanego startu, odzyskuj wygasłe blokady i wykonuj dostarczenie promptu oraz długie usuwanie Git poza blokadą.
+- Require ownership evidence for legacy Trash, journal named dirty-worktree overrides, and accept known 0.27.x config keys on rollback. / Wymagaj dowodu własności starszych pozycji kosza, zapisuj zgodę na usunięcie zmienionych worktree i akceptuj znane klucze 0.27.x po powrocie do tej wersji.
+- Add opt-in automatic disk reclamation, per-volume measurements for MCP Trash purge and owner-defined MCP GC scope. / Dodaj włączane przez właściciela automatyczne GC, pomiary odzysku z kosza według woluminu oraz zakres GC dla MCP.
+
+[Release notes (EN)](docs/release-notes/0.26.2.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.26.2.pl.md).
+
 ## [0.26.1] - 2026-11-25
 
 - HOTFIX0263-START/LOCK: Bound checkout and setup, reclaim stale start locks and release setup slots. / Limity czasu checkoutu i setupu, odzyskiwanie nieaktywnych blokad startu i zwalnianie miejsc setupu.

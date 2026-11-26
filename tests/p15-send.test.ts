@@ -385,3 +385,23 @@ describe('P16: Codex', () => {
     assert.match(f.record().promptError!, /the pasted prompt is still in the input after Enter and two retries/);
   });
 });
+
+it('HOTFIX0264-F2: prompt delivery can settle past the admission deadline and still presses Enter', async t => {
+  const { commandStageRemaining } = await import('../src/core/command-stage.ts');
+  let state: 'busy' | 'pasted' | 'queued' = 'busy';
+  const f = fixture('hotfix0264-delivery', {
+    screen: () => state === 'busy' ? emptied(busyPaste) : state === 'pasted' ? busyPaste : busyQueued,
+    styled: () => state === 'queued' ? busyQueuedAnsi : undefined,
+    paste: () => { state = 'pasted'; },
+    enter: () => { state = 'queued'; },
+  });
+  const sleep = f.runner.sleep.bind(f.runner);
+  let remaining: number | undefined;
+  t.mock.method(f.runner, 'sleep', async (ms: number) => {
+    if (state === 'pasted') remaining = commandStageRemaining();
+    await sleep(ms);
+  });
+  await sendPrompts(f.ctx, [{ task: 'T1', window: 't1', prompt: LONG }]);
+  assert.equal(remaining, Infinity);
+  assert.equal(f.seen.enters, 1);
+});

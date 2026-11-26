@@ -182,6 +182,7 @@
             "maxLength": 81
           },
           "purge_trash": {
+            "description": "Select Trash items with receipts and separately listed, ownership-marked legacy items.",
             "type": "boolean"
           },
           "include_cache": {
@@ -2732,14 +2733,14 @@
         "type": "object",
         "properties": {
           "as": {
-            "description": "Caller identity for WALL/events; accepted and ignored elsewhere.",
-            "type": "string",
-            "maxLength": 81
+            "description": "Your chat identity, e.g. chat:project.",
+            "type": "string"
           },
           "request_id": {
             "type": "string"
           },
           "purge_trash": {
+            "description": "Select Trash items with receipts and separately listed, ownership-marked legacy items.",
             "type": "boolean"
           },
           "include_cache": {

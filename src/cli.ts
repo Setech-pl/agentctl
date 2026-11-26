@@ -293,6 +293,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
+  const configWarnings = new Set<string>();
   const contextFor = (dryRun: boolean, { migrate = true, silent = false } = {}): Context => {
     let config: GlobalConfig;
     try {
@@ -302,6 +303,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       const state = readConfigState(path.join(configDir(), 'config-state.json'));
       if (e instanceof AgentctlError && state && !state.ok) throw new AgentctlError(e.message, `${e.hint ? `${e.hint} ` : ''}The ${state.by} keeps the previous settings meanwhile (since ${state.at}).`);
       throw e;
+    }
+    for (const warning of config.warnings ?? []) {
+      if (configWarnings.has(warning)) continue;
+      configWarnings.add(warning);
+      deps.stderr(`warning: ${warning}\n`);
     }
     // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
     const output = silent ? () => {} : line;
@@ -1337,8 +1343,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--include-cache', 'owner-confirmed: also delete old, unreferenced task cache entries')
     .option('--keep <tasks...>', 'keep worktrees and cache for these task IDs in this GC run')
     .option('--keep-cache <tasks...>', 'keep all cache entries for these task IDs')
-    .addOption(new Option('--force-dirty <tasks...>', 'include worktrees with unpushed commits in these task IDs (Git still protects uncommitted files)').conflicts('forceDirtyAll'))
-    .option('--force-dirty-all', 'include worktrees with unpushed commits in the selection (apply requires y/N, and Git protects uncommitted files)')
+    .addOption(new Option('--force-dirty <tasks...>', 'include worktrees with uncommitted changes or unpushed commits in these task IDs').conflicts('forceDirtyAll'))
+    .option('--force-dirty-all', 'include worktrees with uncommitted changes or unpushed commits in the selection (apply requires y/N)')
     .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
     .option('--apply', 'do it (after showing the list and asking y/N); without it nothing is changed')
     .option('--older-than <age>', 'age of the files next to the reports before they go: 12h, 7d, 2w (default 7d)')

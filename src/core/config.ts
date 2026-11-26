@@ -1,3 +1,4 @@
+import { parseAge } from './archive.ts';
 import { parseChatQuotas } from './chat-quotas.ts';
 import type { ChatQuotas } from './chat-quotas.ts';
 import { effectiveLimitConfig, parseLimitSettings } from './limit-profiles.ts';
@@ -29,6 +30,19 @@ export const AGENT_NAMES = PROVIDER_IDS;
 export type AgentName = ProviderId;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
+
+export const AUTO_GC_CATEGORIES = ['closed_clean_worktrees', 'stale_node_modules', 'own_trash', 'closed_task_cache'] as const;
+export type AutoGcCategory = (typeof AUTO_GC_CATEGORIES)[number];
+export interface AutoGcSettings {
+  enabled: boolean;
+  dryRun: boolean;
+  triggerFreeGb: number;
+  targetFreeGb: number;
+  olderThan: string;
+  categories: AutoGcCategory[];
+  maxPerRunGb: number;
+  cohortsExclude: string[];
+}
 
 export interface Link {
   from: string;
@@ -176,7 +190,7 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { minFreeStartGb: number; minFreeStateGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { minFreeStartGb: number; minFreeStateGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number; autoGc: AutoGcSettings };
   git: { timeoutS: number };
   startLockStaleS: number;
   setupTimeoutS: number;
@@ -285,6 +299,7 @@ export interface CollisionSettings {
 }
 
 export interface McpSettings {
+  gcScope: 'owner' | 'own-cohort' | 'all';
   maxResponseKb: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
@@ -401,7 +416,7 @@ export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'inc
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'selection', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
-export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
+export const MCP_KEYS = ['gc_scope', 'allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'hold_on_load', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
@@ -936,7 +951,7 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
  * of agentctl names tools this one does not know). The offending entry is ignored and said so in `warnings`.
  */
 function parseMcp(v: unknown): McpSettings {
-  const mcp: McpSettings = { maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
+  const mcp: McpSettings = { gcScope: 'all', maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
   if (v === undefined || v === null) return mcp;
   if (!isObject(v)) {
     mcp.warnings.push(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}: ignored, writing is off`);
@@ -944,6 +959,7 @@ function parseMcp(v: unknown): McpSettings {
   }
   const q = new Problems();
   checkKeys(v, MCP_KEYS, 'config.mcp', q);
+  if (v.gc_scope !== undefined) mcp.gcScope = parseEnumValue(v.gc_scope, ['owner', 'own-cohort', 'all'] as const, 'config.mcp.gc_scope', q) ?? 'owner';
   if (v.client !== undefined) { if (typeof v.client === 'string' && v.client.trim()) mcp.client = v.client.trim(); else q.add('config.mcp.client must be nonempty text'); }
   if (v.max_response_kb !== undefined) {
     if (typeof v.max_response_kb === 'number' && Number.isFinite(v.max_response_kb) && v.max_response_kb >= 1 && v.max_response_kb <= 1024) mcp.maxResponseKb = v.max_response_kb;
@@ -1088,6 +1104,38 @@ function readYamlFile(file: string): unknown {
 /** Directory of the global config; AGENTCTL_HOME overrides ~/.agentctl. */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.AGENTCTL_HOME ? resolvePath(env.AGENTCTL_HOME) : path.join(os.homedir(), '.agentctl');
+}
+
+function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: number }, p: Problems): AutoGcSettings {
+  const where = 'config.disk.auto_gc';
+  const value = isObject(raw) ? raw : {};
+  if (raw !== undefined && !isObject(raw)) p.add(`${where} must be a mapping`);
+  checkKeys(value, ['enabled', 'dry_run', 'trigger_free_gb', 'target_free_gb', 'older_than', 'categories', 'max_per_run_gb', 'cohorts_exclude'], where, p);
+  const bool = (key: string) => {
+    const v = value[key];
+    if (v !== undefined && typeof v !== 'boolean') p.add(`${where}.${key} must be a boolean`);
+    return v === true;
+  };
+  const number = (key: string, fallback: number) => {
+    const v = value[key];
+    if (v === undefined) return fallback;
+    if (typeof v === 'number' && Number.isFinite(v * 1024 ** 3) && v > 0) return v;
+    p.add(`${where}.${key} must be positive`);
+    return fallback;
+  };
+  const triggerFreeGb = number('trigger_free_gb', disk.warnGb);
+  const targetFreeGb = number('target_free_gb', Math.max(triggerFreeGb, disk.warnGb, disk.minFreeStartGb));
+  if (targetFreeGb < triggerFreeGb) p.add(`${where}.target_free_gb must be at least trigger_free_gb`);
+  const olderThan = value.older_than === undefined ? '2d' : typeof value.older_than === 'string' ? value.older_than : '';
+  try { if (!Number.isFinite(parseAge(olderThan))) throw new Error(); }
+  catch { p.add(`${where}.older_than must be a positive duration, for example 2d`); }
+  const categories = value.categories === undefined ? [...AUTO_GC_CATEGORIES] :
+    parseStringList(value.categories, `${where}.categories`, p);
+  if (categories.some(category => !(AUTO_GC_CATEGORIES as readonly string[]).includes(category))) p.add(`${where}.categories must contain only ${AUTO_GC_CATEGORIES.join(', ')}`);
+  if (new Set(categories).size !== categories.length) p.add(`${where}.categories must be distinct`);
+  return { enabled: bool('enabled'), dryRun: bool('dry_run'), triggerFreeGb, targetFreeGb, olderThan,
+    categories: categories as AutoGcCategory[], maxPerRunGb: number('max_per_run_gb', 50),
+    cohortsExclude: parseStringList(value.cohorts_exclude, `${where}.cohorts_exclude`, p) };
 }
 
 export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), text?: string): GlobalConfig {
@@ -1331,22 +1379,23 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { minFreeStartGb: 30, minFreeStateGb: 5, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const diskCounters = { minFreeStartGb: 30, minFreeStateGb: 5, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { min_free_start_gb: 'minFreeStartGb', min_free_state_gb: 'minFreeStateGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', diskCounters, { min_free_start_gb: 'minFreeStartGb', min_free_state_gb: 'minFreeStateGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];
     if (value === undefined) continue;
     if (!isObject(value)) { p.add(`config.${section} must be a mapping`); continue; }
-    checkKeys(value, Object.keys(fields), `config.${section}`, p);
+    checkKeys(value, [...Object.keys(fields), ...(section === 'disk' ? ['auto_gc'] : [])], `config.${section}`, p);
     for (const [key, field] of Object.entries(fields)) {
       if (value[key] === undefined) continue;
       if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] <= 0) p.add(`config.${section}.${key} must be positive`);
       else (target as unknown as Record<string, number>)[field] = value[key];
     }
   }
+  const disk = { ...diskCounters, autoGc: parseAutoGc(isObject(raw.disk) ? raw.disk.auto_gc : undefined, diskCounters, p) };
   if (disk.worktreeSharePercent > 100) p.add('config.disk.worktree_share_percent must not exceed 100');
   if (!Number.isInteger(disk.workers) || disk.workers < 1 || disk.workers > 8) p.add('config.disk.workers must be an integer from 1 to 8');
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');

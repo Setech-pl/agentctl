@@ -164,6 +164,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`, `set_limits`, `reserve`, `resume` (full list below); `wall` allows the three WALL writes (`wall_post`, `wall_reply`, `wall_set_status`). Read again on every call. |
+| `mcp.gc_scope` | enum | `all` | g | `owner` reserves GC writes for the owner CLI. `own-cohort` limits each chat to the cohorts it exclusively owns. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` and `cancel` from the chat may also remove the git worktree (never forced). |
 
 ### `wall`
@@ -418,7 +419,7 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 
 `capacity` (including JSON/MCP), MCP `status`, CLI `status`, `doctor`, and the board show disk facts. Unknown readings are `null` / `n/d`. Filesystems holding the global worktree root, known projects' `.agentctl.yaml` roots, recorded worktrees, cache and state are deduplicated by device. `statfs` falls back to `df -kP`. Worktree sizes are cached for five minutes; symlinks are not followed. The watcher checks every five minutes, persists the previous level, and records `disk-warn`, `disk-critical`, `disk-ok` once per transition. These events can be selected in `notify.ntfy.events`.
 
-A critical reading warns before `new` or queue insertion. The terminal asks y/N (`--yes` acknowledges the warning); MCP shows it before confirmation. It does not impose a capacity limit or switch providers.
+The start gate holds starts below `disk.min_free_start_gb` (30 GiB by default). See [disk management](en/configuration.md#disk-management) for automatic GC, Trash purge and MCP scope.
 
 MCP write permissions accept exact tool names and explicit groups: `queue:*`, `cohort`, `manager:*`. Existing `queue` still permits only insertion. All previous names keep their permission scope. Group membership is generated in docs/mcp.md; reads remain available without allow.
 

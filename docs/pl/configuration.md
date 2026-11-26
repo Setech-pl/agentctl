@@ -288,11 +288,36 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `git.timeout_s` | `600` | Dodatni limit czasu etapu checkoutu Git w sekundach. |
 | `start_lock_stale_s` | `180` | Czas w sekundach przed odzyskaniem blokady bez właściciela. Blokadę po zakończonym PID można odzyskać od razu. |
 | `setup.timeout_s` | `900` | Łączny limit setupu zadania w sekundach. Ustaw go w globalnej mapie `setup`. Dotychczasowy zapis listy poleceń nadal działa. |
-| `gc.delete_mode` | `delete` | Usuwa wybrane pliki cache, stare node_modules i wyniki sprzątania po zamknięciu od razu. `trash` zapisuje ścieżkę po przeniesieniu do kosza systemowego i usuwa wskazany element. Worktree usuwa Git bez wymuszania. |
+| `gc.delete_mode` | `delete` | Usuwa wybrane pliki cache, stare node_modules i wyniki sprzątania po zamknięciu od razu. `trash` zapisuje ścieżkę po przeniesieniu do kosza systemowego i usuwa wskazany element. Git wymusza usunięcie wyłącznie dla jawnie zatwierdzonych zadań ze zmianami. |
 | `gc` | mapowanie | Ustawienia sprzątania po integracji. |
 | `gc.after_integration` | `propose` | `propose` tworzy plan GC z identyfikatorem żądania po przesunięciu lokalnego `main`/`master` i przekazuje wiadomość WALL każdemu czatowi będącemu właścicielem zadań. `off` wyłącza propozycje. |
 | `mcp.client` | — | Opcjonalny wspólny sufiks kursora; domyślnie sesje niezależne. |
 | `mcp.max_response_kb` | `8` | Budżet KiB; kontynuacje przez response_page. |
+
+## Zarządzanie dyskiem
+
+Progi są podawane w GiB. `disk.warn_gb` (50) i `disk.critical_gb` (20) określają poziom wolnego miejsca osobno dla każdego woluminu. `disk.min_free_start_gb` (30) wstrzymuje lokalne starty i starty z kolejki poniżej progu lub bez świeżego pomiaru. Gdy automatyczne GC jest włączone, brak miejsca przy starcie zleca też przebieg GC, co widać w powodzie wstrzymania.
+
+Właściciel włącza automatyczne GC w `config.yaml`. Dodaj poniższe ustawienia do istniejącej sekcji `disk`. Po przejrzeniu planu ustaw `dry_run: false`.
+
+~~~yaml
+disk:
+  auto_gc:
+    enabled: true
+    dry_run: true
+    trigger_free_gb: 50
+    target_free_gb: 60
+    older_than: 2d
+    categories: [closed_clean_worktrees, stale_node_modules, own_trash, closed_task_cache]
+    max_per_run_gb: 50
+    cohorts_exclude: []
+~~~
+
+Automatyczne GC jest domyślnie wyłączone. Domyślny próg uruchomienia to `disk.warn_gb`, cel to najwyższy z progów uruchomienia, ostrzeżenia i startu, a limit to 50 GiB szacowanych danych na przebieg. Watch sprawdza osobno dysk wewnętrzny i skonfigurowane woluminy zewnętrzne. Przechodzi kategorie w podanej kolejności, sprawdza wolne bloki po każdym usunięciu i kończy po osiągnięciu celu, limitu lub wyczerpaniu pozycji. Chroni przypięte i aktywne zadania, lokalne i niewysłane zmiany, linki, główne gałęzie, `keep_cache`, raporty i wykluczone kohorty. Przed usunięciem ponownie sprawdza własność, wiek i granice woluminu. Zmieniony plan albo wynik trafia do dziennika i kanału WALL `agentctl`.
+
+Użyj `agentctl gc --purge-trash`, aby obejrzeć podgląd, a następnie `--apply`, aby zatwierdzić. W MCP wywołaj `gc` z `purge_trash: true`, pobierz token podglądu (przez `request_id`, gdy plan przygotowuje watch) i potwierdź tym tokenem. Zapis przeniesienia wskazuje konkretny element. Starsze pozycje pojawiają się osobno i wymagają znacznika własności agentctl. Faktyczny odzysk jest mierzony według wolnych bloków każdego woluminu. Właściciel może jawnie zatwierdzić usunięcie wskazanych worktree ze zmianami przez `--force-dirty TASK` lub MCP `force_dirty: [TASK]`. Zgoda trafia do dziennika.
+
+Zapis przez MCP wymaga `gc` w `mcp.allow`. `mcp.gc_scope` przyjmuje `all` (domyślnie), `own-cohort` (czat wykonuje tylko plany dla kohort, których jest jedynym właścicielem) i `owner` (wykonanie dla właściciela przez terminal). Przy `own-cohort` podaj `as: "chat:<nazwa>"` lub użyj klienta przypisanego w `wall.chats`. Watch ponownie sprawdza zakres za każdym razem przed wykonaniem.
 
 ## Przykład
 

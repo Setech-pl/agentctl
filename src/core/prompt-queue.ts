@@ -22,8 +22,11 @@ export const queueFile = (ctx: Context, window: string) => path.join(ctx.config.
 export function readPromptQueue(ctx: Context, window: string): QueuedPrompt[] {
   try { const data: unknown = JSON.parse(fs.readFileSync(queueFile(ctx, window), 'utf8')); return Array.isArray(data) ? data.filter((p): p is QueuedPrompt => p && typeof p.id === 'string' && typeof p.text === 'string' && typeof p.queuedAt === 'string') : []; } catch { return []; }
 }
+export const withPromptQueueLock = <T>(ctx: Context, window: string, action: () => Promise<T>) =>
+  withFileLock(`${queueFile(ctx, window)}.lock`, action);
+
 export async function enqueuePrompt(ctx: Context, window: string, text: string, options: { waitForTurnEnd?: boolean } = {}): Promise<QueuedPrompt> {
-  return withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
+  return withPromptQueueLock(ctx, window, async () => {
     const item = { id: randomUUID(), text, queuedAt: new Date(ctx.runner.now()).toISOString(), ...(options.waitForTurnEnd ? { waitForTurnEnd: true } : {}) };
     await ctx.runner.writeFile(queueFile(ctx, window), JSON.stringify([...readPromptQueue(ctx, window), item]));
     await ctx.runner.appendFile(taskFile(ctx.config, window), `\n\n## Follow-up queued ${item.queuedAt} (${item.id})\n\n${text.trim()}\n`);
@@ -54,7 +57,7 @@ async function replaceStalledKimiStart(ctx: Context, window: string, next: Queue
 /** Durable FIFO. Only a stalled Kimi start can yield to a follow-up in a verified empty pane. */
 export async function drainPromptQueue(ctx: Context, window: string, turnState?: TaskState): Promise<void> {
   if (ctx.runner.dryRun) return;
-  await withStartLock(ctx, () => withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
+  await withPromptQueueLock(ctx, window, async () => {
     let record = readTaskRecord(ctx.config, window);
     if (!record || record.closed || record.cancelled || stateWriteFailure(taskFile(ctx.config, window))) return;
     let queue = readPromptQueue(ctx, window);
@@ -68,8 +71,13 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
     while (queue.length) {
       record = readTaskRecord(ctx.config, window)!;
       if (record.agent !== 'unknown') {
-        const live = await liveWindows(ctx);
-        if (live.some(w => w.window === window && w.counted === false) && (checkWindowLimit(record.agent, ctx.config.limits[record.agent], live, ctx.config.session) || checkHostLimit(ctx.config, { ...record, agent: record.agent }, live))) return;
+        const { agent } = record;
+        const full = await withStartLock(ctx, async () => {
+          const live = await liveWindows(ctx);
+          return live.some(w => w.window === window && w.counted === false)
+            && (checkWindowLimit(agent, ctx.config.limits[agent], live, ctx.config.session) || checkHostLimit(ctx.config, { ...record, agent }, live));
+        });
+        if (full) return;
       }
       // Codex redraws its composer mid-turn. Keep the FIFO intact until watch observes idle.
       if (record.agent === 'codex') {
@@ -113,7 +121,7 @@ export async function drainPromptQueue(ctx: Context, window: string, turnState?:
       if (record.agent === 'codex') return; // One queued turn per idle observation.
       stalledStart = false;
     }
-  }));
+  });
 }
 
 export function promptQueueView(ctx: Context, window: string, record?: ReturnType<typeof readTaskRecord>) {
@@ -144,7 +152,7 @@ export interface WithdrawResult {
  * instead: the delivery machinery finishes its confirmation, and status, peek and the journal say the user withdrew it.
  */
 export async function withdrawPrompt(ctx: Context, window: string, idPrefix: string): Promise<WithdrawResult> {
-  return withStartLock(ctx, () => withFileLock(`${queueFile(ctx, window)}.lock`, async () => {
+  return withPromptQueueLock(ctx, window, async () => {
     const record = readTaskRecord(ctx.config, window);
     if (!record) throw new AgentctlError(`no task state for window ${window}`);
     const now = new Date(ctx.runner.now()).toISOString();
@@ -192,5 +200,5 @@ export async function withdrawPrompt(ctx: Context, window: string, idPrefix: str
     await note(entry.id);
     await recordJournal(ctx, { kind: 'delivery', task: record.task, text: `${record.task}: wycofano wiadomość z kolejki (${entry.id.slice(0, 8)})` });
     return { outcome: 'withdrawn', id: entry.id, message: `${record.task}: wycofano wiadomość z kolejki (${entry.id.slice(0, 8)}) – nie zostanie wysłana` };
-  }));
+  });
 }

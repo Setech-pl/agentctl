@@ -20,16 +20,31 @@ function clearOwnerDetails(file: string): void {
   try { fs.unlinkSync(ownerFile(file)); } catch { /* best-effort diagnostic metadata */ }
 }
 
+function parseOwner(raw: string): Partial<LockOwner> {
+  if (!raw.startsWith('{')) return { pid: Number(raw) };
+  try {
+    const owner = JSON.parse(raw);
+    const at = typeof owner.at === 'number' ? new Date(owner.at).toISOString() : owner.at;
+    return { pid: Number(owner.pid), ...(typeof owner.task === 'string' ? { task: owner.task } : {}), ...(typeof at === 'string' ? { at } : {}) };
+  } catch { return {}; }
+}
+
 function recoverDeadOwner(file: string, recovery?: LockRecovery): void {
   try {
     const original = fs.lstatSync(file);
     if (!original.isFile()) return;
-    const age = Date.now() - original.mtimeMs;
+    const now = Date.now();
     const raw = fs.readFileSync(file, 'utf8').trim();
-    const owner: Partial<LockOwner> = raw.startsWith('{') ? JSON.parse(raw) : recovery ? ownerDetails(file, Number(raw), original) : {pid: Number(raw)};
-    let dead = (!raw || owner.pid === 0) && age > (recovery?.staleMs ?? 5000);
-    if (owner.pid && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
-      try { process.kill(owner.pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+    const owner = !raw.startsWith('{') && recovery ? ownerDetails(file, Number(raw), original) : parseOwner(raw);
+    const at = Date.parse(owner.at ?? '');
+    const pid = owner.pid;
+    const validPid = pid !== undefined && Number.isSafeInteger(pid) && pid > 0;
+    let dead = !validPid && now - original.mtimeMs >= (recovery ? 30_000 : 5000);
+    if (validPid) {
+      dead = Boolean(recovery && Number.isFinite(at) && now - at >= Math.max(30_000, recovery.staleMs));
+      if (!dead) {
+        try { process.kill(pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+      }
     }
     if (dead && sameLock(file, original)) {
       if (recovery) clearOwnerDetails(file);
@@ -77,10 +92,16 @@ export function tryFileLock(file: string, recovery?: LockRecovery): (() => void)
   return undefined;
 }
 
+export class FileLockTimeout extends Error {
+  readonly file: string;
+  constructor(file: string) { super(`Timed out waiting for ${file}`); this.file = file; }
+}
+
 const ownership = new AsyncLocalStorage<Map<string, { active: boolean }>>();
+export const withoutFileLockOwnership = <T>(run: () => T): T => ownership.exit(run);
 export const taskLock = (file: string): string => path.join(path.dirname(path.resolve(file)), 'prompt-delivery.lock');
 
-/** Short, process-shared critical section. A dead owner's lock can be recovered; a live owner is never evicted. */
+/** Short, process-shared critical section. An admission lease can be recovered when its recorded timestamp expires. */
 export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000, stateWrite = false, recovery?: LockRecovery): Promise<T> {
   file = path.resolve(file);
   if (stateWrite) checkResponseBudget();
@@ -89,7 +110,7 @@ export async function withFileLock<T>(file: string, action: () => Promise<T>, ti
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file, recovery))) {
     checkResponseBudget();
-    if (Date.now() >= deadline || commandStageRemaining() <= 0) throw new Error(`Timed out waiting for ${file}`);
+    if (Date.now() >= deadline || commandStageRemaining() <= 0) throw new FileLockTimeout(file);
     await new Promise((resolve) => setTimeout(resolve, 10));
     if (stateWrite) checkResponseBudget();
   }
@@ -114,7 +135,7 @@ export function withFileLockSync<T>(file: string, action: () => T, timeoutMs = 2
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file))) {
     checkResponseBudget();
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    if (Date.now() >= deadline) throw new FileLockTimeout(file);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   }
   const lease = { active: true }, owned = new Map(ownership.getStore()); owned.set(file, lease);

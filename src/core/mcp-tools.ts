@@ -1,3 +1,5 @@
+import { gcLocation, pathsOverlap } from './start-paths.ts';
+import { trashOwners } from './trash.ts';
 import { chatOwner, effectiveChatCeilings, quotaWarnings } from './chat-quotas.ts';
 import { accountTasks, taskNames } from './task-accounting.ts';
 import { planRemoteGc } from './host-gc.ts';
@@ -463,6 +465,7 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
 }
 
 interface GcPreviewArgs {
+  as?: string;
   purge_trash?: boolean;
   request_id?: string;
   include_cache?: boolean;
@@ -475,6 +478,58 @@ interface GcPreviewArgs {
   detail?: boolean;
   offset?: number;
   limit?: number;
+}
+
+function gcCaller(ctx: Context, as: unknown, client?: string): string | undefined {
+  if (ctx.config.mcp.gcScope === 'all') return undefined;
+  if (ctx.config.mcp.gcScope === 'owner') throw new AgentctlError('mcp.gc_scope: owner reserves GC writes for the owner CLI');
+  const declared = typeof as === 'string' ? as : undefined;
+  const mapped = wallIdentity(ctx.config, { client });
+  const caller = orderOwner(ctx.config, declared, client);
+  const boundClients = caller ? ctx.config.wall.chats[caller.slice(5)]?.clients ?? [] : [];
+  if (!caller || !caller.startsWith('chat:') || (mapped.kind === 'chat' && mapped.id !== caller) ||
+      (client && boundClients.length && !boundClients.includes(client))) {
+    throw new AgentctlError('mcp.gc_scope: own-cohort requires your configured chat identity');
+  }
+  return caller;
+}
+
+function scopeMcpGc(ctx: Context, args: GcPreviewArgs, plan: GcPlan, client?: string): GcPlan {
+  const caller = gcCaller(ctx, args.as, client);
+  if (!caller) return plan;
+  const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const members = [...records, ...readQueue(ctx.config)];
+  const ownsCohort = (name: string | undefined) => {
+    if (!name) return false;
+    const cohort = members.filter(record => record.cohort && cohortKey(record.cohort) === cohortKey(name));
+    return cohort.length > 0 && cohort.every(record => record.owner === caller);
+  };
+  if (args.cohort && !ownsCohort(args.cohort) || plan.integration && plan.integration.owner !== caller) {
+    throw new AgentctlError('mcp.gc_scope: applying GC to another chat’s cohort requires all');
+  }
+  const owns = (record: { owner?: string; cohort?: string }) => record.owner === caller && ownsCohort(record.cohort);
+  const items = plan.items.filter(item => {
+    if (item.trash) {
+      const owners = trashOwners(ctx, item.trash.original, records.filter(record => !record.host));
+      return owners.length > 0 && owners.every(owns);
+    }
+    const samePath = (first: string, second: string) => {
+      try {
+        return pathsOverlap(item.host ? path.resolve(first) : gcLocation(path.resolve(first)), item.host ? path.resolve(second) : gcLocation(path.resolve(second)));
+      } catch { return true; } // An unresolvable ownership path cannot authorize removal.
+    };
+    const owners = records.filter(record => record.host === item.host && (record.task === item.task ||
+      item.kind === 'worktree' && record.repos.some(repo => samePath(repo.worktree, item.target)) ||
+      item.kind === 'cache' && record.report && samePath(path.dirname(record.report), item.target) ||
+      item.kind === 'branch' && record.repos.some(repo => repo.branch === item.branch && samePath(repo.path, item.repo ?? ''))));
+    return owners.length > 0 && owners.every(owns);
+  });
+  return { ...plan, items, freeBytes: items.reduce((sum, item) => sum + item.bytes, 0) };
+}
+
+function verifyMcpGcScope(ctx: Context, args: GcPreviewArgs, plan: GcPlan, client?: string): void {
+  const current = scopeMcpGc(ctx, args, plan, client);
+  if (current.items.length !== plan.items.length) throw new AgentctlError('GC authorization changed since preview; nothing was done');
 }
 
 async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false): Promise<GcPlan> {
@@ -1396,7 +1451,7 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, only with owner-confirmed include_cache: true, old unreferenced cache entries (keep_cache tasks stay); state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
       'Use purge_trash: true to list previously trashed agentctl items. Use the separately allowed gc tool to apply the preview with confirm: true (branches default false).',
-    input: { purge_trash: z.boolean().optional(), include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose clean worktrees may be removed when they contain unpushed commits. Git still protects uncommitted files.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+    input: { purge_trash: z.boolean().optional().describe('Select Trash items with receipts and separately listed, ownership-marked legacy items.'), include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
@@ -1802,7 +1857,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--purge-trash] [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), purge_trash: z.boolean().optional(), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { purgeTrash: a.purge_trash, cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
+  extraWrite('gc', 'gc --apply [--purge-trash] [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), purge_trash: z.boolean().optional().describe('Select Trash items with receipts and separately listed, ownership-marked legacy items.'), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), as: z.string().optional().describe('Your chat identity, e.g. chat:project.'), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { purgeTrash: a.purge_trash, cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
 );
 
 // ---- WALL (WALL-1): a message board of the owner's chats and agents. Its content is data, never instructions.
@@ -1965,18 +2020,22 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
     return { text: `GC preview ready: ${plan.items.length} items; call gc or gc_preview with request_id: ${request.id}` };
   }
   let scope: unknown;
+  if (request.tool === 'gc' && request.scope === null) throw new AgentctlError('GC request has no confirmed preview');
   if (request.scope !== null) {
-    scope = request.tool === 'gc' ? await planMcpGc(ctx, request.args, true) : await confirmationScope(ctx, request.tool, request.args);
+    scope = request.tool === 'gc' ? scopeMcpGc(ctx, request.args, await planMcpGc(ctx, request.args, true)) : await confirmationScope(ctx, request.tool, request.args);
     if (JSON.stringify(canonical(confirmationTargets(request.tool, scope))) !== request.scope) {
       throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
     }
   }
   const result = request.tool === 'gc'
     ? await writeTool(applying, 'gc', {}, async fresh => {
-      const result = await applyGc(fresh, scope as GcPlan);
+      const plan = scope as GcPlan;
+      verifyMcpGcScope(fresh, request.args, plan);
+      const result = await applyGc(fresh, plan);
       await refreshDiskAfterGc(fresh, result.freedBytes);
-      const text = gcResultLine(result, typeof request.args.cohort === 'string' ? request.args.cohort : undefined);
-      return { text, executed: true, announce: text };
+      // The durable MCP result is bounded, so write measurements before the item lists.
+      const { freedBytes, freedByVolume, done, failed } = result;
+      return { text: JSON.stringify({ freedBytes, freedByVolume, done, failed }), executed: true, announce: `gc: ${done.length} items, ${freedBytes} bytes` };
     })
     : request.tool === 'archive'
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
@@ -2166,15 +2225,19 @@ for (const tool of MCP_TOOLS) {
     let input = provided;
     let prepared: GcPlan | undefined;
     if (tool.name === 'gc' && provided.request_id !== undefined) {
-      const { request_id, detail, offset, limit, ...selection } = provided;
+      const { request_id, detail, offset, limit, as, ...selection } = provided;
       if (confirm || preview_token || Object.keys(selection).length || typeof request_id !== 'string') {
-        return fail('GC request_id retrieves a plan. Pass only request_id and optional detail, offset or limit; then confirm with preview_token.');
+        return fail('GC request_id retrieves a plan. Pass request_id and optional as, detail, offset or limit; then confirm with preview_token.');
       }
       const saved = readGcPreview(ctx, request_id);
       if (!('plan' in saved)) return saved;
       if (ctx.runner.now() - saved.at >= ctx.config.preview.ttlS * 1000) return fail('GC preview plan expired; request a fresh plan.');
-      input = { ...saved.args, ...(detail !== undefined ? { detail } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) };
+      input = { ...saved.args, ...(as !== undefined ? { as } : {}), ...(detail !== undefined ? { detail } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) };
       prepared = saved.plan;
+    }
+    if (tool.name === 'gc' && input.as === undefined) {
+      const mapped = wallIdentity(ctx.config, { client: deps.clientId });
+      if (mapped.kind === 'chat') input = { ...input, as: mapped.id };
     }
     // Required preview fields remain required for a preview or explicit-argument confirm.
     // A token-only confirm restores the validated arguments from its session preview.
@@ -2246,6 +2309,7 @@ for (const tool of MCP_TOOLS) {
       }
       if (ctx.runner.now() - preview.at > preview.ttlS * 1000) return deny(`TTL expired (${preview.ttlS}s since preview)`);
     }
+    if (tool.name === 'gc') gcCaller(ctx, effective.as, deps.clientId);
     // P93: the confirm of new/queue does not plan again (git, tmux, every task record: seconds on a loaded host). Its scope identity is the
     // argument hash alone (confirmationTargets), the plan is the preview's, and the watcher validates the accepted specs.
     const accepting = Boolean(confirm) && (tool.name === 'new' || tool.name === 'queue');
@@ -2257,6 +2321,7 @@ for (const tool of MCP_TOOLS) {
     let scope: unknown = prepared;
     try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective))); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
+    if (tool.name === 'gc') scope = scopeMcpGc(ctx, effective, scope as GcPlan, deps.clientId);
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
@@ -2306,6 +2371,7 @@ for (const tool of MCP_TOOLS) {
       });
       if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
         const plan = scope as GcPlan;
+        verifyMcpGcScope(fresh, effective, plan, deps.clientId);
         const result = await applyGc(fresh, plan);
         const freed = await refreshDiskAfterGc(fresh, result.freedBytes);
         return { text: JSON.stringify({ ...result, ...(freed ? { note: freed } : {}) }, null, 2), executed: true, announce: gcResultLine(result, typeof effective.cohort === 'string' ? effective.cohort : undefined) };
@@ -2745,7 +2811,7 @@ for (const tool of MCP_TOOLS) {
 /** Identity is accepted uniformly. Tools that do not consume it keep it out of confirmation hashes. */
 for (const tool of MCP_TOOLS) {
   tool.input = {as: z.string().max(81).optional().describe('Caller identity for WALL/events; accepted and ignored elsewhere.'), ...tool.input};
-  if (tool.name.startsWith('wall_') || chatUsageTools.has(tool.name) || ['events_since', 'new', 'queue', 'set_limits'].includes(tool.name)) continue;
+  if (tool.name.startsWith('wall_') || chatUsageTools.has(tool.name) || ['events_since', 'new', 'queue', 'set_limits', 'gc'].includes(tool.name)) continue;
   const run = tool.run;
   tool.run = (deps, args) => {const {as: _as, ...input} = args; return run(deps, input);};
 }

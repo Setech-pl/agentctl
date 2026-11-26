@@ -38,12 +38,18 @@ it('D1: cached MCP preview checks every repo including untracked files in the se
   const plan = await planGc(f.ctx, { cachedSizes: true });
   assert.ok(!plan.items.some(i => i.kind === 'worktree' && i.target === f.repos[1]!.worktree));
   assert.equal(gcView(plan).worktrees.total, 2);
+});
+
+it('HOTFIX0264-F5: only the explicitly approved dirty removal uses force and is journaled', async () => {
+  const { readJournal } = await import('../src/core/journal.ts');
+  const f = fixture('forced');
   const forced = await planGc(f.ctx, { cachedSizes: true, forceDirty: ['TWO'] });
   assert.equal(forced.items.filter(i => i.kind === 'worktree').length, 2);
   const applied = await applyGc(f.ctx, forced);
-  assert.ok(f.runner.commands.some(c => c.includes(`worktree remove ${f.repos[1]!.worktree}`)));
-  assert.ok(!f.runner.commands.some(c => c.includes('worktree remove --force')));
-  assert.match(applied.failed.find(failure => failure.item.target === f.repos[1]!.worktree)?.reason ?? '', /untracked files/);
+  assert.deepEqual(applied.failed, []);
+  assert.ok(f.runner.commands.some(c => c.includes(`worktree remove ${f.repos[0]!.worktree}`)));
+  assert.ok(f.runner.commands.some(c => c.includes(`worktree remove --force ${f.repos[1]!.worktree}`)));
+  assert.deepEqual(readJournal(f.config).filter(event => event.kind === 'gc-force-dirty').map(event => event.task), ['TWO']);
 });
 
 it('D1: unpushed commits and dirt created after preview are refused at apply', async () => {

@@ -3,15 +3,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { TaskRecord } from './taskstore.ts';
+import { pathsOverlap } from './start-paths.ts';
 import type { Context } from './context.ts';
 import { readJournal } from './journal.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords, readRecordFile } from './taskstore.ts';
 
 export interface TrashItem {
   target: string;
   original: string;
   identity: string;
   receipt?: string;
+  legacyMarker?: string;
 }
 
 interface TrashReceipt { original: string; identity: string; url?: string; purged?: boolean }
@@ -45,6 +48,54 @@ function safeRoot(root: string): boolean {
     const stat = fs.lstatSync(root);
     return stat.isDirectory() && stat.uid === uid && fs.realpathSync(root) === root;
   } catch { return false; }
+}
+
+const localRecords = (ctx: Context) => [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(record => !record.host);
+
+export function trashOwners(ctx: Context, original: string, records = localRecords(ctx)): TaskRecord[] {
+  return records.filter(record => [
+    path.join(ctx.config.cache, record.window),
+    ...(record.report ? [path.dirname(path.resolve(record.report))] : []),
+    ...record.repos.filter(repo => repo.worktree !== repo.path).map(repo => repo.worktree),
+  ].some(root => pathsOverlap(path.resolve(root), original)));
+}
+
+function legacyMarker(target: string, original: string, owners: TaskRecord[]): string | undefined {
+  try {
+    const dir = fs.lstatSync(target);
+    if (!dir.isDirectory() || !owners.length) return undefined;
+    let originalParent = path.dirname(original);
+    while (!fs.existsSync(originalParent) && path.dirname(originalParent) !== originalParent) originalParent = path.dirname(originalParent);
+    if (fs.statSync(originalParent).dev !== dir.dev) return undefined;
+    const file = (name: string) => {
+      const candidate = path.join(target, name);
+      const stat = fs.lstatSync(candidate, { throwIfNoEntry: false });
+      return stat?.isFile() && stat.uid === uid && stat.size <= 1024 ** 2 ? candidate : undefined;
+    };
+    for (const name of ['TASK.md', '.agentctl']) {
+      const marker = file(name);
+      const record = marker && readRecordFile(marker);
+      if (record && owners.some(owner => owner.task === record.task && owner.window === record.window)) return name;
+    }
+    const worktrees = owners.flatMap(record => record.repos.filter(repo => !record.reviewMode && repo.worktree !== repo.path));
+    const modules = fs.lstatSync(path.join(target, 'node_modules'), { throwIfNoEntry: false });
+    if (modules?.isDirectory() && modules.uid === uid &&
+        worktrees.some(repo => path.resolve(repo.worktree) === original && path.basename(repo.worktree) === path.basename(target))) {
+      return 'node_modules under a recorded task worktree';
+    }
+    const git = file('.git');
+    if (git) {
+      const gitdir = /^gitdir: (.+)$/m.exec(fs.readFileSync(git, 'utf8'))?.[1];
+      if (gitdir && worktrees.some(repo => {
+        if (path.resolve(repo.worktree) !== original) return false;
+        const expected = path.join(path.resolve(repo.path), '.git', 'worktrees');
+        const registration = path.resolve(original, gitdir.trim());
+        if (path.dirname(registration) !== expected) return false;
+        try { return fs.readFileSync(path.join(registration, 'gitdir'), 'utf8').trim() === path.join(original, '.git'); }
+        catch { return false; }
+      })) return '.git worktree registration';
+    }
+  } catch { /* unverifiable marker */ }
 }
 
 function safeItem(target: string, original: string, expected: string): boolean {
@@ -84,6 +135,7 @@ export async function moveToTrash(ctx: Context, original: string): Promise<Trash
 export async function purgeTrashItem(ctx: Context, item: TrashItem): Promise<void> {
   if (ctx.runner.dryRun) return;
   if (!safeItem(item.target, item.original, item.identity)) throw new Error('Trash item changed since preview; kept');
+  if (!item.receipt && (!item.legacyMarker || !planTrashPurge(ctx).some(candidate => candidate.target === item.target && candidate.original === item.original && candidate.identity === item.identity && candidate.legacyMarker === item.legacyMarker))) throw new Error('Legacy Trash item has no current agentctl ownership marker; kept');
   const root = path.dirname(item.target);
   const info = path.join(path.dirname(root), 'info');
   const sidecar = path.join(info, `${path.basename(item.target)}.trashinfo`);
@@ -96,7 +148,7 @@ export async function purgeTrashItem(ctx: Context, item: TrashItem): Promise<voi
   }));
 }
 
-/** Recorded items take precedence. Legacy names match only an absent, known original on the same Trash volume. */
+/** Receipts take precedence. Legacy names additionally need an agentctl ownership marker. */
 export function planTrashPurge(ctx: Context): TrashItem[] {
   const result = new Map<string, TrashItem>();
   const recorded = new Set<string>();
@@ -127,7 +179,8 @@ export function planTrashPurge(ctx: Context): TrashItem[] {
       originals.set(target, matches);
     }
   };
-  for (const record of [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]) {
+  const records = localRecords(ctx);
+  for (const record of records) {
     if (record.host || record.pin || !record.closed && !record.cancelled) continue;
     add(path.join(ctx.config.cache, record.window));
     for (const repo of record.repos) if (!record.reviewMode && repo.worktree !== repo.path) add(repo.worktree);
@@ -139,7 +192,11 @@ export function planTrashPurge(ctx: Context): TrashItem[] {
     if (matches.size !== 1 || result.has(target)) continue;
     const original = [...matches][0]!;
     const owned = identity(target);
-    if (owned && safeItem(target, original, owned)) result.set(target, { target, original, identity: owned });
+    if (!owned || !safeItem(target, original, owned)) continue;
+    const owners = trashOwners(ctx, original, records);
+    if (owners.some(record => record.pin || !record.closed && !record.cancelled)) continue;
+    const marker = legacyMarker(target, original, owners);
+    if (marker) result.set(target, { target, original, identity: owned, legacyMarker: marker });
   }
   return [...result.values()].sort((a, b) => a.target.localeCompare(b.target));
 }

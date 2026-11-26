@@ -10,7 +10,7 @@ import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
-import { releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
+import { commitStart, releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
 import { closeFailedStartWindow, keepFailedWindow, LaunchExited, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
@@ -1298,7 +1298,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
     && !chatQuotaWait(config, entry, live) && !checkHostLimit(config, entry, live);
   const start = async (entry: QueueEntry): Promise<void> => {
-    if (!await beginStart(ctx, memory, notifier, entry, opts)) return;
+    if (!await beginStart(ctx, memory, notifier, entry, opts)) {
+      if (memory.held.has(entry.task)) stillHeld.add(entry.task);
+      return;
+    }
     occupiedSetups++;
     used[entry.agent]++;
     live.push({ window: windowName(entry.task), agent: entry.agent, host: entry.host, owner: entry.owner });
@@ -1424,7 +1427,16 @@ export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: {
 async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
   const { config } = ctx;
   // Sample the volume before taking the shared lock. newTasks rechecks before setup.
-  if (opts.signal?.aborted || await entryDiskStartHold(ctx, initial)) return false;
+  if (opts.signal?.aborted) return false;
+  const diskHold = await entryDiskStartHold(ctx, initial);
+  if (diskHold) {
+    if (memory.held.get(initial.task) !== diskHold) {
+      memory.held.set(initial.task, diskHold);
+      await opts.log?.(`queue: ${initial.task} ${diskHold}`);
+    }
+    return false;
+  }
+  memory.held.delete(initial.task);
   let entry = initial;
   let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
@@ -1447,33 +1459,34 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
     entry = fresh;
     return true;
   };
-  const claimed = await withStartLock(ctx, async () => {
+  const claimStart = () => withStartLock(ctx, async () => {
     const current = readQueue(config);
     const fresh = current.find(e => e.seq === entry.seq && e.task === entry.task);
-    if (!fresh || fresh.status !== 'queued' || fresh.spec !== initial.spec || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
+    if (!fresh || fresh.autoReview?.author !== initial.autoReview?.author || fresh.status !== 'queued' || fresh.spec !== initial.spec || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
     const author = directAuthorState(config, fresh, current);
     if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
     if (author.waiting) return false;
     if (!fresh.autoReview) return claim(fresh);
-    // The review starts on the author's state as it is NOW: under the lock that send/enqueuePrompt takes, a follow-up cannot slip in between the check and the claim.
-    const authorWindow = findAuthorRecord(config, fresh.autoReview.author)?.window ?? windowName(fresh.autoReview.author);
-    return withFileLock(`${promptQueueFile(ctx, authorWindow)}.lock`, async () => {
-      try {
-        // The last read before the claim is the status: whatever the checks below took time for, the decision is on the state as it is now.
-        const busy = await authorCheckoutBusy(ctx, fresh.autoReview!.author);
-        const rows = await queueDependencyRows(ctx, [fresh]);
-        const terminal = authorTerminal(config, fresh.autoReview, rows, ctx.runner.now());
-        if (terminal) { await failEntry(ctx, fresh, terminal.text, notifier, opts, true); return false; }
-        if (unmetAfter(effectiveAfter(config, fresh, rows, ctx.runner.now()), rows, fresh.afterVerdicts).length > 0) return false;
-        const waits = authorWaitReason(config, fresh.autoReview, rows, ctx.runner.now()) ?? (busy ? `czeka na autora ${fresh.autoReview!.author}: ${busy}` : undefined);
-        if (waits) { await opts.log?.(`queue: ${fresh.task} ${waits}`); return false; }
-        return claim(await rebuildAutoReview(ctx, fresh, { write: true, ...(opts.log ? { log: opts.log } : {}) }));
-      } catch (e) {
-        await failEntry(ctx, fresh, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, false);
-        return false;
-      }
-    });
+    try {
+      // The last read before the claim is the status: whatever the checks below took time for, the decision is on the state as it is now.
+      const busy = await authorCheckoutBusy(ctx, fresh.autoReview!.author);
+      const rows = await queueDependencyRows(ctx, [fresh]);
+      const terminal = authorTerminal(config, fresh.autoReview, rows, ctx.runner.now());
+      if (terminal) { await failEntry(ctx, fresh, terminal.text, notifier, opts, true); return false; }
+      if (unmetAfter(effectiveAfter(config, fresh, rows, ctx.runner.now()), rows, fresh.afterVerdicts).length > 0) return false;
+      const waits = authorWaitReason(config, fresh.autoReview, rows, ctx.runner.now()) ?? (busy ? `czeka na autora ${fresh.autoReview!.author}: ${busy}` : undefined);
+      if (waits) { await opts.log?.(`queue: ${fresh.task} ${waits}`); return false; }
+      return claim(await rebuildAutoReview(ctx, fresh, { write: true, ...(opts.log ? { log: opts.log } : {}) }));
+    } catch (e) {
+      await failEntry(ctx, fresh, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, false);
+      return false;
+    }
   }, initial.task);
+  // Match send's lock order: the author FIFO must stay unchanged through the claim.
+  const author = initial.autoReview?.author;
+  const claimed = author
+    ? await withFileLock(`${promptQueueFile(ctx, findAuthorRecord(config, author)?.window ?? windowName(author))}.lock`, claimStart)
+    : await claimStart();
   if (!claimed) return false;
   const starting: QueueEntry = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task)!;
   const log: string[] = [];
@@ -1503,12 +1516,12 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
       // no_agent intentionally writes no TASK.md. Commit its successful preparation and dependent metadata under the admission lock.
-      await withStartLock(ctx, async () => {
+      await commitStart(ctx, async () => {
         if (entry.noAgent) for (const dependent of readQueue(config)) {
           if (dependent.noAgent && dependent.directAuthor === entry.task) await writeEntry(ctx, { ...dependent, authorPrepared: true });
         }
         fs.rmSync(entryFile(config, starting), { force: true });
-      });
+      }, entry.task, opts.signal);
       fs.rmSync(queueLogFile(config, starting), { force: true });
       await opts.log?.(`queue: ${entry.task} started`);
       const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;
@@ -1526,7 +1539,7 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
       }
       if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
       if (e instanceof ReviewBlocked) { await blockEntryReview(ctx, entry, e); return; }
-      if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
+      if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: (?:dysk|trwa GC)/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
       if (await liveStartedRecord(ctx, entry.task)) {
