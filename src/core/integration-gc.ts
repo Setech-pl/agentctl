@@ -15,6 +15,7 @@ import { errorMessage } from './util.ts';
 import { canPost, OWNER_IDENTITY, postMessage, readableChannels } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
 import { insidePath } from './worktree-volume.ts';
+import { withWorktreeLocks } from './worktree-locks.ts';
 
 export interface IntegrationGcScope {
   repo: string;
@@ -147,15 +148,17 @@ export async function applyIntegrationGc(ctx: Context, plan: GcPlan, space = new
   for (const item of plan.items) {
     try {
       if (!current.items.some(candidate => candidate.target === item.target && candidate.task === item.task && candidate.head === item.head)) throw Error('Integration GC scope changed; worktree kept');
-      await withStartLock(ctx, async () => {
-        const all = records(ctx);
-        const owner = all.find(record => record.task === item.task);
-        const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(ctx.config).map(start => start.window)]);
-        if ((!owner?.closed && !owner?.cancelled) || owner.pin || owner.owner !== scope.owner || live.has(owner.window) || !owner.repos.some(repo => location(repo.worktree) === item.target) ||
-            all.some(record => record !== owner && (record.pin || live.has(record.window) || !record.closed && !record.cancelled) && record.repos.some(repo => location(repo.worktree) === item.target))) throw Error('Worktree is now active, pinned or no longer belongs to this GC plan');
-        const base = await commitAt(ctx, scope.repo, `refs/heads/${scope.branch}`);
-        if (!base || !await ancestor(ctx, scope.repo, scope.head, base) || await cleanIntegratedHead(ctx, item.target, scope.head) !== item.head || linkUsers(item.target, knownLinkReferences(ctx.config)).length) throw Error('Worktree or integration ref changed; kept');
+      await withWorktreeLocks(ctx, [item.target], async () => {
         if (!ctx.runner.dryRun) await space.before(item.target);
+        await withStartLock(ctx, async () => {
+          const all = records(ctx);
+          const owner = all.find(record => record.task === item.task);
+          const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(ctx.config).map(start => start.window)]);
+          if ((!owner?.closed && !owner?.cancelled) || owner.pin || owner.owner !== scope.owner || live.has(owner.window) || !owner.repos.some(repo => location(repo.worktree) === item.target) ||
+              all.some(record => record !== owner && (record.pin || live.has(record.window) || !record.closed && !record.cancelled) && record.repos.some(repo => location(repo.worktree) === item.target))) throw Error('Worktree is now active, pinned or no longer belongs to this GC plan');
+          const base = await commitAt(ctx, scope.repo, `refs/heads/${scope.branch}`);
+          if (!base || !await ancestor(ctx, scope.repo, scope.head, base) || await cleanIntegratedHead(ctx, item.target, scope.head) !== item.head || linkUsers(item.target, knownLinkReferences(ctx.config)).length) throw Error('Worktree or integration ref changed; kept');
+        });
         const removed = await ctx.runner.exec('git', ['-C', scope.repo, 'worktree', 'remove', item.target], { async: true, timeoutMs: ctx.config.git.timeoutS * 1000 });
         if (removed.code !== 0) throw Error(removed.stderr.trim() || `git exit ${removed.code}`);
       });

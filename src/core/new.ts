@@ -13,6 +13,7 @@ import { attachHint } from './tmux-socket.ts';
 import { writeLaunchScript } from './launch-script.ts';
 import { launchEnvironment } from './safety.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
+import { withWorktreeLocks } from './worktree-locks.ts';
 import { queuePrompt, deliverPendingPrompt, DELIVERY_WARNING } from './prompt-delivery.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -150,6 +151,11 @@ async function runSetup(ctx: Context, spec: ResolvedSpec, prepared: Map<string, 
 
 /** Start every spec: worktree, links, TASK.md, tmux window, agent, prompt. Plans and validates everything first. */
 export async function newTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOptions = {}): Promise<NewResult[]> {
+  const reused = opts.reuse ? requested.filter(spec => !spec.host).flatMap(spec => spec.repos.map(repo => repo.worktree)) : [];
+  return withWorktreeLocks(ctx, reused, () => newTasksLocked(ctx, requested, opts));
+}
+
+async function newTasksLocked(ctx: Context, requested: ResolvedSpec[], opts: NewOptions): Promise<NewResult[]> {
   if (ctx.runner.dryRun || opts.noAgent) return startTasks(ctx, requested, opts);
   // A person answering a capacity question must never own the global lock.
   const interactive = Boolean(ctx.confirm && (!opts.noSwitch || opts.overflow));

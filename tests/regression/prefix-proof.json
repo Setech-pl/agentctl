@@ -1651,6 +1651,18 @@
       "REVIEW0263-F1: accepted start probes do not hold the shared admission lock"
     ]
   },
+  "REVIEW0263-F2": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "REVIEW0263-F2: a nearing deadline leaves the pending prompt untouched for another tick",
+      "REVIEW0263-F2: a nearing deadline leaves the pending prompt untouched for another tick",
+      "FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it",
+      "FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it"
+    ]
+  },
   "REVIEW0263-F4": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",

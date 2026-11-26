@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
+import { withCommandStage } from '../src/core/command-stage.ts';
+import { deliverPendingPrompt, queuePrompt } from '../src/core/prompt-delivery.ts';
 import { readQueue, saveEntry, validateAccepted } from '../src/core/queue.ts';
-import { DiskRunner, FakeTmux, makeConfig, useScratch } from './helpers.ts';
+import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 const notifier = {notify: async () => {}};
@@ -26,4 +28,17 @@ it('REVIEW0263-F1: accepted start probes do not hold the shared admission lock',
   assert.ok(locks.length > 0, 'validation inspected live windows');
   assert.ok(locks.every(locked => !locked));
   assert.notEqual(readQueue(config)[0]?.status, 'accepted');
+});
+
+it('REVIEW0263-F2: a nearing deadline leaves the pending prompt untouched for another tick', async () => {
+  const config = makeConfig(scratch.sub('lock-paste'));
+  const tmux = new FakeTmux(config.session);
+  const pane = tmux.add('paste-1', '❯ ');
+  const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  const record = seedTask(config, 'PASTE-1', {windowId: pane.id});
+  await queuePrompt(ctx, record, 'A follow-up in the fixture.', 'pending', {kind: 'followup'});
+  const outcome = await withCommandStage(2000, undefined, () => deliverPendingPrompt(ctx, record.window));
+  assert.equal(outcome, 'pending');
+  assert.ok(!runner.commands.some(line => /paste-buffer|send-keys.*Enter/.test(line)));
 });

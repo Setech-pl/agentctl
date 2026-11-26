@@ -261,9 +261,15 @@ it('FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm
   const again = await gc.run(deps, { request_id: id });
   const newToken = /preview_token: (\S+)/.exec(again.text)?.[1];
   assert.ok(newToken);
+  let removalUnderAdmissionLock: boolean | undefined;
+  w.interceptGit(args => {
+    if (args[2] === 'worktree' && args[3] === 'remove') removalUnderAdmissionLock = fs.existsSync(path.join(w.config.stateDir, 'start.lock'));
+    return undefined;
+  });
   assert.match((await gc.run(deps, { preview_token: newToken, confirm: true })).text, /^Accepted/);
   await applyAcceptedWrites(w.ctx, w.notifier, {});
   assert.equal(readMcpRequests(w.config).find(request => request.token === newToken)?.status, 'done');
+  assert.equal(removalUnderAdmissionLock, false, 'worktree removal has its own Git budget');
   assert.equal(fs.existsSync(good), false);
   for (const kept of [cancelled, dirty, untracked, linked, pinned, unmerged, live]) assert.ok(fs.existsSync(kept), kept);
 });

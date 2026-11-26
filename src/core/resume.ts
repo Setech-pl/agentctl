@@ -7,6 +7,7 @@ import { validateLaunch, launchEnvironment } from './safety.ts';
 import { assertCheckoutNotBorrowed, readonlyReviewEnvironment } from './readonly-review.ts';
 import { provider, isActive, providerCommand } from './providers/registry.ts';
 import { withStartLock, reserveStarts, releaseStarts } from './start-lock.ts';
+import { withWorktreeLocks } from './worktree-locks.ts';
 import { queuePrompt, deliverPendingPrompt } from './prompt-delivery.ts';
 import { waitForReady } from './ready.ts';
 import { withCommandStage } from './command-stage.ts';
@@ -130,21 +131,24 @@ export async function resumeTasks(ctx: Context, plan: ResumePlan, opts: ResumeOp
   if (ctx.runner.dryRun) return startResumed(ctx, plan, opts);
   const results: ResumeResult[] = [];
   for (const item of plan.items) {
-    let ids: string[] = [];
-    try {
-      await withCommandStage(30_000, opts.signal, async () => {
-        ids = await withStartLock(ctx, async () => {
-          const record = readTaskRecord(ctx.config, item.window);
-          if (!record || record.closed || record.cancelled || record.supersededBy || record.agent !== item.agent) return [];
-          const occupied = await liveWindows(ctx);
-          if (occupied.some(w => w.window === item.window) || checkHostLimit(ctx.config, item, occupied)
-            || checkWindowLimit(item.agent, ctx.config.limits[item.agent], occupied, ctx.config.session)
-            || chatQuotaWait(ctx.config, item, occupied)) return [];
-          return reserveStarts(ctx, [item]);
+    const repos = item.host ? [] : readTaskRecord(ctx.config, item.window)?.repos.map(repo => repo.worktree) ?? [];
+    await withWorktreeLocks(ctx, repos, async () => {
+      let ids: string[] = [];
+      try {
+        await withCommandStage(30_000, opts.signal, async () => {
+          ids = await withStartLock(ctx, async () => {
+            const record = readTaskRecord(ctx.config, item.window);
+            if (!record || record.closed || record.cancelled || record.supersededBy || record.agent !== item.agent) return [];
+            const occupied = await liveWindows(ctx);
+            if (occupied.some(w => w.window === item.window) || checkHostLimit(ctx.config, item, occupied)
+              || checkWindowLimit(item.agent, ctx.config.limits[item.agent], occupied, ctx.config.session)
+              || chatQuotaWait(ctx.config, item, occupied)) return [];
+            return reserveStarts(ctx, [item]);
+          });
+          if (ids.length) results.push(...await startResumed(ctx, {...plan, items: [item]}, opts));
         });
-        if (ids.length) results.push(...await startResumed(ctx, {...plan, items: [item]}, opts));
-      });
-    } finally { await releaseStarts(ctx, ids); }
+      } finally { await releaseStarts(ctx, ids); }
+    });
   }
   return results;
 }
