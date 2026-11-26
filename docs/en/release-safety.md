@@ -4,6 +4,8 @@ Run the release checklist from a clean candidate checkout with an absolute task-
 
 The production fixture has 1,500 task records, more than 2,000 worktree directories across simulated volumes, 40 orders from four chats, and 150 WALL messages. It runs the real watcher for at least 20 ticks with fake agents, CPU load of at least twice the core count, and a slow filesystem shim. Each admissible order has two ticks to start. The gate checks for a full snapshot younger than 60 seconds, skips of at most three consecutive ticks per stage, complete MCP reads under eight seconds, queue/close/GC confirmation, and disk and limits in the rendered board header. Each watch tick must finish within 15 seconds. The gate records stage timings, synchronous filesystem and process calls, and task and journal reads.
 
+On macOS the gate controller retains its background policy. The measured watch process keeps the gate’s nice level and uses the same application scheduling as a production tmux watch. The CPU workers and slow-filesystem shim stay active during the measurement.
+
 Regression scenarios cover worktree data loss in 0.22.4 (D1, D2), watch and write recovery after ENOSPC in 0.23.1 (FIELD0253-ENOSPC), admission and stuck follow-up delivery in 0.25.2 (FIELD0253-ADMISSION, FIELD0253-BACKGROUND), external volumes (W102-VOLUME), and the nine 0.26.0 field reports (W110-A through W110-I). Each gate runs these scenarios. [Regression catalog](../../tests/regression/CATALOG.md)
 
 ## Shadow the candidate before upgrading

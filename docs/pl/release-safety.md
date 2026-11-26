@@ -4,6 +4,8 @@ W czystym checkoutcie kandydata ustaw bezwzględną ścieżkę zadania w `AGENTC
 
 Scenariusz produkcyjny ma 1500 rekordów zadań, ponad 2000 katalogów worktree na symulowanych woluminach, 40 zleceń z czterech czatów i 150 wiadomości WALL. Uruchamia właściwy watch na co najmniej 20 przebiegów z atrapami agentów, obciążeniem co najmniej dwukrotności liczby rdzeni i opóźnionymi odczytami dysku. Dopuszczone zlecenie musi wystartować w ciągu dwóch przebiegów. Test sprawdza pełny snapshot młodszy niż 60 sekund, najwyżej trzy kolejne pominięcia etapu, pełne odczyty MCP poniżej ośmiu sekund, potwierdzenia queue/close/GC oraz dysk i limity w nagłówku board. Każdy przebieg watch musi zakończyć się w ciągu 15 sekund. Bramka zapisuje czasy etapów, synchroniczne operacje dyskowe i procesowe oraz odczyty zadań i dziennika.
 
+Na macOS kontroler bramki pozostaje w trybie tła. Mierzony watch zachowuje wartość nice bramki i korzysta z polityki aplikacji jak watch produkcyjny w tmux. Podczas pomiaru nadal działają procesy obciążające CPU i symulacja wolnego dysku.
+
 Katalog regresji obejmuje utratę danych przez GC w 0.22.4 (D1, D2), odzyskiwanie watch i zapisu po ENOSPC w 0.23.1 (FIELD0253-ENOSPC), start kolejki i zablokowane wiadomości w 0.25.2 (FIELD0253-ADMISSION, FIELD0253-BACKGROUND), woluminy zewnętrzne (W102-VOLUME) oraz dziewięć zgłoszeń z 0.26.0 (W110-A–W110-I). [Katalog regresji](../../tests/regression/CATALOG.md)
 
 ## Próba na danych produkcyjnych przed aktualizacją

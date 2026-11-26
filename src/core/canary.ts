@@ -297,9 +297,9 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   const dirtyPath = path.join(world.volume, 'wt-9-0', 'only-copy');
   const cleanPath = path.join(runner.root, 'wt-10-0');
   const measure = async (name: string, args: Record<string, unknown>) => {
-    const value = await canaryRead(deps, name, args);
-    metrics.maxMcpMs = Math.max(metrics.maxMcpMs, value.ms);
-    return value.text;
+    const start = performance.now();
+    try { return (await canaryRead(deps, name, args)).text; }
+    finally { metrics.maxMcpMs = Math.max(metrics.maxMcpMs, performance.now() - start); }
   };
   const register = async (name: string, args: Record<string, unknown>) => {
     const preview = await measure(name, args);
@@ -327,6 +327,11 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     metrics.ticks = tick;
     if (tick === 1) metrics.firstTickMs = elapsedMs;
     metrics.maxTickMs = Math.max(metrics.maxTickMs, elapsedMs);
+    if (opts.load) {
+      const load = opts.load();
+      metrics.peakLoad1 = Math.max(metrics.peakLoad1, load);
+      metrics.minLoad1 = Math.min(metrics.minLoad1, load);
+    }
     opts.sample?.(metrics);
     await memory.queue.idle();
     const snap = readSnapshot(config);
@@ -344,11 +349,6 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     const heartbeat = JSON.parse(fs.readFileSync(watchHeartbeatPath(config), 'utf8')) as {consecutive?: Record<string, number>};
     metrics.maxSkipped = Math.max(metrics.maxSkipped, ...Object.values(heartbeat.consecutive ?? {}));
     assert.ok(metrics.maxSkipped <= 3, `watch stages skipped: ${JSON.stringify(heartbeat.consecutive)}`);
-    if (opts.load) {
-      const load = opts.load();
-      metrics.peakLoad1 = Math.max(metrics.peakLoad1, load);
-      metrics.minLoad1 = Math.min(metrics.minLoad1, load);
-    }
     if (tick === 1 || tick % 5 === 0 || tick === opts.minTicks) {
       const status = JSON.parse(await measure('status', {format: 'json', all: true, limit: 100}));
       assert.equal(status.tasks?.length, Math.min(100, snap.rows.length) + snap.queue.filter(entry => !snap.rows.some(row => row.task === entry.task)).length);
