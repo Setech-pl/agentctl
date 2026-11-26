@@ -1,4 +1,4 @@
-import { claimGcPath } from './start-paths.ts';
+import { claimGcPath, pathsOverlap } from './start-paths.ts';
 import { GcSpace } from './gc-space.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +15,6 @@ import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
 import { errorMessage } from './util.ts';
 import { canPost, OWNER_IDENTITY, postMessage, readableChannels } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
-import { insidePath } from './worktree-volume.ts';
 
 export interface IntegrationGcScope {
   repo: string;
@@ -60,11 +59,11 @@ async function cleanIntegratedHead(ctx: Context, wt: string, base: string): Prom
 }
 
 /** Look for real symlinks (including ignored files) in addition to declared links. */
-async function protectLinkedWorktrees(roots: Set<string>, candidates: GcItem[]): Promise<GcItem[]> {
+export async function protectLinkedWorktrees(roots: Set<string>, candidates: GcItem[]): Promise<GcItem[]> {
   if (!candidates.length) return candidates;
   const targets = new Map(candidates.map(item => [location(item.target), item]));
   const protect = (from: string, to: string) => {
-    for (const root of targets.keys()) if (root !== from && insidePath(root, to)) targets.delete(root);
+    for (const root of targets.keys()) if (root !== from && pathsOverlap(root, to)) targets.delete(root);
   };
   for (const root of roots) {
     const pending = [root];

@@ -514,6 +514,11 @@ function scopeMcpGc(ctx: Context, args: GcPreviewArgs, plan: GcPlan, client?: st
   return { ...plan, items, freeBytes: items.reduce((sum, item) => sum + item.bytes, 0) };
 }
 
+function verifyMcpGcScope(ctx: Context, args: GcPreviewArgs, plan: GcPlan, client?: string): void {
+  const current = scopeMcpGc(ctx, args, plan, client);
+  if (current.items.length !== plan.items.length) throw new AgentctlError('GC authorization changed since preview; nothing was done');
+}
+
 async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false): Promise<GcPlan> {
   if (args.request_id) {
     const saved = readGcPreview(ctx, args.request_id);
@@ -1974,7 +1979,7 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
     }
   }
   const result = request.tool === 'gc'
-    ? await writeTool(applying, 'gc', {}, async fresh => { const result = await applyGc(fresh, scope as GcPlan); await refreshDiskAfterGc(fresh, result.freedBytes); return {text: JSON.stringify(result), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes`}; })
+    ? await writeTool(applying, 'gc', {}, async fresh => { verifyMcpGcScope(fresh, request.args, scope as GcPlan); const result = await applyGc(fresh, scope as GcPlan); await refreshDiskAfterGc(fresh, result.freedBytes); return {text: JSON.stringify(result), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes`}; })
     : request.tool === 'archive'
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
     : await guarded(() => run(applying, { ...request.args, confirm: true, _apply: true } as never));
@@ -2163,7 +2168,7 @@ for (const tool of MCP_TOOLS) {
     if (tool.name === 'gc' && provided.request_id !== undefined) {
       const { request_id, detail, offset, limit, as, ...selection } = provided;
       if (confirm || preview_token || Object.keys(selection).length || typeof request_id !== 'string') {
-        return fail('GC request_id retrieves a plan. Pass only request_id and optional detail, offset or limit; then confirm with preview_token.');
+        return fail('GC request_id retrieves a plan. Pass request_id and optional as, detail, offset or limit; then confirm with preview_token.');
       }
       const saved = readGcPreview(ctx, request_id);
       if (!('plan' in saved)) return saved;
@@ -2307,6 +2312,7 @@ for (const tool of MCP_TOOLS) {
       });
       if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
         const plan = scope as GcPlan;
+        verifyMcpGcScope(fresh, effective, plan, deps.clientId);
         const result = await applyGc(fresh, plan);
         const freed = await refreshDiskAfterGc(fresh, result.freedBytes);
         return { text: JSON.stringify({ ...result, ...(freed ? { note: freed } : {}) }, null, 2), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes` };
@@ -2701,7 +2707,7 @@ for (const tool of MCP_TOOLS) {
 /** Identity is accepted uniformly. Tools that do not consume it keep it out of confirmation hashes. */
 for (const tool of MCP_TOOLS) {
   tool.input = {as: z.string().max(81).optional().describe('Caller identity for WALL/events; accepted and ignored elsewhere.'), ...tool.input};
-  if (tool.name.startsWith('wall_') || ['events_since', 'new', 'queue', 'set_limits'].includes(tool.name)) continue;
+  if (tool.name.startsWith('wall_') || ['events_since', 'new', 'queue', 'set_limits', 'gc'].includes(tool.name)) continue;
   const run = tool.run;
   tool.run = (deps, args) => {const {as: _as, ...input} = args; return run(deps, input);};
 }

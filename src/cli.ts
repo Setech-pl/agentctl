@@ -292,6 +292,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
+  const configWarnings = new Set<string>();
   const contextFor = (dryRun: boolean, { migrate = true, silent = false } = {}): Context => {
     let config: GlobalConfig;
     try {
@@ -301,6 +302,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       const state = readConfigState(path.join(configDir(), 'config-state.json'));
       if (e instanceof AgentctlError && state && !state.ok) throw new AgentctlError(e.message, `${e.hint ? `${e.hint} ` : ''}The ${state.by} keeps the previous settings meanwhile (since ${state.at}).`);
       throw e;
+    }
+    for (const warning of config.warnings ?? []) {
+      if (configWarnings.has(warning)) continue;
+      configWarnings.add(warning);
+      deps.stderr(`warning: ${warning}\n`);
     }
     // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
     const output = silent ? () => {} : line;

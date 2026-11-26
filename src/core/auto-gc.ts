@@ -9,13 +9,14 @@ import { withoutResponseBudget } from './response-budget.ts';
 import { tryFileLock, withoutFileLockOwnership } from './file-lock.ts';
 import { applyGc, checkAutomaticGc, planGc, type GcItem, type GcKind, type GcSkip } from './gc.ts';
 import { GcSpace } from './gc-space.ts';
-import { sizeOf } from './fs-measure.ts';
 import { recordJournal } from './journal.ts';
 import { postMessage, OWNER_IDENTITY } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
 import { errorMessage } from './util.ts';
 
 const GiB = 1024 ** 3;
+const lastHeldKick = new Map<string, number>();
+const HELD_RECHECK_MS = 60_000;
 const kinds: Record<AutoGcCategory, GcKind> = {
   closed_clean_worktrees: 'worktree', stale_node_modules: 'node-modules', own_trash: 'trash', closed_task_cache: 'cache',
 };
@@ -94,8 +95,8 @@ export async function runAutoGc(ctx: Context, volumes: AutoGcVolume[], held = fa
       for (const category of policy.categories) {
         for (const item of candidates.filter(i => i.kind === kinds[category] && deviceAt(i.target) === volume.device)) {
           try {
-            await checkAutomaticGc(ctx, item, volume.device, plan.olderThanMs);
-            ordered.push({ ...item, bytes: await sizeOf(item.target, { fresh: true, now: () => ctx.runner.now() }) });
+            const bytes = await checkAutomaticGc(ctx, item, volume.device, plan.olderThanMs);
+            ordered.push({ ...item, bytes });
           } catch (error) { skipped.push({ ...item, reason: errorMessage(error) }); }
         }
       }
@@ -145,6 +146,16 @@ export async function runAutoGc(ctx: Context, volumes: AutoGcVolume[], held = fa
 
 export function kickAutoGc(ctx: Context, volumes: AutoGcVolume[], opts: { held?: boolean; signal?: AbortSignal; log?: (line: string) => Promise<void> } = {}): void {
   if (!ctx.config.disk.autoGc.enabled || ctx.runner.dryRun || !volumes.length) return;
+  if (opts.held) {
+    const now = ctx.runner.now();
+    volumes = volumes.filter(volume => {
+      const key = `${ctx.config.stateDir}:${volume.device}`;
+      if (now - (lastHeldKick.get(key) ?? -Infinity) < HELD_RECHECK_MS) return false;
+      lastHeldKick.set(key, now);
+      return true;
+    });
+    if (!volumes.length) return;
+  }
   void nextTurn().then(() => commandStage.exit(() => withoutFileLockOwnership(() => withoutResponseBudget(() =>
     runAutoGc(ctx, volumes, opts.held, opts.signal)))))
     .catch(error => opts.log?.(`auto_gc: ${errorMessage(error)}`) ?? ctx.info(`auto_gc: ${errorMessage(error)}`)).catch(() => undefined);

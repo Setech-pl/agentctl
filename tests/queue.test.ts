@@ -785,3 +785,39 @@ it('HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners
     assert.equal(fs.existsSync(file), false);
   }
 });
+
+it('HOTFIX0264-F1: a prepared queue start retries the TASK.md commit without replaying setup', async t => {
+  const s = setup('hotfix0264-prepared');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  const now = Date.now;
+  let offset = 0, setupRuns = 0, probes = 0;
+  t.mock.method(Date, 'now', () => now() + offset);
+  const read = fs.readFileSync;
+  t.mock.method(fs, 'readFileSync', (filePath: Parameters<typeof fs.readFileSync>[0], opts: Parameters<typeof fs.readFileSync>[1]) => {
+    const data = Reflect.apply(read, fs, [filePath, opts]);
+    if (setupRuns && filePath === file && String(data) === String(process.pid)) {
+      offset = 61_000;
+      if (++probes === 3) fs.unlinkSync(file);
+    }
+    return data;
+  });
+  const exec = s.runner.exec.bind(s.runner);
+  s.runner.exec = async (command, args, opts) => {
+    const result = await exec(command, args, opts);
+    if (command === 'sh' && args.at(-1) === 'npm ci') {
+      setupRuns++;
+      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
+    }
+    return result;
+  };
+  await add(s, specOf(s.repo, 'PREPARED', { setup: '[npm ci]' }));
+  try {
+    assert.deepEqual(await s.tick(), ['PREPARED']);
+    assert.equal(setupRuns, 1);
+    assert.equal(probes, 3);
+    assert.deepEqual(readQueue(s.config), []);
+    assert.ok(readTaskRecord(s.config, 'prepared'));
+  } finally {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
+});

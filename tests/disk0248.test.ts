@@ -677,7 +677,7 @@ it('MCP purge_trash previews and confirms receipts via watch with measured free 
   const source = path.join(w.root, 'owned');
   fs.mkdirSync(source);
   const receipt = await moveToTrash(w.ctx, source);
-  const personal = path.join(w.trash, 'personal');
+  const personal = path.join(w.trash, 'personal-mcp');
   fs.writeFileSync(personal, 'keep');
   const statfs = fs.promises.statfs;
   t.mock.method(fs.promises, 'statfs', async (dir: string) => {
@@ -737,7 +737,7 @@ disk:
   const owned = artifact('OWNED'), later = artifact('LATER'), pinned = artifact('PINNED', { pin: true });
   const excluded = artifact('EXCLUDED', { cohort: 'keep-cohort' }), protectedCache = artifact('PROTECTED', { keepCache: true });
   const receipt = await moveToTrash(w.ctx, owned);
-  const personal = path.join(w.trash, 'personal');
+  const personal = path.join(w.trash, 'personal-auto');
   fs.writeFileSync(personal, 'keep');
   await w.runner.sleep(3 * 86400_000);
   const statfs = fs.promises.statfs;
@@ -817,7 +817,7 @@ wall:
   assert.match((await gc.run(deps, { as: 'chat:beta' })).text, /requires your configured chat identity/);
   const first = await gc.run(deps, { include_cache: true });
   assert.match(first.text, /ALPHA/);
-  assert.doesNotMatch(first.text, /Would remove:[^]*BETA.*artifact\.bin/);
+  assert.doesNotMatch(first.text.split('Skipped (uncommitted changes)')[0]!, /BETA/);
   const token = /preview_token: ([\w-]+)/.exec(first.text)?.[1];
   assert.ok(token, first.text);
   const confirmed = await gc.run(deps, { preview_token: token, confirm: true });

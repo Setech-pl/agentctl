@@ -19,7 +19,7 @@ import { formatBytes } from './pull.ts';
 import { archiveDir, listArchivedRecords, listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, cohortKey, errorMessage } from './util.ts';
-import { applyIntegrationGc } from './integration-gc.ts';
+import { applyIntegrationGc, protectLinkedWorktrees } from './integration-gc.ts';
 import type { IntegrationGcScope } from './integration-gc.ts';
 
 /*
@@ -366,16 +366,22 @@ function currentLocalRecords(ctx: Context): TaskRecord[] {
   return [...current, ...listArchivedRecords(ctx.config).filter(record => !windows.has(record.window))].filter(record => !record.host);
 }
 
-async function assertSameDeviceTree(target: string, device: string): Promise<void> {
+async function inspectAutomaticTree(target: string, device: string): Promise<{ bytes: number; newest: number }> {
   const stat = await fs.promises.lstat(target);
   if (String(stat.dev) !== device) throw new Error('different filesystem or nested mount; kept');
+  let bytes = Math.max(stat.size, stat.blocks * 512), newest = stat.mtimeMs;
   if (stat.isDirectory()) {
-    for await (const entry of await fs.promises.opendir(target)) await assertSameDeviceTree(path.join(target, entry.name), device);
+    for await (const entry of await fs.promises.opendir(target)) {
+      const child = await inspectAutomaticTree(path.join(target, entry.name), device);
+      bytes += child.bytes;
+      newest = Math.max(newest, child.newest);
+    }
   }
+  return { bytes, newest };
 }
 
 /** Extra safeguards for unattended deletion. The same facts are checked again with the path claimed. */
-export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number): Promise<void> {
+export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number): Promise<number> {
   const { config, runner } = ctx;
   const stat = fs.lstatSync(item.target);
   if (stat.isSymbolicLink() || String(stat.dev) !== device || String(fs.statSync(path.dirname(item.target)).dev) !== device ||
@@ -386,7 +392,7 @@ export async function checkAutomaticGc(ctx: Context, item: GcItem, device: strin
   const excluded = new Set(config.disk.autoGc.cohortsExclude.map(cohortKey));
   const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(config).filter(start => !start.host).map(start => start.window)]);
   const source = item.trash?.original ?? item.target;
-  const isStore = item.kind === 'node-modules' || item.kind === 'trash' && storeOwnsPath(config, source);
+  const isStore = (item.kind === 'node-modules' || item.kind === 'trash') && storeOwnsPath(config, source);
   const owners = item.kind === 'trash' ? trashOwners(ctx, source, records) : item.kind === 'worktree'
     ? records.filter(record => record.repos.some(repo => pathsOverlap(location(repo.worktree), real)))
     : item.kind === 'cache' ? records.filter(record => record.report && pathsOverlap(location(path.dirname(record.report)), real)) : [];
@@ -433,8 +439,14 @@ export async function checkAutomaticGc(ctx: Context, item: GcItem, device: strin
       }
     }
   }
-  await assertSameDeviceTree(item.target, device);
-  if (item.kind !== 'node-modules' && runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < olderThanMs) throw new Error('contents changed too recently');
+  const roots = [...new Set(records.flatMap(record => record.repos.flatMap(repo => [repo.path, repo.worktree])))];
+  const knownRoots = new Set(roots.filter(root => fs.existsSync(root)).map(location));
+  if (!(await protectLinkedWorktrees(knownRoots, [item])).length) throw new Error('links target in use');
+  const tree = await inspectAutomaticTree(item.target, device);
+  if (item.kind !== 'node-modules' && runner.now() - tree.newest < olderThanMs) throw new Error('contents changed too recently');
+  const current = fs.lstatSync(item.target);
+  if (current.ino !== stat.ino || current.dev !== stat.dev || current.birthtimeMs !== stat.birthtimeMs) throw new Error('path changed during verification');
+  return tree.bytes;
 }
 
 export interface GcResult {
@@ -467,7 +479,8 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
         if (plan.automatic) {
           if (!config.disk.autoGc.enabled || config.disk.autoGc.dryRun || !ctx.config.disk.autoGc.enabled || ctx.config.disk.autoGc.dryRun) throw new Error('automatic GC disabled or dry run');
           release = await claimGcPath(ctx, item.target, async () => {});
-          await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs);
+          const bytes = await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs);
+          if (bytes > item.bytes) throw new Error('size grew after planning; kept within max_per_run_gb');
         }
         if (kind === 'node-modules') {
           await removeStaleNodeModules(ctx, item.target, plan.olderThanMs, async () => {

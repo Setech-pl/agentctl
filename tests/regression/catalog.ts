@@ -30,7 +30,7 @@ export const BUGS: BugEntry[] = [
   { id: 'HOTFIX0264-F5', fixedIn: '0.26.2', symptom: 'Git refused dirty worktree removal even after the owner authorized the named task.', scenarios: [s('fix0227-gc.test.ts', '^HOTFIX0264-F5:')] },
   { id: 'HOTFIX0264-F4', fixedIn: '0.26.2', symptom: 'A config with 0.27.x keys prevented 0.26.x from loading during rollback.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F4:')] },
   { id: 'HOTFIX0264-F3', fixedIn: '0.26.2', symptom: 'A personal Trash item could be purged solely because it shared the basename of a closed task path.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F3:')] },
-  { id: 'HOTFIX0264-F2', fixedIn: '0.26.2', symptom: 'Integration GC cut slow Git worktree removal at the 30-second admission deadline.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F2:')] },
+  { id: 'HOTFIX0264-F2', fixedIn: '0.26.2', symptom: 'Integration GC cut slow Git worktree removal at the 30-second admission deadline.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F2:'), s('p15-send.test.ts', '^HOTFIX0264-F2:')] },
   { id: 'HOTFIX0264-F1', fixedIn: '0.26.2', symptom: 'Start-lock contention failed callers after five seconds and could fail a queued start after setup.', scenarios: [s('queue.test.ts', '^HOTFIX0264-F1:')] },
   { id: 'HOTFIX0263-START', fixedIn: '0.26.1', symptom: 'Hung checkout or setup retained a setup slot and delayed unrelated queued tasks.', scenarios: [s('queue.test.ts', '^HOTFIX0263-START:')] },
   { id: 'HOTFIX0263-LOCK', fixedIn: '0.26.1', symptom: 'An old admission lock with no live owner kept starts from proceeding.', scenarios: [s('queue.test.ts', '^HOTFIX0263-LOCK:')] },
