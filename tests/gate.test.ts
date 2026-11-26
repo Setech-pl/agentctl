@@ -37,11 +37,18 @@ it('REL0272-PRESSURE-POLICY: load workers keep their configured nice level outsi
 });
 it('REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target', async () => {
   const { additionalPressureWorkers, pressureWorkerArgs } = await import('../scripts/prodshape.ts');
-  assert.equal(additionalPressureWorkers(18, 44, 15), 18);
-  assert.equal(additionalPressureWorkers(18, 100, 39), 8);
+  assert.equal(additionalPressureWorkers(18, 44, 15), 5);
+  assert.equal(additionalPressureWorkers(18, 105, 39), 3);
   assert.equal(additionalPressureWorkers(18, 108, 39), 0);
   assert.equal(additionalPressureWorkers(18, 44, 40), 0);
   assert.equal(pressureWorkerArgs('darwin', 0)[1], '0');
+});
+it('REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without weakening the measured requirement', async () => {
+  const { additionalPressureWorkers } = await import('../scripts/prodshape.ts');
+  assert.equal(additionalPressureWorkers(18, 44, 43), 0);
+  assert.equal(additionalPressureWorkers(18, 54, 51), -5);
+  assert.equal(additionalPressureWorkers(18, 80, 120), -10);
+  assert.equal(additionalPressureWorkers(18, 20, 120), -2);
 });
 it('plans tiers in order, keeping both runtimes sequential and live last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);

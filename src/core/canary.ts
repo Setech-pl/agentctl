@@ -275,10 +275,12 @@ export interface CanaryMetrics {
 export async function exerciseCanary(world: CanaryWorld, opts: {
   scale: boolean; mirror?: boolean; minTicks: number; durationMs?: number; signal?: AbortSignal; load?: () => number; sample?: (metrics: CanaryMetrics) => void;
   observeStep?: import('./watch-steps.ts').WatchStepObserver;
+  beforeWatch?: () => Promise<void>;
 }): Promise<CanaryMetrics> {
   const {config, runner, ctx, deps} = world;
   const mirrored = opts.mirror ? listTaskRecords(config).length + listArchivedRecords(config).length : 0;
   const shape = await seedFixture(world, opts.scale, opts.mirror === true);
+  await opts.beforeWatch?.();
   const mirroredReady = new Map<string, number>();
   const begin = runner.now();
   const metrics: CanaryMetrics = {ticks: 0, tasks: shape.count + mirrored, worktreeDirs: runner.worktrees.size,

@@ -20,7 +20,10 @@ export function pressureWorkerArgs(platform = process.platform, extraNice = 19):
 }
 
 export function additionalPressureWorkers(cores: number, workers: number, load1: number): number {
-  return load1 < 2 * cores + 4 ? Math.max(0, Math.min(cores, 6 * cores - workers)) : 0;
+  const step = Math.max(1, Math.ceil(cores / 4));
+  if (load1 >= 3 * cores) return -Math.max(0, Math.min(2 * step, workers - cores));
+  if (load1 > 2 * cores + 8) return -Math.max(0, Math.min(step, workers - cores));
+  return load1 < 2 * cores + 4 ? Math.max(0, Math.min(step, 6 * cores - workers)) : 0;
 }
 
 function installStopHandlers() {
@@ -31,7 +34,7 @@ function installStopHandlers() {
   return {stop, close() { process.off('SIGINT', abort); process.off('SIGTERM', abort); }};
 }
 
-async function runFixture(work: string, evidence: string, signal: AbortSignal): Promise<void> {
+async function runFixture(work: string, evidence: string, signal: AbortSignal, beforeWatch: () => Promise<void>): Promise<void> {
   const cores = os.cpus().length, target = 2 * cores;
   let current: CanaryMetrics | undefined;
   const save = (details: object) => fs.writeFileSync(evidence, JSON.stringify({cores, target,
@@ -40,7 +43,7 @@ async function runFixture(work: string, evidence: string, signal: AbortSignal): 
   const profile = profileWatch(console.log);
   try {
     current = await runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
-      scale: true, minTicks: 20, signal, load, observeStep: profile.observe,
+      scale: true, minTicks: 20, signal, load, observeStep: profile.observe, beforeWatch,
       sample: metrics => { current = {...metrics}; save({status: 'RUNNING'}); },
     }), 2, 5);
     assert.ok(current.ticks >= 20 && current.tasks >= 1500 && current.worktreeDirs >= 2000 && current.queued === 40 && current.wall >= 150);
@@ -53,24 +56,37 @@ async function runFixture(work: string, evidence: string, signal: AbortSignal): 
   } finally { profile.restore(); }
 }
 
-async function applicationFixture(work: string, evidence: string, signal: AbortSignal): Promise<void> {
-  if (process.platform !== 'darwin') return runFixture(work, evidence, signal);
+async function applicationFixture(work: string, evidence: string, signal: AbortSignal, warmPressure: (signal: AbortSignal) => Promise<void>): Promise<void> {
+  if (process.platform !== 'darwin') return runFixture(work, evidence, signal, () => warmPressure(signal));
   // The gate controller stays in Darwin background policy. A tmux watch on the real machine runs as an application.
   // Keep the gate's nice level and the same CPU workers and filesystem delays for the measured service process.
   console.log('prodshape watcher uses application scheduling (inherited nice and observed CPU contention)');
   const worker = spawn('/bin/sh', ['-c', 'taskpolicy -B -p "$$" && exec "$@"', 'prodshape-watch', process.execPath,
-    '--experimental-strip-types', '--no-warnings', process.argv[1]!, '--watch-workload'], {stdio: 'inherit'});
+    '--experimental-strip-types', '--no-warnings', process.argv[1]!, '--watch-workload'], {stdio: ['inherit', 'inherit', 'inherit', 'ipc']});
   let escalation: NodeJS.Timeout | undefined;
   const stop = () => {
     worker.kill('SIGTERM');
     escalation ??= setTimeout(() => worker.kill('SIGKILL'), 5000);
   };
+  const lifetime = new AbortController();
+  let warming: Promise<void> | undefined;
+  let pressureError: unknown;
+  worker.once('message', message => {
+    warming = (async () => {
+      assert.equal(message, 'fixture-ready');
+      await warmPressure(AbortSignal.any([signal, lifetime.signal]));
+      if (worker.connected) worker.send('pressure-ready');
+    })().catch(error => { pressureError = error; stop(); });
+  });
   signal.addEventListener('abort', stop, {once: true});
   if (signal.aborted) stop();
   try {
     const [code] = await once(worker, 'close');
+    if (pressureError) throw pressureError;
     assert.equal(code, 0, 'prodshape watch workload failed');
   } finally {
+    lifetime.abort();
+    await warming;
     signal.removeEventListener('abort', stop);
     clearTimeout(escalation);
   }
@@ -83,43 +99,64 @@ async function main() {
   liveCacheRoot(path.dirname(evidence));
   const {stop, close} = installStopHandlers();
   if (process.argv[2] === '--watch-workload') {
-    try { return await runFixture(work, evidence, stop.signal); }
-    finally { close(); }
+    try {
+      return await runFixture(work, evidence, stop.signal, async () => {
+        assert.ok(process.send && process.connected, 'prodshape watch workload requires its controller');
+        const reply = once(process, 'message', {signal: stop.signal});
+        process.send('fixture-ready');
+        const [message] = await reply;
+        assert.equal(message, 'pressure-ready');
+      });
+    } finally {
+      close();
+      if (process.connected) process.disconnect?.();
+    }
   }
   const cores = os.cpus().length, target = 2 * cores;
-  const workers: { process: ChildProcess; closed: Promise<unknown> }[] = [];
+  const workers: { process: ChildProcess; closed: Promise<unknown>; retiring: boolean }[] = [];
   let closing = false;
   let workerError: Error | undefined;
-  let addedAt = 0;
+  let adjustedAt = 0;
   const addWorkers = (count: number, extraNice: number) => {
     for (let i = 0; i < count; i++) {
       const child = spawn('nice', pressureWorkerArgs(process.platform, extraNice), {stdio: 'ignore'});
       const closed = once(child, 'close').catch(error => { workerError = error; stop.abort(); });
-      workers.push({process: child, closed});
-      child.once('exit', () => { if (!closing && !stop.signal.aborted) { workerError = Error('CPU pressure loop exited early'); stop.abort(); } });
+      const worker = {process: child, closed, retiring: false};
+      workers.push(worker);
+      child.once('exit', () => { if (!worker.retiring && !closing && !stop.signal.aborted) { workerError = Error('CPU pressure loop exited early'); stop.abort(); } });
     }
   };
   const keepPressure = () => {
-    if (stop.signal.aborted || Date.now() - addedAt < 30_000) return;
-    const additional = additionalPressureWorkers(cores, workers.length, load());
-    if (!additional) return;
-    addedAt = Date.now();
-    addWorkers(additional, 0);
-    console.log(`prodshape pressure increased to ${workers.length} CPU workers at load1 ${load().toFixed(2)}`);
+    if (stop.signal.aborted) return;
+    const observed = load();
+    const live = workers.filter(worker => !worker.retiring);
+    const change = additionalPressureWorkers(cores, live.length, observed);
+    // load1 is a lagging average. Grow slowly and let overshoot unwind sooner.
+    if (!change || Date.now() - adjustedAt < (change < 0 ? 10_000 : 25_000)) return;
+    adjustedAt = Date.now();
+    if (change > 0) addWorkers(change, 0);
+    else for (const worker of live.slice(change)) {
+      worker.retiring = true;
+      worker.process.kill('SIGTERM');
+    }
+    console.log('prodshape pressure adjusted to ' + (live.length + change) + ' CPU workers at load1 ' + observed.toFixed(2));
   };
   let pressureTimer: NodeJS.Timeout | undefined;
-  try {
+  const warmPressure = async (signal: AbortSignal) => {
     addWorkers(2 * cores + 8, 19);
     const warm = Date.now();
-    addedAt = warm;
-    while (load() < target + 4 && !stop.signal.aborted) {
-      assert.ok(Date.now() - warm < 180_000, `CPU contention did not reach load1 ${target}, observed ${load()}`);
+    adjustedAt = warm;
+    while (load() < target + 4 && !signal.aborted) {
+      assert.ok(Date.now() - warm < 300_000, `CPU contention did not reach load1 ${target}, observed ${load()}`);
       keepPressure();
       await sleep(1000);
     }
+    signal.throwIfAborted();
     pressureTimer = setInterval(keepPressure, 5000);
     console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
-    await applicationFixture(work, evidence, stop.signal);
+  };
+  try {
+    await applicationFixture(work, evidence, stop.signal, warmPressure);
     if (workerError) throw workerError;
   } catch (error) {
     const failure = workerError ?? error;

@@ -1695,6 +1695,16 @@
       "REL0272-P19-RETRY: two reused worktrees share one bounded process census"
     ]
   },
+  "REL0272-PRESSURE-OVERSHOOT": {
+    "rev": "cad707e92212f3f95773251354295b93c340ab74",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without weakening the measured requirement",
+      "REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without weakening the measured requirement"
+    ]
+  },
   "REL0272-PRESSURE-POLICY": {
     "rev": "6631d091d0b6f64af65184dbb37f68684d9faa43",
     "outcome": "FAILS",
