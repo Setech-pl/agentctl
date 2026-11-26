@@ -269,7 +269,7 @@ export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: st
     kickAutoGc(ctx, report.volumes.flatMap(volume =>
       !volume.host && volume.device && volume.samplePath && volume.availableBytes !== null
         ? [{ device: volume.device, path: volume.mount ?? volume.samplePath }] : []),
-    { ...(log ? { log } : {}), ...(signal ? { signal } : {}) });
+    { watcher: true, ...(log ? { log } : {}), ...(signal ? { signal } : {}) });
     let previous: Record<string, DiskLevel> = {};
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
     const next = { ...previous };

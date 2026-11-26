@@ -134,7 +134,7 @@ export async function takeAutoGcKick(ctx: Context, signal?: AbortSignal, log?: (
   let volumes: AutoGcVolume[] = [];
   try { const data = JSON.parse(raw); volumes = Array.isArray(data.volumes) ? data.volumes.filter((v: AutoGcVolume) => typeof v?.device === 'string' && typeof v?.path === 'string') : []; } catch { /* unreadable request */ }
   if (!volumes.length) return false;
-  kickAutoGc(ctx, volumes, { held: true, ...(signal ? { signal } : {}), ...(log ? { log } : {}) });
+  kickAutoGc(ctx, volumes, { held: true, watcher: true, ...(signal ? { signal } : {}), ...(log ? { log } : {}) });
   return true;
 }
 
@@ -250,9 +250,9 @@ export async function runAutoGc(ctx: Context, volumes: AutoGcVolume[], held = fa
   } finally { release(); }
 }
 
-export function kickAutoGc(ctx: Context, volumes: AutoGcVolume[], opts: { held?: boolean; signal?: AbortSignal; log?: (line: string) => Promise<void> } = {}): void {
+export function kickAutoGc(ctx: Context, volumes: AutoGcVolume[], opts: { held?: boolean; signal?: AbortSignal; log?: (line: string) => Promise<void>; watcher?: boolean } = {}): void {
   if (!ctx.config.disk.autoGc.enabled || ctx.runner.dryRun || !volumes.length) return;
-  if (!opts.signal && !host) {
+  if (!opts.watcher && !opts.signal && !host) {
     // L1: not the watcher. Leave the request; the watcher runs it with its own stop signal on its next disk tick.
     try { atomicWriteFile(kickFile(ctx), JSON.stringify({ at: new Date(ctx.runner.now()).toISOString(), held: Boolean(opts.held), volumes })); } catch { /* the periodic disk tick still runs auto_gc */ }
     return;

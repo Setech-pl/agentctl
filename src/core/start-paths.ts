@@ -81,23 +81,6 @@ export async function claimStartPaths(ctx: Context, kind: PathClaim['kind'], tar
   };
 }
 
-/** Existing claims (for checks that must see a start in progress); stale ones are ignored. */
-export function activeClaims(ctx: Context): PathClaim[] {
-  const dir = path.join(ctx.config.stateDir, 'start-path-claims');
-  const claims: PathClaim[] = [];
-  let names: string[] = [];
-  try { names = fs.readdirSync(dir); } catch { return claims; }
-  for (const name of names) {
-    if (!/^[a-f0-9-]{36}\.json$/.test(name)) continue;
-    try {
-      const claim = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as PathClaim;
-      try { process.kill(claim.pid, 0); } catch { continue; }
-      if (!staleClaim(claim)) claims.push(claim);
-    } catch { /* removed meanwhile */ }
-  }
-  return claims;
-}
-
 export function claimGcPath(ctx: Context, target: string, check: () => Promise<void>): Promise<() => void> {
   return withStartLock(ctx, async () => {
     await check();

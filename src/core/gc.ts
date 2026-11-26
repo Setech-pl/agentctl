@@ -550,12 +550,13 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           const run = plan.automatic.run ?? new AutoGcRun(ctx, ctx.config.disk.autoGc);
           // M3: under start.lock (the lock every start takes before its own path claim) the queue is read again, so a task queued or
           // admitted since the precheck keeps what it needs, and a start that begins later sees this claim and waits.
+          // Short under the lock: the queue is read fresh, owners come from the run's index (ownership is rechecked below, after a refresh).
           release = await claimGcPath(ctx, item.target, async () => {
-            run.refresh();
             const owners = item.kind === 'worktree' ? await run.worktreeOwners(await run.location(item.target)) : item.kind === 'cache' ? await run.cacheOwners(await run.location(item.target)) : [];
             const queued = await run.queueProtection(item.trash?.original ?? item.target, owners);
             if (queued) throw new Error(queued);
           });
+          run.refresh();
           const bytes = await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs, run);
           if (bytes > item.bytes) throw new Error('size grew after planning; kept within max_per_run_gb');
         }
