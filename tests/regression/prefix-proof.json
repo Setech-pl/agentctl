@@ -1624,6 +1624,16 @@
       "REL0272-DOCTOR-IO: cached doctor does not open task headers synchronously"
     ]
   },
+  "REL0272-GC-APPLY-IO": {
+    "rev": "25fae22e54d8692ce1dd744d56e215f4587a3f45",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-GC-APPLY-IO: removal revalidates task record versions without synchronous header reads",
+      "REL0272-GC-APPLY-IO: removal revalidates task record versions without synchronous header reads"
+    ]
+  },
   "REL0272-GC-INVENTORY": {
     "rev": "560b422462e02f28812e9251981ddddef4893d24",
     "outcome": "FAILS",
@@ -1632,6 +1642,16 @@
     "failing": [
       "REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory",
       "REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory"
+    ]
+  },
+  "REL0272-GC-RESULT-COMPAT": {
+    "rev": "25fae22e54d8692ce1dd744d56e215f4587a3f45",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-GC-EVENT: deferred cohort GC publishes one summary",
+      "FIELD0256-GC-EVENT: deferred cohort GC publishes one summary"
     ]
   },
   "REL0272-GIT-REFUSAL": {

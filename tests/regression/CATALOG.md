@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-GC-APPLY-IO | Confirmed GC repeatedly reopened every task header synchronously while removing worktrees. | `tests/field0253-gc.test.ts` (`^REL0272-GC-APPLY-IO:`) | 0.27.2 | fails on 25fae22e54d8692ce1dd744d56e215f4587a3f45 (1 failing of 1) |
+| REL0272-GC-RESULT-COMPAT | The 0.26.2 hotfix merge replaced normal GC cohort results with a machine payload in events_since. | `tests/field0253-gc.test.ts` (`^FIELD0256-GC-EVENT:`) | 0.27.2 | fails on 25fae22e54d8692ce1dd744d56e215f4587a3f45 (1 failing of 1) |
 | REL0272-PRESSURE-OVERSHOOT | An increasing-only CPU injector overshot two cores per core severalfold and never shed workers. | `tests/gate.test.ts` (`^REL0272-PRESSURE-OVERSHOOT:`) | 0.27.2 | fails on cad707e92212f3f95773251354295b93c340ab74 (1 failing of 1) |
 | REL0272-P19-STDIO-FIXTURE | The stdio setup fixture raced the asynchronous audit and could finish before clients exercised disconnect during setup. | `tests/p19-stdio.test.ts` (`setup survives the death`) | 0.27.2 | not proven: Fixture race. The held-setup scenario also passes on the preceding implementation. |
 | REL0272-GC-INVENTORY | A narrow GC preview repeatedly scanned every task and reloaded the same repository link configuration. | `tests/review0256.test.ts` (`^REL0272-GC-INVENTORY:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |

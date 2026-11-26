@@ -28,6 +28,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-GC-APPLY-IO', fixedIn: '0.27.2', proofAgainst: '25fae22e54d8692ce1dd744d56e215f4587a3f45', symptom: 'Confirmed GC repeatedly reopened every task header synchronously while removing worktrees.', scenarios: [s('field0253-gc.test.ts', '^REL0272-GC-APPLY-IO:')] },
+  { id: 'REL0272-GC-RESULT-COMPAT', fixedIn: '0.27.2', proofAgainst: '25fae22e54d8692ce1dd744d56e215f4587a3f45', symptom: 'The 0.26.2 hotfix merge replaced normal GC cohort results with a machine payload in events_since.', scenarios: [s('field0253-gc.test.ts', '^FIELD0256-GC-EVENT:')] },
   { id: 'REL0272-PRESSURE-OVERSHOOT', fixedIn: '0.27.2', proofAgainst: 'cad707e92212f3f95773251354295b93c340ab74', symptom: 'An increasing-only CPU injector overshot two cores per core severalfold and never shed workers.', scenarios: [s('gate.test.ts', '^REL0272-PRESSURE-OVERSHOOT:')] },
   { id: 'REL0272-P19-STDIO-FIXTURE', fixedIn: '0.27.2', symptom: 'The stdio setup fixture raced the asynchronous audit and could finish before clients exercised disconnect during setup.', scenarios: [s('p19-stdio.test.ts', 'setup survives the death')], noProof: 'Fixture race. The held-setup scenario also passes on the preceding implementation.' },
   { id: 'REL0272-GC-INVENTORY', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'A narrow GC preview repeatedly scanned every task and reloaded the same repository link configuration.', scenarios: [s('review0256.test.ts', '^REL0272-GC-INVENTORY:')] },

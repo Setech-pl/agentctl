@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Confirmed GC revalidates task headers asynchronously and keeps cohort summaries in the event stream. Trash purge carries measured results by volume. / Potwierdzone GC sprawdza nagłówki asynchronicznie i zachowuje podsumowania kohort w zdarzeniach. Opróżnianie kosza zwraca pomiary według woluminu.
+
 - Watch refreshes its index after a confirmed cancellation. Cached doctor and GC previews reuse asynchronous task inventories. / Watch odświeża indeks po potwierdzonym anulowaniu. Podglądy GC i skrócony doctor współdzielą asynchroniczny odczyt zadań.
 
 - Watch reuses indexed headers for launch and status, checks plan readings separately from token accounting, and runs admission independently of status. Legacy launches wait for a named resume without a duplicate window-loss alert. / Watch współdzieli indeks nagłówków, oddziela odczyt limitów od zliczania tokenów i uruchamia kolejkę niezależnie od odczytu stanu. Przerwane starty starszej wersji czekają na jawne wznowienie bez powielonego alertu o oknie.

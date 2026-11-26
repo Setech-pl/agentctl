@@ -2033,7 +2033,11 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
       verifyMcpGcScope(fresh, request.args, plan);
       const result = await applyGc(fresh, plan);
       await refreshDiskAfterGc(fresh, result.freedBytes);
-      // The durable MCP result is bounded, so write measurements before the item lists.
+      if (request.args.purge_trash !== true) {
+        const summary = gcResultLine(result, typeof request.args.cohort === 'string' ? request.args.cohort : undefined);
+        return {text: summary, executed: true, announce: summary};
+      }
+      // Trash results carry measured per-volume data before the bounded item lists.
       const { freedBytes, freedByVolume, done, failed } = result;
       return { text: JSON.stringify({ freedBytes, freedByVolume, done, failed }), executed: true, announce: `gc: ${done.length} items, ${freedBytes} bytes` };
     })

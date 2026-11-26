@@ -533,13 +533,14 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           result.done.push(item);
           continue;
         }
-        const assertUnpinned = () => {
-          const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
-          const protectedRecords = records.filter(r => r.host === item.host).filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
+        const assertUnpinned = async () => {
+          const inventory = await snapshotRecords(config, true);
+          const protectedRecords = inventory.all.filter(r => r.host === item.host).filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
           const overlaps = (a: string, b: string) => same(a, b) || location(a).startsWith(`${location(b)}${path.sep}`) || location(b).startsWith(`${location(a)}${path.sep}`);
           if (protectedRecords.some(r => r.task.toLowerCase() === item.task.toLowerCase() || (kind === 'worktree' && r.repos.some(repo => same(repo.worktree, item.target))) || (kind === 'cache' && r.report && overlaps(path.dirname(r.report), item.target)))) throw new Error('pinned/kept task; left in place');
+          return inventory;
         };
-        assertUnpinned();
+        const inventory = await assertUnpinned();
         if (item.host) {
           const done = await applyRemoteGc(ctx, item, plan.olderThanMs, plan);
           result.done.push(done); result.freedBytes += done.bytes; continue;
@@ -556,9 +557,9 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
             const head = await git(ctx, ['-C', item.target, 'rev-parse', '--abbrev-ref', 'HEAD']);
             if (head.code !== 0 || PROTECTED.has(head.out)) throw new Error('dead worktree checkout changed or is protected; kept');
           }
-          const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
+          const borrowers = inventory.current.filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
           if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
-          const users = linkUsers(item.target, knownLinkReferences(config));
+          const users = linkUsers(item.target, knownLinkReferences(config, inventory));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
           const risk = await worktreeRisk(ctx, item.target, item.base, item.dead);
           const forced = !item.dead && permitsDirty(plan.forceDirty, item.task);
@@ -569,24 +570,24 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           if (forceRemove || forced && risk.unpushedCommits > 0) await recordJournal(ctx, {
             kind: 'gc-force-dirty', task: item.task, text: `Owner-authorized worktree removal: ${item.target} (${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits)`,
           });
-          assertUnpinned();
+          await assertUnpinned();
           const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forceRemove ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
           if (!plan.includeCache) throw new Error('cache deletion requires explicit include_cache: true');
-          const record = [...listTaskRecords(config), ...listArchivedRecords(config)].find(r => r.task === item.task);
+          const record = inventory.all.find(r => r.task === item.task);
           if (!record) throw new Error('cannot verify cache owner; kept');
           const protection = cacheProtection(record, item.target);
           if (protection || plan.keepCache?.some(t => t.toLowerCase() === item.task.toLowerCase())) throw new Error(protection ?? 'keep_cache requested for task');
           if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
           if (!runner.dryRun) await space.before(item.target);
-          assertUnpinned();
+          await assertUnpinned();
           await remove(item);
         } else if (kind === 'archive') {
-          assertUnpinned();
+          await assertUnpinned();
           await runner.rename(item.target, path.join(archiveDir(config), path.basename(item.target)));
         } else {
-          assertUnpinned();
+          await assertUnpinned();
           const r = await runner.exec('git', ['-C', item.repo as string, 'branch', '-d', item.branch as string]);
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         }
