@@ -83,7 +83,7 @@ describe('new: waiting for folder trust', () => {
       waitTrust: { timeoutMs: config.agents.claude.trustTimeout * 1000, onWaiting: () => {} },
     });
     assert.deepEqual([r.ready, r.trust], [false, false], 'never became ready, and the dialog is gone');
-    assert.equal(runner.now() - t0, 3000 + 2000, '3s with the dialog up, then ready_timeout (2s) from the moment it went away, not the 10s trust timeout');
+    assert.equal(runner.now() - t0, 3000 + 2000 + 500, '3s with the dialog up, then ready_timeout (2s) from the moment it went away plus the final capture (0.26.3), not the 10s trust timeout');
   });
 
   it('times out after trust_timeout, leaves the window open and says how to send the prompt', async () => {

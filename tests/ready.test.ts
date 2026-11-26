@@ -32,8 +32,9 @@ describe('waitForReady', () => {
     const t0 = runner.now();
     const result = await waitForReady(runner, tmux, 'nc-1', { pattern: 'ready', timeoutMs: 2000, intervalMs: 500 });
     assert.deepEqual(result, { ready: false, trust: false, screen: 'still loading' });
-    assert.equal(captures(), 5);
-    assert.equal(runner.now() - t0, 2000);
+    // 0.26.3 (READY0263-RECAPTURE): one more capture, one interval after the deadline.
+    assert.equal(captures(), 6);
+    assert.equal(runner.now() - t0, 2500);
   });
 
   it('keeps polling when capture-pane fails (window not up yet)', async () => {

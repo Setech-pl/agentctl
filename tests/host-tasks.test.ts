@@ -325,7 +325,8 @@ for (const host of ['local', 'pc']) {
     screen.screen = 'Welcome to Kimi Code!\nNo session yet\n│ >';
     const beforeTimeout = w.runner.now();
     assert.equal((await waitForReady(w.runner, w.ctx.tmux, record.window, options)).ready, false);
-    assert.equal(w.runner.now() - beforeTimeout, options.timeoutMs);
+    // 0.26.3 (READY0263-RECAPTURE): one more capture, one poll interval (500 ms) after the deadline, before the wait gives up.
+    assert.equal(w.runner.now() - beforeTimeout, options.timeoutMs + 500);
     assert.equal(w.pastes.length, 0);
     assert.doesNotMatch(w.localTmux.seen.join('\n'), /paste-buffer|send-keys/);
   });
