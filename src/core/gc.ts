@@ -19,7 +19,8 @@ import { formatBytes } from './pull.ts';
 import { archiveDir, listArchivedRecords, listTaskRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, cohortKey, errorMessage } from './util.ts';
-import { applyIntegrationGc, protectLinkedWorktrees } from './integration-gc.ts';
+import { applyIntegrationGc } from './integration-gc.ts';
+import { AutoGcRun, valuableIgnored } from './auto-gc-run.ts';
 import type { IntegrationGcScope } from './integration-gc.ts';
 
 /*
@@ -68,7 +69,8 @@ export interface GcSkip {
 
 export interface GcPlan {
   integration?: IntegrationGcScope;
-  automatic?: { device: string };
+  /** Unattended run: the device it may touch and the run's shared indexes (not serialized). */
+  automatic?: { device: string; run?: AutoGcRun };
   /** An MCP plan may estimate sizes; safety checks are always fresh. */
   cachedSizes?: boolean;
   deleteMode?: 'delete' | 'trash';
@@ -360,19 +362,14 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   return { deleteMode: config.gc.deleteMode, keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
 }
 
-function currentLocalRecords(ctx: Context): TaskRecord[] {
-  const current = listTaskRecords(ctx.config);
-  const windows = new Set(current.map(record => record.window));
-  return [...current, ...listArchivedRecords(ctx.config).filter(record => !windows.has(record.window))].filter(record => !record.host);
-}
-
-async function inspectAutomaticTree(target: string, device: string): Promise<{ bytes: number; newest: number }> {
+async function inspectAutomaticTree(target: string, device: string, run: AutoGcRun): Promise<{ bytes: number; newest: number }> {
   const stat = await fs.promises.lstat(target);
   if (String(stat.dev) !== device) throw new Error('different filesystem or nested mount; kept');
   let bytes = Math.max(stat.size, stat.blocks * 512), newest = stat.mtimeMs;
   if (stat.isDirectory()) {
     for await (const entry of await fs.promises.opendir(target)) {
-      const child = await inspectAutomaticTree(path.join(target, entry.name), device);
+      await run.pace();
+      const child = await inspectAutomaticTree(path.join(target, entry.name), device, run);
       bytes += child.bytes;
       newest = Math.max(newest, child.newest);
     }
@@ -380,22 +377,34 @@ async function inspectAutomaticTree(target: string, device: string): Promise<{ b
   return { bytes, newest };
 }
 
-/** Extra safeguards for unattended deletion. The same facts are checked again with the path claimed. */
-export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number): Promise<number> {
+/** Git's ignored entries of a worktree (`!!` rows; whole ignored folders come as one row ending in "/"). */
+async function ignoredEntries(ctx: Context, wt: string): Promise<string[]> {
+  const r = await ctx.runner.exec('git', ['-C', wt, 'status', '--porcelain=v1', '-z', '--ignored', '--untracked-files=normal'], { readOnly: true, async: true, timeoutMs: ctx.config.git.timeoutS * 1000 });
+  if (r.code !== 0) throw new Error(`git status --ignored failed: ${r.stderr.trim() || r.code}`);
+  return r.stdout.split('\0').filter(row => row.startsWith('!! ')).map(row => row.slice(3));
+}
+
+/**
+ * Extra safeguards for unattended deletion. The same facts are checked again with the path claimed. One run (AutoGcRun) shares the
+ * inventory, the link and symlink indexes and the report references; every walk yields and stops at the run's deadline (0.26.4, M1).
+ */
+export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number, run = new AutoGcRun(ctx, ctx.config.disk.autoGc)): Promise<number> {
   const { config, runner } = ctx;
-  const stat = fs.lstatSync(item.target);
-  if (stat.isSymbolicLink() || String(stat.dev) !== device || String(fs.statSync(path.dirname(item.target)).dev) !== device ||
+  run.check();
+  run.stats.prechecks++;
+  const stat = await fs.promises.lstat(item.target);
+  if (stat.isSymbolicLink() || String(stat.dev) !== device || String((await fs.promises.stat(path.dirname(item.target))).dev) !== device ||
       (process.getuid && stat.uid !== process.getuid())) throw new Error('unsafe owner, symlink or filesystem boundary; kept');
-  const real = fs.realpathSync(item.target);
-  if (real !== path.join(fs.realpathSync(path.dirname(item.target)), path.basename(item.target))) throw new Error('path resolved outside its directory');
-  const records = currentLocalRecords(ctx);
+  const real = await fs.promises.realpath(item.target);
+  if (real !== path.join(await fs.promises.realpath(path.dirname(item.target)), path.basename(item.target))) throw new Error('path resolved outside its directory');
+  const records = await run.records();
   const excluded = new Set(config.disk.autoGc.cohortsExclude.map(cohortKey));
-  const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(config).filter(start => !start.host).map(start => start.window)]);
+  const live = await run.live();
   const source = item.trash?.original ?? item.target;
   const isStore = (item.kind === 'node-modules' || item.kind === 'trash') && storeOwnsPath(config, source);
   const owners = item.kind === 'trash' ? trashOwners(ctx, source, records) : item.kind === 'worktree'
-    ? records.filter(record => record.repos.some(repo => pathsOverlap(location(repo.worktree), real)))
-    : item.kind === 'cache' ? records.filter(record => record.report && pathsOverlap(location(path.dirname(record.report)), real)) : [];
+    ? await run.worktreeOwners(real)
+    : item.kind === 'cache' ? await run.cacheOwners(real) : [];
   if (!owners.length && !isStore) throw new Error('no verifiable agentctl owner');
   for (const owner of owners) {
     if (owner.pin || owner.keepCache) throw new Error('pinned / keep_cache task');
@@ -406,16 +415,41 @@ export async function checkAutomaticGc(ctx: Context, item: GcItem, device: strin
   }
   if (isStore && records.some(record => record.cohort && excluded.has(cohortKey(record.cohort)) &&
       record.repos.some(repo => storeOwnsPath(config, source, repo.path)))) throw new Error('cohort excluded by owner');
-  if (knownLinkReferences(config).some(ref => ref.target === '*' || pathsOverlap(location(ref.target.replace(/\/\*$/, '')), location(source)))) throw new Error('links target in use');
+  // M3: queued, starting and needs-attention tasks keep what they will use.
+  const queued = await run.queueProtection(source, owners);
+  if (queued) throw new Error(queued);
+  const users = await run.linkUsers(source);
+  if (users.length) throw new Error(`links target used by ${users.join(', ')}`);
   if (item.kind === 'worktree') {
-    const registered = item.repo && await listWorktrees(ctx, item.repo);
-    const row = registered && registered.find(worktree => same(worktree.path, item.target));
-    if (!row || same(registered[0]!.path, item.target) || row.branch && PROTECTED.has(row.branch)) throw new Error('not a registered task worktree or protected branch');
     const owner = owners.find(record => record.task === item.task);
-    if (!owner || owner.reviewMode || !owner.repos.some(repo => !same(repo.path, repo.worktree) && same(repo.path, item.repo!) && same(repo.worktree, item.target))) throw new Error('worktree ownership changed');
+    if (!owner || owner.reviewMode) throw new Error('worktree ownership changed');
+    if (!owner.repos.some(repo => !same(repo.path, repo.worktree) && same(repo.path, item.repo!) && same(repo.worktree, item.target))) throw new Error('worktree ownership changed');
+    // One `git worktree list` per repository and run, resolved once (async): a repository may register thousands of worktrees.
+    const registered = item.repo ? await run.memo(`worktrees:${item.repo}`, async () => {
+      const rows = await listWorktrees(ctx, item.repo!);
+      if (!rows) return undefined;
+      const byLocation = new Map<string, { row: WorktreeListing; main: boolean }>();
+      for (const [index, row] of rows.entries()) { await run.pace(); byLocation.set(await run.location(row.path), { row, main: index === 0 }); }
+      return byLocation;
+    }) : undefined;
+    const found = registered?.get(real);
+    if (!found || found.main || found.row.branch && PROTECTED.has(found.row.branch)) throw new Error('not a registered task worktree or protected branch');
+    run.check();
+    const risk = await worktreeRisk(ctx, item.target, item.base);
+    if (risk.dirtyFiles || risk.unpushedCommits) {
+      Object.assign(item, { dirtyFiles: risk.dirtyFiles, unpushedCommits: risk.unpushedCommits });
+      throw new Error(`uncommitted changes / unpushed work (${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison})`);
+    }
+    // M2: `git worktree remove` also deletes ignored files. Only the throwaway list (auto_gc.ignored_ok) may go unattended.
+    run.check();
+    const { valuable, throwaway } = await valuableIgnored(run, item.target, await ignoredEntries(ctx, item.target));
+    if (valuable.length) throw new Error(`ignored files outside auto_gc.ignored_ok: ${valuable.slice(0, 5).join(', ')}${valuable.length > 5 ? ` (+${valuable.length - 5})` : ''}`);
+    const kept = throwaway.map(rel => path.join(real, rel));
+    const referenced = (await run.reportRefs()).find(ref => ref.path.startsWith(`${real}${path.sep}`) && kept.some(dir => pathsOverlap(dir, ref.path)));
+    if (referenced) throw new Error(`referenced by report: ${referenced.report}`);
   }
   if (item.kind === 'cache') {
-    const root = fs.realpathSync(config.cache);
+    const root = await fs.promises.realpath(config.cache);
     const under = path.relative(path.resolve(config.cache), path.resolve(item.target));
     if (real !== path.join(root, under) || !real.startsWith(root + path.sep) || !owners.some(owner => owner.task === item.task)) throw new Error('cache path is outside the owned cache');
     for (const owner of owners) {
@@ -439,12 +473,11 @@ export async function checkAutomaticGc(ctx: Context, item: GcItem, device: strin
       }
     }
   }
-  const roots = [...new Set(records.flatMap(record => record.repos.flatMap(repo => [repo.path, repo.worktree])))];
-  const knownRoots = new Set(roots.filter(root => fs.existsSync(root)).map(location));
-  if (!(await protectLinkedWorktrees(knownRoots, [item])).length) throw new Error('links target in use');
-  const tree = await inspectAutomaticTree(item.target, device);
+  const linked = await run.linkedInto(item.target);
+  if (linked) throw new Error(`links target in use (symlink ${linked})`);
+  const tree = await inspectAutomaticTree(item.target, device, run);
   if (item.kind !== 'node-modules' && runner.now() - tree.newest < olderThanMs) throw new Error('contents changed too recently');
-  const current = fs.lstatSync(item.target);
+  const current = await fs.promises.lstat(item.target);
   if (current.ino !== stat.ino || current.dev !== stat.dev || current.birthtimeMs !== stat.birthtimeMs) throw new Error('path changed during verification');
   return tree.bytes;
 }
@@ -478,8 +511,16 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
       try {
         if (plan.automatic) {
           if (!config.disk.autoGc.enabled || config.disk.autoGc.dryRun || !ctx.config.disk.autoGc.enabled || ctx.config.disk.autoGc.dryRun) throw new Error('automatic GC disabled or dry run');
-          release = await claimGcPath(ctx, item.target, async () => {});
-          const bytes = await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs);
+          const run = plan.automatic.run ?? new AutoGcRun(ctx, ctx.config.disk.autoGc);
+          // M3: under start.lock (the lock every start takes before its own path claim) the queue is read again, so a task queued or
+          // admitted since the precheck keeps what it needs, and a start that begins later sees this claim and waits.
+          release = await claimGcPath(ctx, item.target, async () => {
+            run.refresh();
+            const owners = item.kind === 'worktree' ? await run.worktreeOwners(await run.location(item.target)) : item.kind === 'cache' ? await run.cacheOwners(await run.location(item.target)) : [];
+            const queued = await run.queueProtection(item.trash?.original ?? item.target, owners);
+            if (queued) throw new Error(queued);
+          });
+          const bytes = await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs, run);
           if (bytes > item.bytes) throw new Error('size grew after planning; kept within max_per_run_gb');
         }
         if (kind === 'node-modules') {
@@ -497,8 +538,9 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           result.done.push(item);
           continue;
         }
+        const inventory = plan.automatic?.run ? await plan.automatic.run.inventory() : undefined;
         const assertUnpinned = () => {
-          const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
+          const records = inventory?.all ?? [...listTaskRecords(config), ...listArchivedRecords(config)];
           const protectedRecords = records.filter(r => r.host === item.host).filter(r => r.pin || plan.keep?.some(t => t.toLowerCase() === r.task.toLowerCase()));
           const overlaps = (a: string, b: string) => same(a, b) || location(a).startsWith(`${location(b)}${path.sep}`) || location(b).startsWith(`${location(a)}${path.sep}`);
           if (protectedRecords.some(r => r.task.toLowerCase() === item.task.toLowerCase() || (kind === 'worktree' && r.repos.some(repo => same(repo.worktree, item.target))) || (kind === 'cache' && r.report && overlaps(path.dirname(r.report), item.target)))) throw new Error('pinned/kept task; left in place');
@@ -509,9 +551,9 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           result.done.push(done); result.freedBytes += done.bytes; continue;
         }
         if (kind === 'worktree') {
-          const borrowers = listTaskRecords(config).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
+          const borrowers = (inventory?.current ?? listTaskRecords(config)).filter(r => r.reviewMode && !r.closed && !r.cancelled && r.repos.some(repo => same(repo.worktree, item.target)));
           if (borrowers.length) throw new Error(`worktree is used by readonly review ${borrowers[0]!.task}`);
-          const users = linkUsers(item.target, knownLinkReferences(config));
+          const users = plan.automatic?.run ? await plan.automatic.run.linkUsers(item.target) : linkUsers(item.target, knownLinkReferences(config));
           if (users.length && !plan.forceLinks) throw new Error(`links target used by ${users.join(', ')}`);
           const risk = await worktreeRisk(ctx, item.target, item.base);
           const forced = permitsDirty(plan.forceDirty, item.task);

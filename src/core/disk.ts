@@ -1,4 +1,4 @@
-import { kickAutoGc } from './auto-gc.ts';
+import { kickAutoGc, takeAutoGcKick } from './auto-gc.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { probeHosts } from './host-health.ts';
@@ -12,7 +12,7 @@ import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { cachedMeasurement, configureMeasurements, requestMeasurement, restoreMeasurements, lastMeasurement } from './fs-measure.ts';
 import type { PathMeasurement } from './fs-measure.ts';
-import { resolvePath } from './util.ts';
+import { errorMessage, resolvePath } from './util.ts';
 import { recordJournal } from './journal.ts';
 import type { Notifier } from './notify.ts';
 import { fileVersion } from './file-version.ts';
@@ -235,6 +235,8 @@ export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: st
   background('host health', refreshHostHealth(ctx));
   background('worktree measurement', refreshDiskMeasurements(ctx));
   const file = path.join(path.dirname(ctx.config.path), 'disk-state.json');
+  // L1: a disk hold met by a CLI or MCP process is run here, under the watcher's stop signal.
+  if (!ctx.runner.dryRun) await takeAutoGcKick(ctx, signal, log).catch(error => log?.(`auto_gc: ${errorMessage(error)}`));
   if (ctx.runner.dryRun || ctx.runner.now() - (sampled.get(file) ?? -Infinity) < DISK_INTERVAL_MS) return;
   sampled.set(file, ctx.runner.now());
   await withFileLock(`${file}.lock`, async () => {

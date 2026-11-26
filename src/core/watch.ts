@@ -16,6 +16,7 @@ import { journalOutputs } from './outputs.ts';
 import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
+import { autoGcIdle, hostAutoGc } from './auto-gc.ts';
 import { WatchStalled, WatchSteps } from './watch-steps.ts';
 import { watchSnapshotPath } from './watch-snapshot.ts';
 import { atomicWriteFile, stateWriteFailure } from './atomic-file.ts';
@@ -476,6 +477,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
   };
   let stalled = false;
+  const unhost = hostAutoGc({ ...(opts.signal ? { signal: opts.signal } : {}), log: line => ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${line}\n`) });
   try {
     // Inventory may be slow. Accept writes and recover interrupted starts from the first tick.
     void memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', () => announceResumable(ctx, current));
@@ -490,6 +492,9 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     throw error;
   } finally {
     fileWatcher?.close();
+    unhost();
+    // A stopped watcher lets an automatic GC run finish the item it is deleting; the run itself stops at the next item.
+    await autoGcIdle();
     if (!stalled) {
       await memory.queue.idle();
       const restored = await restoreWindowNames(ctx, memory);

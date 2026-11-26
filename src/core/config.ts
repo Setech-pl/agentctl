@@ -40,7 +40,13 @@ export interface AutoGcSettings {
   categories: AutoGcCategory[];
   maxPerRunGb: number;
   cohortsExclude: string[];
+  /** 0.26.4: wall-clock limit of one automatic run (seconds). */
+  maxRunS: number;
+  /** 0.26.4: ignored-by-git paths a worktree may hold and still be removed (a bare name matches at any depth, a path with "/" from the worktree root). */
+  ignoredOk: string[];
 }
+
+export const AUTO_GC_IGNORED_OK = ['node_modules', '.cache/vite', 'dist', 'coverage', '.turbo'];
 
 export interface Link {
   from: string;
@@ -1099,7 +1105,7 @@ function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: numbe
   const where = 'config.disk.auto_gc';
   const value = isObject(raw) ? raw : {};
   if (raw !== undefined && !isObject(raw)) p.add(`${where} must be a mapping`);
-  checkKeys(value, ['enabled', 'dry_run', 'trigger_free_gb', 'target_free_gb', 'older_than', 'categories', 'max_per_run_gb', 'cohorts_exclude'], where, p);
+  checkKeys(value, ['enabled', 'dry_run', 'trigger_free_gb', 'target_free_gb', 'older_than', 'categories', 'max_per_run_gb', 'cohorts_exclude', 'max_run_s', 'ignored_ok'], where, p);
   const bool = (key: string) => {
     const v = value[key];
     if (v !== undefined && typeof v !== 'boolean') p.add(`${where}.${key} must be a boolean`);
@@ -1122,9 +1128,14 @@ function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: numbe
     parseStringList(value.categories, `${where}.categories`, p);
   if (categories.some(category => !(AUTO_GC_CATEGORIES as readonly string[]).includes(category))) p.add(`${where}.categories must contain only ${AUTO_GC_CATEGORIES.join(', ')}`);
   if (new Set(categories).size !== categories.length) p.add(`${where}.categories must be distinct`);
+  const ignoredOk = value.ignored_ok === undefined ? [...AUTO_GC_IGNORED_OK] : parseStringList(value.ignored_ok, `${where}.ignored_ok`, p);
+  for (const entry of ignoredOk) {
+    const clean = entry.replace(/\/+$/, '');
+    if (!clean || path.isAbsolute(clean) || clean.split('/').some(part => part === '..' || part === '.' || part === '') || /[*?[\]]/.test(clean)) p.add(`${where}.ignored_ok entries must be relative paths without wildcards or "..", got ${JSON.stringify(entry)}`);
+  }
   return { enabled: bool('enabled'), dryRun: bool('dry_run'), triggerFreeGb, targetFreeGb, olderThan,
     categories: categories as AutoGcCategory[], maxPerRunGb: number('max_per_run_gb', 50),
-    cohortsExclude: parseStringList(value.cohorts_exclude, `${where}.cohorts_exclude`, p) };
+    cohortsExclude: parseStringList(value.cohorts_exclude, `${where}.cohorts_exclude`, p), maxRunS: number('max_run_s', 300), ignoredOk: ignoredOk.map(entry => entry.replace(/\/+$/, '')) };
 }
 
 /** Allow rollback with known 0.27.x settings while keeping typo validation for this release. */

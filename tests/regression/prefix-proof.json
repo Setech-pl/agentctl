@@ -98,6 +98,58 @@
       "A9: placeholder references are findings and never published while valid entries survive"
     ]
   },
+  "AUTOGC0266-CLI": {
+    "rev": "v0.26.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "AUTOGC0266-CLI: a CLI disk hold leaves the run to the watcher, and a stopped watcher finishes the current item only",
+      "AUTOGC0266-CLI: a CLI disk hold leaves the run to the watcher, and a stopped watcher finishes the current item only"
+    ]
+  },
+  "AUTOGC0266-IGNORED": {
+    "rev": "v0.26.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "AUTOGC0266-IGNORED: worktrees with ignored files outside ignored_ok or referenced by a report stay",
+      "AUTOGC0266-IGNORED: worktrees with ignored files outside ignored_ok or referenced by a report stay"
+    ]
+  },
+  "AUTOGC0266-QUEUE": {
+    "rev": "v0.26.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "AUTOGC0266-QUEUE: queued tasks keep their authors, bases and named paths, and a start/GC race resolves through path claims",
+      "AUTOGC0266-QUEUE: queued tasks keep their authors, bases and named paths, and a start/GC race resolves through path claims"
+    ]
+  },
+  "AUTOGC0266-RELOAD": {
+    "rev": "v0.26.3",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "AUTOGC0266-RELOAD: a reload of other settings keeps a run going, the journal records duration and statfs bytes, and a reused PID does not pin a path",
+      "AUTOGC0266-RELOAD: a reload of other settings keeps a run going, the journal records duration and statfs bytes, and a reused PID does not pin a path"
+    ]
+  },
+  "AUTOGC0266-SCALE": {
+    "rev": "v0.26.3",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "AUTOGC0266-SCALE: 1500 records and 2000 worktrees with node_modules finish one run inside max_run_s with one inventory, one walk and a responsive event loop",
+      "AUTOGC0266-SCALE: prechecks are lazy and a run stops at max_run_s with a journal entry",
+      "AUTOGC0266-SCALE: 1500 records and 2000 worktrees with node_modules finish one run inside max_run_s with one inventory, one walk and a responsive event loop",
+      "AUTOGC0266-SCALE: prechecks are lazy and a run stops at max_run_s with a journal entry"
+    ]
+  },
   "B1-answer": {
     "rev": "v0.18.2",
     "outcome": "IMPORT-ERROR",

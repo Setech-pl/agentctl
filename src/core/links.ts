@@ -4,6 +4,7 @@ import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
 import type { Link, GlobalConfig } from './config.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { fillPlaceholders, resolvePath } from './util.ts';
 import type { Runner } from './runner.ts';
 import { AgentctlError, Problems } from './util.ts';
@@ -232,20 +233,24 @@ export async function linkBaseWarnings(runner: Runner, links: Link[], repos: Res
   return warnings;
 }
 
-export function projectLinks(repo: string, task = '', cache = repo): Link[] {
-  return (loadProjectConfig(repo)?.links ?? []).filter(link => !/\{(?:worktree:|task:[^}]*,repo:)/.test(link.to)).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
+export function projectLinks(repo: string, task = '', cache = repo, layer: ReturnType<typeof loadProjectConfig> | null = null): Link[] {
+  return ((layer ?? loadProjectConfig(repo))?.links ?? []).filter(link => !/\{(?:worktree:|task:[^}]*,repo:)/.test(link.to)).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
 }
 
-/** Known projects come from current and archived task records; active tasks can also supply spec-only links. */
-export function knownLinkReferences(config: GlobalConfig): { target: string; source: string }[] {
-  const active = listTaskRecords(config).filter(r => !r.closed && !r.cancelled);
-  const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
+/** Known projects come from current and archived task records; active tasks can also supply spec-only links. An inventory (one scan) avoids rereading every TASK.md. */
+export function knownLinkReferences(config: GlobalConfig, inventory?: { current: TaskRecord[]; all: TaskRecord[] }): { target: string; source: string }[] {
+  const current = inventory?.current ?? listTaskRecords(config);
+  const records = inventory?.all ?? [...current, ...listArchivedRecords(config)];
+  const active = current.filter(r => !r.closed && !r.cancelled);
   const refs = active.flatMap(r => r.links.map(l => ({ target: l.to, source: `active task ${r.task}` })));
-  for (const repo of new Set(records.flatMap(r => r.repos.map(repo => repo.path)))) {
+  const byRepo = new Map<string, TaskRecord[]>();
+  for (const record of records) for (const repo of new Set(record.repos.map(x => x.path))) byRepo.set(repo, [...byRepo.get(repo) ?? [], record]);
+  for (const [repo, users] of byRepo) {
     try {
-      for (const record of records.filter(r => r.repos.some(x => x.path === repo))) {
-        refs.push(...projectLinks(repo, record.task, config.cache).map(l => ({ target: l.to, source: `${repo}/.agentctl.yaml` })));
-      }
+      // The project file is read once per repository; only the placeholders differ per task.
+      const layer = loadProjectConfig(repo);
+      if (!layer?.links?.length) continue;
+      for (const record of users) refs.push(...projectLinks(repo, record.task, config.cache, layer).map(l => ({ target: l.to, source: `${repo}/.agentctl.yaml` })));
     } catch (error) {
       // An unreadable known config cannot prove that a candidate is unused.
       refs.push({ target: '*', source: `${repo}/.agentctl.yaml: ${String(error)}` });
