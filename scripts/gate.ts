@@ -76,13 +76,18 @@ export function affectedTests(changed: string[], sources: Record<string, string>
 export function heavyCommand(command: string, args: string[], platform = process.platform): [string, string[]] {
   return ['nice', ['-n', '10', ...(platform === 'darwin' ? ['taskpolicy', '-b'] : []), command, ...args]];
 }
-/** Keep collecting release evidence after check failures, then fail the gate with all of them recorded. */
-export async function runReleaseChecks(live: string[], runCheck: (name: string) => Promise<number>): Promise<string[]> {
+/** Keep collecting independent evidence after check failures. Doctor needs a successfully installed package. */
+export async function runReleaseChecks(live: string[], runCheck: (name: string) => Promise<number>, runtimes: string[] = []): Promise<string[]> {
   const failures: string[] = [];
-  for (const name of ['regression', ...live]) {
+  const check = async (name: string) => {
     const code = await runCheck(name);
     if (code !== 0) failures.push(`${name} (${code})`);
+    return code === 0;
+  };
+  for (const runtime of runtimes) {
+    if (await check(`smoke-${runtime}`)) await check(`doctor-${runtime}`);
   }
+  for (const name of ['regression', ...live]) await check(name);
   return failures;
 }
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
@@ -254,20 +259,24 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         }
         const packed = await run('pack', node26, [npm, 'pack', staging, '--ignore-scripts', '--json', '--pack-destination', work], { npm_config_update_notifier: 'false' });
         const tarball = path.join(work, packJson(packed.text)[0]!.filename);
-        for (const [label, node] of [['node22', node22], ['node26', node26]]) {
-          const runtimeEnv = { AGENTCTL_SMOKE_NODE: label, AGENTCTL_SMOKE_TARBALL: tarball, AGENTCTL_NODE22: node22, AGENTCTL_NODE26: node26, AGENTCTL_NPM26: npm, PATH: `${path.dirname(node)}:${env.PATH}` };
-          await run(`smoke-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/smoke-package.ts'], runtimeEnv);
-          result.counts.pass += 12;
-          await run(`doctor-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/doctor-matrix.ts'], runtimeEnv);
-          result.counts.pass += 10;
-        }
         if (opts.skipLive) result.counts.skip += live.length;
         const failures = await runReleaseChecks([...(opts.skipLive ? [] : live), 'prodshape'], async name => {
           if (name === 'prodshape') return runProdshape(node26);
+          const matrix = /^(smoke|doctor)-(node22|node26)$/.exec(name);
+          if (matrix) {
+            const [, kind, label] = matrix;
+            const node = label === 'node22' ? node22 : node26;
+            const runtimeEnv = { AGENTCTL_SMOKE_NODE: label, AGENTCTL_SMOKE_TARBALL: tarball, AGENTCTL_SMOKE_NPM_CACHE: env.npm_config_cache, AGENTCTL_NODE22: node22, AGENTCTL_NODE26: node26, AGENTCTL_NPM26: npm, PATH: `${path.dirname(node)}:${env.PATH}` };
+            const file = kind === 'smoke' ? 'scripts/smoke-package.ts' : 'scripts/doctor-matrix.ts';
+            const step = await run(name, node, ['--experimental-strip-types', '--no-warnings', file], runtimeEnv, false);
+            if (step.code === 0) result.counts.pass += kind === 'smoke' ? 12 : 10;
+            else if (kind === 'smoke') result.counts.skip += 10;
+            return step.code;
+          }
           const file = name === 'regression' ? 'scripts/regression.ts' : name;
           const step = await run(name, node26, ['--experimental-strip-types', '--no-warnings', file], {}, false);
           return step.code;
-        });
+        }, ['node22', 'node26']);
         result.counts.fail += failures.length;
         if (failures.length) throw new Error(`Release checks failed: ${failures.join(', ')}; see step logs in ${path.dirname(output)}`);
       }

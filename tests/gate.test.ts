@@ -18,6 +18,16 @@ it('REL0244-LIVE-EVIDENCE: release collects every live result after earlier fail
   assert.deepEqual(seen, checks);
   assert.deepEqual(failures, ['regression (1)', 'scripts/live-a.ts (1)']);
 });
+it('REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results', async () => {
+  const { runReleaseChecks } = await import('../scripts/gate.ts');
+  const ran: string[] = [];
+  const failures = await runReleaseChecks(['prodshape'], async name => {
+    ran.push(name);
+    return name === 'smoke-node22' || name === 'prodshape' ? 1 : 0;
+  }, ['node22', 'node26']);
+  assert.deepEqual(ran, ['smoke-node22', 'smoke-node26', 'doctor-node26', 'regression', 'prodshape']);
+  assert.deepEqual(failures, ['smoke-node22 (1)', 'prodshape (1)']);
+});
 it('plans tiers in order, keeping both runtimes sequential and live last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);
   assert.deepEqual(planTier('full', [], []), ['tests Node 22.14.0 (full)', 'tests Node 26 (full)', 'regression scenarios (tests/regression/CATALOG.md)']);

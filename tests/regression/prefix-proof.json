@@ -1457,6 +1457,16 @@
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
     ]
   },
+  "REL0272-SMOKE-EVIDENCE": {
+    "rev": "f702dcca477f2d708a55a3cf9ed540cae21001ed",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results",
+      "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
+    ]
+  },
   "REVIEW0256-DOWNGRADE": {
     "rev": "v0.27.1",
     "outcome": "FAILS",
