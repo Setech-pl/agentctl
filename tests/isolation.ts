@@ -47,3 +47,5 @@ for (const name of ['tmux', 'claude', 'codex', 'kimi', 'pbcopy', 'pbpaste', 'ter
 }
 process.env.PATH = `${bin}:/usr/bin:/bin`;
 process.on('exit', () => fs.rmSync(root, { recursive: true, force: true }));
+// 0.26.3: the ready timeout scales with load1/cores; fixtures see an idle host (a test that needs load sets this itself).
+process.env.AGENTCTL_READY_LOAD = '0,1';

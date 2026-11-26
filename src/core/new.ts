@@ -27,7 +27,7 @@ import { addWorktree } from './git.ts';
 import { applyLinks, checkLinkTargets, planLinks } from './links.ts';
 import { planBatch } from './plan.ts';
 import type { PlanOptions } from './plan.ts';
-import { waitForReady } from './ready.ts';
+import { scaledReadyTimeout, waitForReady } from './ready.ts';
 import { saveStartFailureScreen } from './start-failure.ts';
 import { RC_CONFIRM, RC_FIRST_TIME } from './remote-control.ts';
 import type { ResolvedSpec } from './spec.ts';
@@ -350,7 +350,9 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
     // 6. wait for the agent; never answer a trust dialog (wait for the human to do it); then paste the prompt and press Enter
     const waitTrust = opts.waitTrust !== false;
     const sendHint = `agentctl watch --tmux (original prompt with report protocol is pending in ${taskFile(config, spec.window)}; sent once after trust and ready input)`;
-    const ready = await waitForReady(runner, taskTmux, spec.window, {
+    // 0.26.3: the ready timeout scales with the machine load (base: providers_config.<p>.ready_timeout_s, else agents.<p>.ready_timeout).
+    const readyTimeoutS = scaledReadyTimeout(config.providersConfig?.[spec.agent]?.readyTimeoutS ?? settings.readyTimeout);
+    const waitOnce = () => waitForReady(runner, taskTmux, spec.window, {
       pattern: settings.readyPattern,
       emptyInput: true,
       // Kimi included (P92): its box is read by its own geometry, so the paste waits for a whole composer, not for the first "│ >" row.
@@ -358,7 +360,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       agent: spec.agent,
       trustPattern: remote ? `${settings.trustPattern}|${RC_CONFIRM}` : settings.trustPattern,
       ...(settings.dialogPattern ? { dialogPattern: settings.dialogPattern } : {}),
-      timeoutMs: settings.readyTimeout * 1000,
+      timeoutMs: readyTimeoutS * 1000,
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(waitTrust
         ? {
@@ -369,6 +371,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
           }
         : {}),
     });
+    const ready = await waitOnce();
     const fresh = readTaskRecord(config, spec.window);
     if (fresh?.promptDelivery === 'sent') { ready.ready = true; ready.trust = false; }
     if (fresh?.promptDelivery === 'launching' && (ready.trust || ready.ready)) await setHeaderField(runner, taskFile(config, spec.window), 'prompt_delivery', 'pending');
@@ -418,7 +421,7 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       const seen = capture ? `; last screen: ${capture}` : '';
       await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md${seen}` });
       throw new AgentctlError(
-        `${spec.task}: ${spec.agent} did not show its input prompt within ${settings.readyTimeout}s (pattern /${settings.readyPattern}/)${seen}`,
+        `${spec.task}: ${spec.agent} did not show its input prompt within ${readyTimeoutS}s (pattern /${settings.readyPattern}/)${seen}`,
         `The window is still open: "${hint}". Once the agent is ready, send the prompt with "agentctl send"; ` +
           `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
       );

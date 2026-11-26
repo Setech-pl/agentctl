@@ -1,4 +1,5 @@
-import { inspectField } from './input-field.ts';
+import os from 'node:os';
+import { inspectField, plainScreen } from './input-field.ts';
 import type { DeliveryAgent } from './paste-wrapper.ts';
 import { screenMetadata } from './tmux.ts';
 import { PATTERN_FLAGS } from './config.ts';
@@ -17,6 +18,28 @@ export function kimiSettledView(screen: string): string | undefined {
   const field = inspectField(screen, 'kimi');
   if (!field.readable || field.bottom === undefined) return undefined;
   return screen.split('\n').slice(0, field.bottom + 1).map(line => line.trimEnd()).join('\n');
+}
+
+/** Upper bound of the load-scaled ready timeout (seconds); a larger configured value is kept as it is. */
+export const READY_TIMEOUT_CAP_S = 180;
+
+/**
+ * The machine load the ready timeout scales with. `AGENTCTL_READY_LOAD` ("<load1>,<cores>") replaces the live sample;
+ * the test isolation sets it, so fixtures do not depend on the load of the host that runs them.
+ */
+export function readyLoadSample(): { load1: number; cores: number } {
+  const forced = /^\s*([\d.]+)\s*,\s*(\d+)\s*$/.exec(process.env.AGENTCTL_READY_LOAD ?? '');
+  if (forced) return { load1: Number(forced[1]), cores: Math.max(1, Number(forced[2])) };
+  return { load1: os.loadavg()[0] ?? 0, cores: Math.max(1, os.cpus().length) };
+}
+
+/**
+ * Seconds to wait for the agent's input prompt: the configured base (default 60), scaled by load1/cores (factor 1..3)
+ * and capped at 180 s. A loaded machine starts an agent's TUI slower; an idle one keeps the base.
+ */
+export function scaledReadyTimeout(baseS: number, sample = readyLoadSample()): number {
+  const factor = Math.min(3, Math.max(1, sample.load1 / Math.max(1, sample.cores)));
+  return Math.round(Math.max(baseS, Math.min(READY_TIMEOUT_CAP_S, baseS * factor)));
 }
 
 export interface TrustWait {
@@ -79,13 +102,15 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
   let screen = '';
   let welcome = false;
   let previousKimiView: string | undefined;
+  // 0.26.3: the deadline is followed by one more capture before the wait gives up (a prompt drawn in the last interval is not lost).
+  let finalLook = false;
   for (;;) {
     if (opts.signal?.aborted) return { ready: false, trust: inTrust, aborted: true, screen };
     const r = await tmux.capture(window);
     const previous = previousKimiView;
     previousKimiView = undefined;
     if (r.code === 0) {
-      screen = r.stdout;
+      screen = plainScreen(r.stdout);
       if (trust?.test(screen)) {
         if (!opts.waitTrust) return { ready: false, trust: true, screen };
         if (!inTrust) {
@@ -96,6 +121,7 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
       } else {
         if (inTrust) {
           inTrust = false;
+          finalLook = false;
           deadline = runner.now() + opts.timeoutMs;
         }
         if (startupDialogShown(screen, { dialogPattern: opts.dialogPattern, readyPattern: opts.pattern })) return { ready: false, trust: false, dialog: true, screen };
@@ -109,7 +135,10 @@ export async function waitForReady(runner: Runner, tmux: Tmux, window: string, o
         }
       }
     }
-    if (runner.now() >= deadline) return { ready: false, trust: inTrust, screen };
+    if (runner.now() >= deadline) {
+      if (finalLook || inTrust) return { ready: false, trust: inTrust, screen };
+      finalLook = true;
+    }
     await runner.sleep(interval);
   }
 }

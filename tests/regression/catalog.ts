@@ -27,6 +27,7 @@ const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name 
 
 export const BUGS: BugEntry[] = [
   { id: 'READY0263-COMPOSER', fixedIn: '0.26.3', symptom: 'Codex 0.167+ queue starts failed with "did not show its input prompt within 60s" although the saved screen showed a ready Codex: the footer "GPT-6.2-Sol medium Fast · <dir>" made the composer unreadable.', scenarios: [s('ready0263-composer.test.ts', '^READY0263-COMPOSER:')] },
+  { id: 'READY0263-RECAPTURE', fixedIn: '0.26.3', symptom: 'A start failed when the input prompt appeared in the last poll interval or the TUI needed longer than a fixed 60 s on a loaded host.', scenarios: [s('ready0263-recapture.test.ts', '^READY0263-RECAPTURE:')] },
   { id: 'HOTFIX0264-F6', fixedIn: '0.26.2', symptom: 'Reused PIDs could pin start.lock indefinitely and empty owners took three minutes to clear.', scenarios: [s('queue.test.ts', '^HOTFIX0264-F6:')] },
   { id: 'HOTFIX0264-F5', fixedIn: '0.26.2', symptom: 'Git refused dirty worktree removal even after the owner authorized the named task.', scenarios: [s('fix0227-gc.test.ts', '^HOTFIX0264-F5:')] },
   { id: 'HOTFIX0264-F4', fixedIn: '0.26.2', symptom: 'A config with 0.27.x keys prevented 0.26.x from loading during rollback.', scenarios: [s('disk0248.test.ts', '^HOTFIX0264-F4:')] },
