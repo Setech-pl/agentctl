@@ -1447,7 +1447,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
     .option('--restart', 'with --tmux: restart the window identified by its stable role')
     .option('--no-status-line', 'with --tmux: leave the status bar of the session alone')
-    .addOption(new Option('--supervise').hideHelp())
+    .addOption(new Option('--supervise', 'run the tmux watch supervisor').hideHelp())
     .action(
       guarded(async (opts: { tmux?: boolean; statusLine?: boolean; restart?: boolean; supervise?: boolean }) => {
         const ctx = contextFor(false);

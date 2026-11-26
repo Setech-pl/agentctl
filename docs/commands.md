@@ -1330,7 +1330,7 @@ agentctl watch [options]
 | `--tmux` | run it in window "watch" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session |  |
 | `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--no-status-line` | with --tmux: leave the status bar of the session alone |  |
-| `--supervise` |  |  |
+| `--supervise` | run the tmux watch supervisor |  |
 
 Examples:
 
