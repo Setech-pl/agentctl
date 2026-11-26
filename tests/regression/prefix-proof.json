@@ -1520,6 +1520,16 @@
       "REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up"
     ]
   },
+  "REL0272-GIT-REFUSAL": {
+    "rev": "5274994a68ce2d2fdaf2cc310ad602c00a6b0e94",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "D1: cached MCP preview checks every repo including untracked files in the second",
+      "D1: cached MCP preview checks every repo including untracked files in the second"
+    ]
+  },
   "REL0272-PRESSURE-POLICY": {
     "rev": "6631d091d0b6f64af65184dbb37f68684d9faa43",
     "outcome": "FAILS",

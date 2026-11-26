@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-GIT-REFUSAL | Local GC could override Git’s untracked-file protection after the hotfix merge. | `tests/fix0227-gc.test.ts` (`^D1: cached MCP preview checks every repo`) | 0.27.2 | fails on 5274994a68ce2d2fdaf2cc310ad602c00a6b0e94 (1 failing of 1) |
 | REL0272-PRESSURE-POLICY | The macOS CPU fixture concentrated its competing application workload in the gate’s background scheduling group. | `tests/gate.test.ts` (`^REL0272-PRESSURE-POLICY:`) | 0.27.2 | fails on 6631d091d0b6f64af65184dbb37f68684d9faa43 (1 failing of 1) |
 | REL0272-DELIVERY-SCAN | Watch acquired the shared start lock once per active task even when there were no messages to send. | `tests/review0256.test.ts` (`^REL0272-DELIVERY-SCAN:`) | 0.27.2 | fails on e3a6373f67cc15323ad95af1e91bacb8c0d83760 (1 failing of 1) |
 | REL0272-SMOKE-EVIDENCE | A package install failure aborted the release gate before its production-scale check. | `tests/gate.test.ts` (`^REL0272-SMOKE-EVIDENCE:`) | 0.27.2 | fails on f702dcca477f2d708a55a3cf9ed540cae21001ed (1 failing of 1) |

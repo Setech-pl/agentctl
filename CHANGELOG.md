@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - Release includes a production-shape gate with a fake-agent watcher under CPU and filesystem contention, an admission deadline, MCP read budgets, and queue/close/GC confirmation checks. Disk and provider limits are visible in the board header.
 - A missed nominal watch interval keeps full queue and limit data available from a recent complete snapshot.
+- Local GC leaves Git’s uncommitted-file protection in force for explicitly selected worktrees. / Lokalne GC zachowuje ochronę niezatwierdzonych plików Git również dla worktree wskazanych jawnie.
 - Watch checks idle delivery queues without taking the shared start lock. / Watch sprawdza puste kolejki wiadomości bez zajmowania wspólnej blokady startu.
 
 - Release gate results seal the candidate SHA and source/fixture contents at every step, and fail if those inputs change.

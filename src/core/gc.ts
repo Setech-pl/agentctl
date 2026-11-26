@@ -453,7 +453,7 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
             if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
             assertUnpinned();
             if (!runner.dryRun) await space.before(item.target);
-            const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forced ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
+            const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', item.target], { timeoutMs: config.git.timeoutS * 1000 });
             if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
           };
           if (item.dead) await withStartLock(ctx, remove);
