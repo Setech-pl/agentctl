@@ -1,5 +1,5 @@
 import { recordJournal } from './journal.ts';
-import { GcSpace } from './gc-space.ts';
+import { GcSpace, type GcVolumeFreed } from './gc-space.ts';
 import { moveToTrash, planTrashPurge, purgeTrashItem, type TrashItem } from './trash.ts';
 import { planRemoteGc, applyRemoteGc } from './host-gc.ts';
 import { cacheProtection } from './gc-cache.ts';
@@ -357,6 +357,7 @@ export interface GcResult {
   done: GcItem[];
   failed: { item: GcItem; reason: string }[];
   freedBytes: number;
+  freedByVolume?: GcVolumeFreed[];
 }
 
 /** Do the plan: worktrees (`git worktree remove`), cache entries, archive moves, then branches (`git branch -d`, never -D). */
@@ -449,7 +450,8 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
       result.done.push(item);
     } catch (e) { result.failed.push({ item, reason: errorMessage(e) }); }
   }
-  result.freedBytes += await space.freed();
+  result.freedByVolume = await space.freedByVolume();
+  result.freedBytes += result.freedByVolume.reduce((bytes, volume) => bytes + (volume.freedBytes ?? 0), 0);
   return result;
 }
 
@@ -528,6 +530,7 @@ export function renderGc(plan: GcPlan, opts: GcViewOptions & { applied?: GcResul
   }
   for (const f of applied.failed) lines.push(`  failed: ${f.item.target}: ${f.reason}`);
   lines.push(`Freed ${formatBytes(applied.freedBytes)} (removed ${applied.done.length}, failed ${applied.failed.length}; skipped entries were left in place).`);
+  for (const volume of applied.freedByVolume ?? []) lines.push(`  ${volume.path}: ${volume.freedBytes === null ? 'unavailable' : formatBytes(volume.freedBytes)}`);
   if (plan.skipped.length) {
     lines.push(`Skipped (left in place): ${plan.skipped.length}, ${view.skipped.bytes} bytes`);
     for (const reason of view.skipped.reasons.items) lines.push(`  skipped: ${reason.reason}: ${reason.count}, ${reason.bytes} bytes`);

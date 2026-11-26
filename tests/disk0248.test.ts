@@ -670,3 +670,40 @@ hosts:
   assert.match(config.warnings![0]!, /0\.27\.x.*limits\.profiles.*hosts\.local.*hosts\.pc\.availability/);
   assert.throws(() => makeConfig(scratch.sub('forward-typo'), 'placemet: {}'), /unknown key/);
 });
+
+it('MCP purge_trash previews and confirms receipts via watch with measured free blocks', async t => {
+  const w = world('mcp-trash-receipt', () => 'mcp: {allow: [gc]}\n');
+  const { moveToTrash } = await import('../src/core/trash.ts');
+  const source = path.join(w.root, 'owned');
+  fs.mkdirSync(source);
+  const receipt = await moveToTrash(w.ctx, source);
+  const personal = path.join(w.trash, 'personal');
+  fs.writeFileSync(personal, 'keep');
+  const statfs = fs.promises.statfs;
+  t.mock.method(fs.promises, 'statfs', async (dir: string) => {
+    const stat = await statfs(dir);
+    return { ...stat, bsize: 4096, bavail: fs.existsSync(receipt.target) ? 100 : 117 };
+  });
+  fakeWatcher(w.config);
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {} };
+  const accepted = await gc.run(deps, { purge_trash: true });
+  const id = /request_id: ([\w-]+)/.exec(accepted.text)?.[1];
+  assert.ok(id, accepted.text);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  const preview = await gc.run(deps, { request_id: id });
+  assert.match(preview.text, /owned/);
+  assert.doesNotMatch(preview.text, /personal/);
+  const token = /preview_token: ([\w-]+)/.exec(preview.text)?.[1];
+  assert.ok(token, preview.text);
+  assert.ok(fs.existsSync(receipt.target));
+  const confirm = await gc.run(deps, { preview_token: token, confirm: true });
+  assert.match(confirm.text, /^Accepted/);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  const request = readMcpRequests(w.config).find(entry => entry.token === token);
+  assert.equal(request?.status, 'done', request?.error);
+  const result = JSON.parse(request.result!);
+  assert.equal(result.freedBytes, 17 * 4096);
+  assert.equal(result.freedByVolume[0].freedBytes, 17 * 4096);
+  assert.ok(fs.existsSync(personal));
+});

@@ -166,7 +166,8 @@ export async function applyIntegrationGc(ctx: Context, plan: GcPlan, space = new
       result.done.push(item);
     } catch (error) { result.failed.push({ item, reason: errorMessage(error) }); }
   }
-  result.freedBytes = await space.freed();
+  result.freedByVolume = await space.freedByVolume();
+  result.freedBytes = result.freedByVolume.reduce((bytes, volume) => bytes + (volume.freedBytes ?? 0), 0);
   return result;
 }
 
