@@ -588,6 +588,7 @@ it('HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge pr
   seedTask(w.config, 'LEGACY', { closed: true });
   const legacy = path.join(w.trash, 'legacy');
   fs.mkdirSync(legacy);
+  fs.copyFileSync(path.join(taskDir(w.config, 'legacy'), 'TASK.md'), path.join(legacy, 'TASK.md'));
   const preview = await runCli(w.config, w.runner, ['gc', '--purge-trash', '--json']);
   assert.equal(preview.code, 0, preview.stderr);
   assert.match(preview.stdout, /legacy/);
@@ -630,4 +631,24 @@ it('HOTFIX0264-F2: integration removal receives the Git timeout without the admi
   assert.equal(result.done.length, 1);
   assert.equal(remaining, Infinity);
   assert.equal(lockHeld, false);
+});
+
+
+it('HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy has its own section', async () => {
+  const w = world('trash-markers');
+  for (const task of ['PERSONAL', 'MARKED']) {
+    seedTask(w.config, task, { closed: true });
+    fs.mkdirSync(path.join(w.trash, task.toLowerCase()));
+  }
+  const marked = path.join(w.trash, 'marked');
+  const marker = path.join(marked, 'TASK.md');
+  fs.copyFileSync(path.join(taskDir(w.config, 'marked'), 'TASK.md'), marker);
+  const plan = await planGc(w.ctx, { purgeTrash: true });
+  assert.deepEqual(plan.items.map(item => item.target), [marked]);
+  const preview = await runCli(w.config, w.runner, ['gc', '--purge-trash']);
+  assert.match(preview.stdout, /Legacy Trash with ownership markers: 1/);
+  fs.unlinkSync(marker);
+  assert.equal((await applyGc(w.ctx, plan)).done.length, 0);
+  assert.ok(fs.existsSync(path.join(w.trash, 'personal')));
+  assert.ok(fs.existsSync(marked));
 });

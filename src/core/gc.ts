@@ -149,7 +149,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   if (opts.purgeTrash) {
     if (opts.cohort || opts.branches || opts.olderThan || opts.includeCache || opts.keepCache?.length || opts.keep?.length || opts.forceDirty || opts.forceLinks) throw new AgentctlError('purge-trash selects only Trash items; remove other GC selection options');
     const items = planTrashPurge(ctx).map(trash => ({
-      kind: 'trash' as const, task: '-', target: trash.target, bytes: 0, trash, detail: `original: ${trash.original}`,
+      kind: 'trash' as const, task: '-', target: trash.target, bytes: 0, trash, detail: `original: ${trash.original}${trash.legacyMarker ? `; legacy marker: ${trash.legacyMarker}` : ''}`,
     }));
     return { items, skipped: [], freeBytes: 0, olderThanMs: 0, unknownCacheDirs: 0 };
   }
@@ -474,7 +474,10 @@ export function gcView(plan: GcPlan, opts: GcViewOptions = {}) {
   const skippedGroup = (name: string, test: (s: GcSkip) => boolean) => { const entries = plan.skipped.filter(test); return { name, count: entries.length, bytes: entries.reduce((n, s) => n + (s.bytes ?? 0), 0), ...page(entries) }; };
   const dirty = (s: GcSkip) => Boolean(s.dirtyFiles || s.unpushedCommits) && /uncommitted changes/.test(s.reason);
   const pinned = (s: GcSkip) => /^(pinned|keep requested)/.test(s.reason);
-  const sections = { remove: { name: 'Would remove', count: plan.items.length, bytes: plan.freeBytes, ...page(plan.items) }, uncommitted: skippedGroup('Skipped (uncommitted changes)', dirty), pinned: skippedGroup('Skipped (pinned)', pinned), other: skippedGroup('Skipped (other)', s => !dirty(s) && !pinned(s)) };
+  const legacy = plan.items.filter(item => item.trash?.legacyMarker);
+  const remove = plan.items.filter(item => !item.trash?.legacyMarker);
+  const sections = { remove: { name: 'Would remove', count: remove.length, bytes: remove.reduce((n, item) => n + item.bytes, 0), ...page(remove) },
+    ...(legacy.length ? { legacyTrash: { name: 'Legacy Trash with ownership markers', count: legacy.length, bytes: legacy.reduce((n, item) => n + item.bytes, 0), ...page(legacy) } } : {}), uncommitted: skippedGroup('Skipped (uncommitted changes)', dirty), pinned: skippedGroup('Skipped (pinned)', pinned), other: skippedGroup('Skipped (other)', s => !dirty(s) && !pinned(s)) };
   return { hosts, sections, autoCacheFreedBytes: plan.autoCacheFreedBytes ?? 0, freeBytes: plan.freeBytes, summary: `można zwolnić ${(plan.freeBytes / 1e9).toFixed(3)} GB (${plan.freeBytes} bytes)`, categories,
     cache: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'cache').map(i => ({ ...i, action: 'reason' in i ? 'keep' : 'delete' }))),
     worktrees: page([...plan.items, ...plan.skipped].filter(i => i.kind === 'worktree').map(i => ({ task: i.task, repo: i.repo, target: i.target, dirtyFiles: i.dirtyFiles ?? null, unpushedCommits: i.unpushedCommits ?? null, detail: 'reason' in i ? i.reason : i.detail }))),
