@@ -23,7 +23,7 @@ import { liveWindows } from './plan.ts';
 import { matchKnownTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { readTaskPrompt, readTaskRecord, setHeaderFields, taskDir, taskFile } from './taskstore.ts';
+import { readTaskPrompt, readTaskRecord, setHeaderFields, snapshotRecords, taskDir, taskFile } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { readTaskSessions } from './usage.ts';
 import { assertAgentSpawnAllowed, openAgentWindow } from './window-guard.ts';
@@ -53,7 +53,7 @@ export interface ResumeCandidate {
 
 /** Active tasks with a worktree and no window. Without `all`, the ones whose report is ready are left out. */
 export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: StatusRow[] } = {}): Promise<ResumeCandidate[]> {
-  const rows = opts.rows ?? (await collectStatus(ctx, { progress: false, archived: false }));
+  const rows = opts.rows ?? await collectStatus(ctx, { progress: false, archived: false, records: await snapshotRecords(ctx.config, true) });
   const out: ResumeCandidate[] = [];
   for (const row of rows) {
     if (row.window !== 'gone' || row.closed || row.cancelled || row.archived || row.hidden || row.supersededBy) continue;

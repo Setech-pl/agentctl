@@ -465,7 +465,7 @@ const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
 /** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
 const SCAN_CHUNK = 25;
 
-async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
+async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[]> {
   let files = recordScanCache.get(dir);
   if (!files) {
     files = new Map();
@@ -473,7 +473,7 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
   }
   let names: string[] = [];
   try {
-    names = (await fs.promises.readdir(dir)).sort();
+    names = (asyncIO ? await fs.promises.readdir(dir) : fs.readdirSync(dir)).sort();
   } catch {
     names = [];
   }
@@ -485,7 +485,7 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
     seen.add(file);
     let st: fs.BigIntStats | undefined;
     try {
-      st = await fs.promises.lstat(file, { bigint: true });
+      st = asyncIO ? await fs.promises.lstat(file, { bigint: true }) : fs.lstatSync(file, { bigint: true });
     } catch {
       files.delete(file);
     }
@@ -497,7 +497,7 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
       } else {
         let record: TaskRecord | undefined;
         try {
-          record = await readRecordFileAsync(file);
+          record = asyncIO ? await readRecordFileAsync(file) : readRecordFile(file);
         } catch {
           record = undefined;
         }
@@ -507,8 +507,17 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
     }
   };
   for (let i = 0; i < names.length; i += SCAN_CHUNK) {
-    const batch = await Promise.all(names.slice(i, i + SCAN_CHUNK).map(scan));
-    records.push(...batch.filter((record): record is TaskRecord => record !== undefined));
+    const namesInBatch = names.slice(i, i + SCAN_CHUNK);
+    if (asyncIO) {
+      const batch = await Promise.all(namesInBatch.map(scan));
+      records.push(...batch.filter((record): record is TaskRecord => record !== undefined));
+    } else {
+      for (const name of namesInBatch) {
+        const record = await scan(name);
+        if (record) records.push(record);
+      }
+      await new Promise(resolve => setImmediate(resolve));
+    }
   }
   for (const key of files.keys()) if (key.startsWith(prefix) && !seen.has(key)) files.delete(key);
   return records;
@@ -538,7 +547,7 @@ export class TaskRecordIndex {
     }
     if (now >= this.reconcileAt) {
       this.reconcileAt = now + 60_000;
-      const all = await scanRecordsIn(root);
+      const all = await scanRecordsIn(root, true);
       this.records.clear();
       for (const record of all) this.records.set(record.window, record);
     }
@@ -569,9 +578,9 @@ export class TaskRecordIndex {
  * this on every refresh and hands the one list to every consumer; one-shot commands keep listTaskRecords/listArchivedRecords.
  * Callers must not mutate the returned records: they are the cache (collectStatus works on copies).
  */
-export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan> {
-  const current = await scanRecordsIn(config.stateDir);
-  const archived = await scanRecordsIn(archiveDir(config));
+export async function snapshotRecords(config: GlobalConfig, asyncIO = false): Promise<RecordScan> {
+  const current = await scanRecordsIn(config.stateDir, asyncIO);
+  const archived = await scanRecordsIn(archiveDir(config), asyncIO);
   return { current, archived, all: [...current, ...archived] };
 }
 

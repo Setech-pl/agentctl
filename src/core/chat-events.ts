@@ -147,7 +147,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const now = runner.now();
   const since = parseSince(opts.since, opts.client, config, now);
   const cohort = opts.cohort === undefined ? null : findCohort(config, opts.cohort).name;
-  const records = await snapshotRecords(config);
+  const records = await snapshotRecords(config, true);
   for (const record of records.current) await journalOutputs(ctx, record, { readOnly: true });
   const journal = readJournal(config, -1);
   const redacted = secretRedactor([config, process.env, journal], new Set(records.current.map(r => r.task)))(journal);

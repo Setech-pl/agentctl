@@ -265,7 +265,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
   const allRows = () => processed ?? observed;
   const activeRows = () => allRows()?.filter(r => !r.closed && !r.cancelled);
-  const collect = async () => collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await snapshotRecords(ctx.config)});
+  const collect = async () => collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await snapshotRecords(ctx.config, true)});
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
