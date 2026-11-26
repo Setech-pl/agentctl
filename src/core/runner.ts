@@ -1,4 +1,4 @@
-import { atomicWriteFile, atomicAppendFile, noteStateWriteFailure } from './atomic-file.ts';
+import { appendJournalFile, atomicWriteFile, atomicAppendFile, noteStateWriteFailure } from './atomic-file.ts';
 import { withStateWriteLock, taskLock } from './file-lock.ts';
 import { readRateLimits } from './readonly-rpc.ts';
 import { spawn, spawnSync } from 'node:child_process';
@@ -149,11 +149,11 @@ export class RealRunner implements Runner {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  private async writeLocked(file: string, operation: () => void): Promise<void> {
+  private async writeLocked(file: string, operation: () => void | Promise<void>): Promise<void> {
     let entered = false;
     try { await withStateWriteLock(path.basename(file) === 'TASK.md' ? taskLock(file) : `${file}.write.lock`, async () => {
       entered = true;
-      try { operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
+      try { await operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
     }); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
   }
 
@@ -162,7 +162,7 @@ export class RealRunner implements Runner {
   }
 
   async appendFile(file: string, content: string): Promise<void> {
-    await this.writeLocked(file, () => atomicAppendFile(file, content));
+    await this.writeLocked(file, () => path.basename(file) === 'journal.jsonl' ? appendJournalFile(file, content) : atomicAppendFile(file, content));
   }
 
   async copyFile(src: string, dest: string): Promise<void> {

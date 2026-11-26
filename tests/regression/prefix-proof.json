@@ -1540,6 +1540,16 @@
       "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons"
     ]
   },
+  "REL0272-JOURNAL-APPEND": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-JOURNAL-APPEND: a torn last line does not absorb the next journal event",
+      "REL0272-JOURNAL-APPEND: a torn last line does not absorb the next journal event"
+    ]
+  },
   "REL0272-LEGACY-JOURNAL": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",

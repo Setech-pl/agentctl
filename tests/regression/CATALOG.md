@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-JOURNAL-APPEND | Every journal append synchronously rewrote the entire file and a torn last line swallowed the next event. | `tests/review0256.test.ts` (`^REL0272-JOURNAL-APPEND:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-HOLD-WRITES | A load hold could block the entire watch tick by rewriting the journal and queue entry for each held order. | `tests/review0256.test.ts` (`^REL0272-HOLD-WRITES:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-TICK-PANES | Watch verified each missing window with a separate tmux IPC call after the main inventory. | `tests/review0256.test.ts` (`^REL0272-TICK-PANES:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-LEGACY-JOURNAL | Watch read and rewrote the journal once per interrupted legacy launch. | `tests/review0256.test.ts` (`^REL0272-LEGACY-JOURNAL:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |

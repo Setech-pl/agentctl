@@ -9,6 +9,7 @@ import {readJournal, recordJournalOnce} from '../src/core/journal.ts';
 import {MCP_TOOLS} from '../src/core/mcp-tools.ts';
 import {queueTick, queueViews, QueueMemory, saveEntry} from '../src/core/queue.ts';
 import {planResume} from '../src/core/resume.ts';
+import {RealRunner} from '../src/core/runner.ts';
 import {pendingStarts} from '../src/core/start-lock.ts';
 import {collectStatus} from '../src/core/status.ts';
 import {runWatch, watchTick, WatchMemory} from '../src/core/watch.ts';
@@ -158,6 +159,17 @@ test('REL0272-LEGACY-JOURNAL: legacy launch events share a single append', async
   const legacyWrites = write.mock.calls.filter(call => String(call.arguments[0]).endsWith('/journal.jsonl') && String(call.arguments[1]).includes('launch-legacy'));
   assert.equal(legacyWrites.length, 1);
   assert.equal(readJournal(w.config).filter(event => event.kind === 'launch-legacy').length, 3);
+});
+
+test('REL0272-JOURNAL-APPEND: a torn last line does not absorb the next journal event', async () => {
+  const w = world('journal-append');
+  const file = path.join(path.dirname(w.config.path), 'journal.jsonl');
+  const event = (text: string) => JSON.stringify({kind: 'watch-resumed', text, at: '2026-01-01T00:00:00Z'}) + '\n';
+  fs.writeFileSync(file, event('old') + '{"torn":');
+  const inode = fs.statSync(file).ino;
+  await new RealRunner().appendFile(file, event('next'));
+  assert.deepEqual(readJournal(w.config).map(entry => entry.text), ['old', 'next']);
+  assert.equal(fs.statSync(file).ino, inode);
 });
 
 test('REL0272-TICK-PANES: many missing windows share one second tmux observation', async () => {

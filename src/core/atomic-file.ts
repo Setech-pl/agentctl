@@ -92,3 +92,25 @@ export function atomicAppendFile(file: string, content: string): void {
   try { old = fs.readFileSync(file, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   atomicWriteFile(file, old + content);
 }
+
+/** For the append-only JSONL journal, with its writer lock held. Existing complete lines survive a failed append. */
+export async function appendJournalFile(file: string, content: string): Promise<void> {
+  const {O_APPEND, O_CREAT, O_NOFOLLOW, O_RDWR} = fs.constants;
+  const handle = await fs.promises.open(file, O_APPEND | O_CREAT | O_NOFOLLOW | O_RDWR, 0o600);
+  try {
+    const {size} = await handle.stat();
+    const tail = Buffer.alloc(1, 10);
+    if (size) await handle.read(tail, 0, 1, size - 1);
+    try {
+      await handle.writeFile(`${tail[0] === 10 ? '' : '\n'}${content}`);
+      await handle.sync();
+    } catch (error) {
+      await handle.truncate(size).catch(() => undefined);
+      throw error;
+    }
+    failures.delete(path.resolve(file));
+    try {
+      if (JSON.parse(await fs.promises.readFile(marker(file), 'utf8')).file === path.resolve(file)) await fs.promises.unlink(marker(file));
+    } catch { /* no failure marker */ }
+  } finally { await handle.close(); }
+}
