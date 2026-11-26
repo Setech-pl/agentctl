@@ -304,7 +304,7 @@ export function diskStartHold(config: Context['config'], worktrees: (string | Di
       if (gb < config.disk.minFreeStartGb) {
         const external = repos.find(repo => repo.worktree === target);
         const mount = external && (external.worktreeMount ?? inferredWorktreeMount(external.worktree));
-        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
+        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}${config.disk.autoGc.enabled ? '; auto_gc włączone' : ''}`;
       }
     } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
   }
@@ -381,7 +381,7 @@ export async function freshTaskDiskStartHold(ctx: Context, host: string | undefi
         const held = `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
         if (!config.disk.autoGc.enabled || ctx.runner.dryRun) return held;
         kickAutoGc(ctx, [{ path: mount ?? ancestor, device: String(dev) }], { held: true });
-        return `${held}; uruchomiono auto_gc`;
+        return `${held}; zlecono auto_gc`;
       }
     }
     return undefined;

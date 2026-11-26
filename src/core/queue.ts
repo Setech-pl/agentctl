@@ -1178,7 +1178,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
     && !chatQuotaWait(config, entry, live) && !checkHostLimit(config, entry, live);
   const start = async (entry: QueueEntry): Promise<void> => {
-    if (!await beginStart(ctx, memory, notifier, entry, opts)) return;
+    if (!await beginStart(ctx, memory, notifier, entry, opts)) {
+      if (memory.held.has(entry.task)) stillHeld.add(entry.task);
+      return;
+    }
     used[entry.agent]++;
     live.push({ window: windowName(entry.task), agent: entry.agent, host: entry.host, owner: entry.owner });
     began.push(entry.task);
@@ -1299,7 +1302,16 @@ export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: {
 async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<boolean> {
   const { config } = ctx;
   // Sample the volume before taking the shared lock. newTasks rechecks before setup.
-  if (opts.signal?.aborted || await entryDiskStartHold(ctx, initial)) return false;
+  if (opts.signal?.aborted) return false;
+  const diskHold = await entryDiskStartHold(ctx, initial);
+  if (diskHold) {
+    if (memory.held.get(initial.task) !== diskHold) {
+      memory.held.set(initial.task, diskHold);
+      await opts.log?.(`queue: ${initial.task} ${diskHold}`);
+    }
+    return false;
+  }
+  memory.held.delete(initial.task);
   let entry = initial;
   let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
