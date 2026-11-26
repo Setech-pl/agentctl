@@ -418,6 +418,11 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
         queued = deliveryClass(record, text, screen.dimInput);
         if (queued && record.deliveryResult !== 'queued-in-agent') await setHeaderFields(ctx.runner, file, { delivery_result: 'queued-in-agent', prompt_error: `${DELIVERY_WARNING}: ${QUEUED_IN_AGENT}` });
       }
+      // 0.26.3 (ACTL-0261, HEMS-2-INT-38): a message sent to a busy agent is processed when its turn ends, which can be long after
+      // delivery_confirm_s. Without hook or transcript proof it stays "queued – unconfirmed"; an older release's
+      // "no acknowledgement" needs-attention for such a delivery is taken back on the next pass.
+      const busyQueued = record.deliveryWasBusy === true && (record.deliveryEnters ?? 0) > 0 && record.deliveryResult !== 'not-delivered-in-field';
+      if (busyQueued && record.promptDelivery === 'needs-attention' && /^Prompt delivery not confirmed: no acknowledgement/.test(record.promptError ?? '')) return uncertain(QUEUED_IN_AGENT, 'queued-in-agent');
       if (record.promptDelivery === 'needs-attention') {
         // An initial prompt that was never pasted (a start that failed before any paste; a window that became ready
         // late) can be re-armed without duplicating anything: the normal paste path serves it on the next pass.
@@ -434,7 +439,9 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       // A message the agent still shows in its own queue is pending, not lost: a turn can run far longer than
       // delivery_confirm_s (P64: Codex held it 54 minutes). The hook or the transcript confirms when the turn takes it.
       if (queued) return uncertain(QUEUED_IN_AGENT, 'queued-in-agent');
-      if (ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) >= ctx.config.deliveryConfirmS * 1000) return attention('no acknowledgement (hook, transcript) before delivery_confirm_s elapsed');
+      if (ctx.runner.now() - Date.parse(record.deliveryStartedAt ?? record.started) >= ctx.config.deliveryConfirmS * 1000) {
+        return busyQueued ? uncertain(QUEUED_IN_AGENT, 'queued-in-agent') : attention('no acknowledgement (hook, transcript) before delivery_confirm_s elapsed');
+      }
       return record.deliveryResult === 'not-delivered-in-field' ? 'confirming' : uncertain('awaiting hook or transcript', record.deliveryResult === 'queued-in-agent' ? 'queued-in-agent' : null);
     }
     if (!record.pendingPrompt || record.agent === 'unknown') return 'needs-attention';

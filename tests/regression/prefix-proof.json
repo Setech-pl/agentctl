@@ -1512,6 +1512,58 @@
       "R1: camelCase credentials and passwd are masked in fields, text and URLs"
     ]
   },
+  "READY0263-COMPOSER": {
+    "rev": "v0.26.2",
+    "outcome": "FAILS",
+    "failed": 6,
+    "passed": 0,
+    "failing": [
+      "READY0263-COMPOSER: as captured: readable, no draft, waitForReady reports ready at once",
+      "READY0263-COMPOSER: CRLF: readable, no draft, waitForReady reports ready at once",
+      "READY0263-COMPOSER: ANSI cursor/colour codes: readable, no draft, waitForReady reports ready at once",
+      "READY0263-COMPOSER: no-break space after the marker: readable, no draft, waitForReady reports ready at once",
+      "READY0263-COMPOSER: more blank padding: readable, no draft, waitForReady reports ready at once"
+    ]
+  },
+  "READY0263-QUEUED": {
+    "rev": "v0.26.2",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "READY0263-QUEUED: the agent stays busy past delivery_confirm_s without hook/transcript → confirming, queued in agent",
+      "READY0263-QUEUED: a busy delivery an older release left in \"Prompt delivery not confirmed\" goes back to queued – unconfirmed",
+      "READY0263-QUEUED: a follow-up sent to a busy agent is \"queued – unconfirmed\" past delivery_confirm_s, never needs-attention",
+      "READY0263-QUEUED: the agent stays busy past delivery_confirm_s without hook/transcript → confirming, queued in agent",
+      "READY0263-QUEUED: a busy delivery an older release left in \"Prompt delivery not confirmed\" goes back to queued – unconfirmed"
+    ]
+  },
+  "READY0263-RECAPTURE": {
+    "rev": "v0.26.2",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "READY0263-RECAPTURE: the fourth capture (after the deadline) is ready → ready, not a failure",
+      "READY0263-RECAPTURE: a prompt drawn in the last interval is seen by one more capture before the wait gives up",
+      "READY0263-RECAPTURE: the ready timeout scales with load1/cores (load 54 on 18 cores → 180 s)",
+      "READY0263-RECAPTURE: the ready timeout scales with the machine load",
+      "READY0263-RECAPTURE: the fourth capture (after the deadline) is ready → ready, not a failure"
+    ]
+  },
+  "READY0263-RETRY": {
+    "rev": "v0.26.2",
+    "outcome": "FAILS",
+    "failed": 3,
+    "passed": 0,
+    "failing": [
+      "READY0263-RETRY: the agent becomes ready after the first 60 s window → the prompt is delivered, no needs-attention",
+      "READY0263-RETRY: a second timeout is a failed start: needs-attention with the screen, nothing pasted",
+      "READY0263-RETRY: a task left in needs-attention by \"did not become ready\" is re-armed once its window shows the ready frame",
+      "READY0263-RETRY: a readiness timeout of a queued start is transient: one more wait in the same window",
+      "READY0263-RETRY: the agent becomes ready after the first 60 s window → the prompt is delivered, no needs-attention"
+    ]
+  },
   "REL0243-DISK": {
     "rev": "v0.23.0",
     "outcome": "FAILS",
