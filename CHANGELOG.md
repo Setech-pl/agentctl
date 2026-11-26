@@ -4,13 +4,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- AUTOGC0266-SCALE: One automatic GC run shares one task inventory, one link/symlink index and one read of the reports, checks candidates lazily, yields to the event loop and stops at `disk.auto_gc.max_run_s` (default 300). / Jeden przebieg automatycznego GC korzysta z jednego spisu zadań, jednego indeksu linków i dowiązań oraz jednego odczytu raportów, sprawdza pozycje leniwie, oddaje pętlę zdarzeń i kończy po `max_run_s` (domyślnie 300).
-- AUTOGC0266-IGNORED: Automatic GC keeps worktrees with git-ignored files outside `disk.auto_gc.ignored_ok` (default `node_modules`, `.cache/vite`, `dist`, `coverage`, `.turbo`) and worktrees whose ignored files a report names. / Automatyczne GC zostawia worktree z plikami ignorowanymi spoza `ignored_ok` oraz takie, których ignorowane pliki wskazuje raport.
-- AUTOGC0266-QUEUE: Automatic GC keeps what queued, starting and needs-attention tasks need (`review_of`, `after`, `base: "@TASK"`, the task's own worktree and paths in the spec or prompt) and rechecks the queue under the start lock before it takes the path claim. / Automatyczne GC chroni to, czego potrzebują zadania w kolejce, w trakcie startu i wymagające uwagi, i sprawdza kolejkę ponownie pod blokadą startu.
-- AUTOGC0266-CLI: Only watch runs automatic GC; a CLI or MCP disk hold leaves a request for watch, and Ctrl-C on watch finishes the current item only. / Automatyczne GC uruchamia tylko watch; start z CLI lub MCP zostawia mu zlecenie, a Ctrl-C kończy tylko bieżącą pozycję.
-- AUTOGC0266-RELOAD: A config reload stops a run only when `disk.auto_gc` changed; path claims carry timestamps and the process start time; the journal records run duration and bytes freed (statfs). / Przeładowanie konfiguracji przerywa przebieg tylko po zmianie `disk.auto_gc`; zajęcia ścieżek mają znaczniki czasu; dziennik zapisuje czas przebiegu i odzysk według statfs.
-- CLAUDEHOOK0266: Claude Code 2.1.332 rejects prompt-type SessionStart hooks; agentctl's task hooks stay command-type (accepted by 2.1.323 and 2.1.332), a start warns about non-command SessionStart hooks in user/project settings, and the first prompt is confirmed by its transcript (identified by the attempt marker) also when no hook runs, locally and on SSH hosts. / Claude Code 2.1.332 odrzuca hooki SessionStart typu prompt; hooki zadań agentctl pozostają typu command, start ostrzega o obcych hookach SessionStart innego typu, a pierwszy prompt potwierdza transkrypt także bez hooków, lokalnie i na hostach SSH.
-
 - Watch proposes confirmation-bound GC after local integration, routing one WALL message to each affected task-owning chat. / Po lokalnej integracji watch proponuje GC wymagające potwierdzenia i wysyła jedną wiadomość WALL do każdego czatu, którego zadania obejmuje plan.
 - `merge_base_check` warns, waits for the author, or creates a local merge candidate against the current `main`/`master`. / `merge_base_check` ostrzega, czeka na aktualizację gałęzi autora lub tworzy lokalny merge do przeglądu względem aktualnej gałęzi `main` albo `master`.
 - `review: {mode: readonly-on-author}` shares a stopped author's local worktree with task-scoped Git hooks and a separate evidence directory. / Przegląd tylko do odczytu korzysta z lokalnego worktree zatrzymanego autora, z hookami Git zadania i osobnym katalogiem dowodów.
@@ -32,6 +25,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.26.4] - 2026-11-26
+
+- AUTOGC0266-SCALE: One automatic GC run shares one task inventory, one link/symlink index and one read of the reports, checks candidates lazily, yields to the event loop and stops at `disk.auto_gc.max_run_s` (default 300). / Jeden przebieg automatycznego GC korzysta z jednego spisu zadań, jednego indeksu linków i dowiązań oraz jednego odczytu raportów, sprawdza pozycje leniwie, oddaje pętlę zdarzeń i kończy po `max_run_s` (domyślnie 300).
+- AUTOGC0266-IGNORED: Automatic GC keeps worktrees with git-ignored files outside `disk.auto_gc.ignored_ok` (default `node_modules`, `.cache/vite`, `dist`, `coverage`, `.turbo`) and worktrees whose ignored files a report names. / Automatyczne GC zostawia worktree z plikami ignorowanymi spoza `ignored_ok` oraz takie, których ignorowane pliki wskazuje raport.
+- AUTOGC0266-QUEUE: Automatic GC keeps what queued, starting and needs-attention tasks need (`review_of`, `after`, `base: "@TASK"`, the task's own worktree and paths in the spec or prompt) and rechecks the queue under the start lock before it takes the path claim. / Automatyczne GC chroni to, czego potrzebują zadania w kolejce, w trakcie startu i wymagające uwagi, i sprawdza kolejkę ponownie pod blokadą startu.
+- AUTOGC0266-CLI: Only watch runs automatic GC; a CLI or MCP disk hold leaves a request for watch, and Ctrl-C on watch finishes the current item only. / Automatyczne GC uruchamia tylko watch; start z CLI lub MCP zostawia mu zlecenie, a Ctrl-C kończy tylko bieżącą pozycję.
+- AUTOGC0266-RELOAD: A config reload stops a run only when `disk.auto_gc` changed; path claims carry timestamps and the process start time; the journal records run duration and bytes freed (statfs). / Przeładowanie konfiguracji przerywa przebieg tylko po zmianie `disk.auto_gc`; zajęcia ścieżek mają znaczniki czasu; dziennik zapisuje czas przebiegu i odzysk według statfs.
+- CLAUDEHOOK0266: Claude Code 2.1.332 rejects prompt-type SessionStart hooks; agentctl's task hooks stay command-type (accepted by 2.1.323 and 2.1.332), a start warns about non-command SessionStart hooks in user/project settings, and the first prompt is confirmed by its transcript (identified by the attempt marker) also when no hook runs, locally and on SSH hosts. / Claude Code 2.1.332 odrzuca hooki SessionStart typu prompt; hooki zadań agentctl pozostają typu command, start ostrzega o obcych hookach SessionStart innego typu, a pierwszy prompt potwierdza transkrypt także bez hooków, lokalnie i na hostach SSH.
+
+[Release notes (EN)](docs/release-notes/0.26.4.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.26.4.pl.md).
 
 ## [0.26.3] - 2026-11-26
 
