@@ -41,6 +41,16 @@ it('queued host move: round trip preserves ID, position, dependencies, prompt an
   await saveEntry(w.ctx, { ...e, status: 'starting' });
   await assert.rejects(moveTask(w.ctx, 'MOVE-1', { host: 'pc', yes: true }), /only queued/);
 });
+it('queued host move: the Mac pin overrides automatic placement', async () => {
+  const w = world();
+  w.config.placement.default = 'auto';
+  await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);
+  await moveTask(w.ctx, 'MOVE-1', { host: 'local', yes: true });
+  const [entry] = readQueue(w.config);
+  assert.equal(entry!.host, undefined);
+  assert.equal(entry!.placement, undefined);
+  assert.equal(splitSpecs(entry!.spec)[0]!.header.host, 'local');
+});
 it('host limits and provider hold: account and host loads agree, remote queue is held', async () => {
   const w = world(); w.raw.header.host = 'pc';
   await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);

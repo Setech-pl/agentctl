@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { withStartLock, pendingStarts } from './start-lock.ts';
 import { findEntry, saveEntry, renderRawSpec, withAcceptLock } from './queue.ts';
 import type { QueueEntry } from './queue.ts';
-import { resolveSpec, splitSpecs } from './spec.ts';
+import { resolveSpec, specHost, splitSpecs } from './spec.ts';
 import { recordFromSpec } from './taskstore.ts';
 import { collectLimits } from './limits.ts';
 import { liveWindows } from './plan.ts';
@@ -88,7 +88,11 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
     if (targetHost) {
       raw.header.host = targetHost;
       for (const repo of raw.header.repos as {worktree?: string}[]) delete repo.worktree;
-    } else raw.header.host = 'local';
+    } else {
+      const originalHost = raw.header.host;
+      delete raw.header.host;
+      if (originalHost === 'auto' || originalHost === 'local' || specHost(raw, config, entry.owner) !== 'local') raw.header.host = 'local';
+    }
     const spec = resolveSpec(raw, { config });
     if (!targetHost && spec.repos.some(r => !fs.existsSync(r.path))) throw new AgentctlError('Local clone missing: use a local absolute repos.path in the original spec and configure worktree_root');
     const fromSpec = resolveSpec(splitSpecs(entry.spec)[0]!, { config });

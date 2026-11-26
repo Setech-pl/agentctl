@@ -241,15 +241,17 @@ export interface LimitsReport {
 export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[], now = Date.now(), showPlans = false, rows?: StatusRow[]): LimitsReport {
   const holds = providerHolds(config, now);
   const plans = showPlans ? readPlanStates(config, openReader(config), now) : undefined;
+  const healthByHost = new Map((readHostsCache()?.hosts ?? []).map(sample => [sample.name, sample]));
+  const localAvailability = hostAvailability(config, 'local', healthByHost.get('local'), now);
   const queue = waiting(readQueue(config));
   const reservations = readReservations(config, now);
   return {
     countExternal: config.countExternal,
     config: config.path,
-    hosts: Object.entries({ ...(config.localHost || Object.keys(config.hosts).length ? { local: { ...config.localHost, providers: activeProviders(config) } } : {}), ...config.hosts }).map(([host, h]) => {
-      const health = readHostsCache()?.hosts.find(sample => sample.name === host);
+    hosts: Object.entries({ ...config.hosts, ...(config.localHost || config.placement.default === 'auto' || localAvailability ? { local: { ...config.localHost, providers: activeProviders(config) } } : {}) }).map(([host, h]) => {
+      const health = healthByHost.get(host);
       const slots = live.filter(w => (w.host ?? 'local') === host && w.kind !== 'reserved');
-      return { host, availability: hostAvailability(config, host, health, now), load: health?.load, memoryFreeKb: health?.memoryFreeKb,
+      return { host, availability: host === 'local' ? localAvailability : hostAvailability(config, host, health, now), load: health?.load, memoryFreeKb: health?.memoryFreeKb,
         total: slots.filter(w => w.counted !== false && w.agent).length, maxTotal: h.maxTotal, perf: slots.find(w => w.perf && !w.reportReady)?.window,
         providers: h.providers.map(agent => {
       const limit = h.limits?.[agent] ?? null;
@@ -320,7 +322,13 @@ export function renderLimits(report: LimitsReport): string[] {
     for (const chat of p.chats ?? []) lines.push(`  ${p.agent} ${renderChatLoad(chat)}`);
     if (parts.length > 0) lines.push(`  ${p.agent}: ${parts.join(' · ')}`);
   }
-  for (const h of report.hosts ?? []) lines.push(`host ${h.host}${h.availability ? ` (${h.availability})` : ''} ${h.total ?? 0}/${h.maxTotal ?? '∞'}${h.perf ? ` perf ${h.perf}` : ''}: ${h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`).join(' · ')} (account limits/holds also apply)`);
+  for (const h of report.hosts ?? []) {
+    const parts = h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`);
+    if (h.maxTotal !== undefined) parts.push(`total ${h.total ?? 0}/${h.maxTotal}`);
+    if (h.availability) parts.push(h.availability);
+    if (h.perf) parts.push(`perf ${h.perf}`);
+    lines.push(`host ${h.host}: ${parts.join(' · ')} (account limits/holds also apply)`);
+  }
   lines.push(report.countExternal ? 'External sessions are counted (limits.count_external).' : 'Sessions started by hand are not counted: "agentctl limits reserve claude=1" holds a place, or set limits.count_external: true.');
   lines.push('HOLD = usage.queue_hold: above that plan percentage (any window) the queue starts no task of the provider; off = never held.');
   lines.push('Change: agentctl limits set claude=3 codex=5 queue_hold.codex=90   (takes effect at once, also in a running watch)');

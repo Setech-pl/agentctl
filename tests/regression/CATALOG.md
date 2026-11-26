@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| NODES0262-COMPAT | Host placement changed a legacy queued spec round trip and reordered existing host limit rows. | `tests/host-polish.test.ts` (`^queued host move: round trip\|^host limits and provider hold`) | 0.27.3 | not proven: Introduced during the unreleased 0.27.3 feature; both scenarios failed on f472db2 in the quick gate. |
 | NODES0262-PLACEMENT | A free worker could not accept an automatic order from the Mac dispatcher. | `tests/host-tasks.test.ts` (`^NODES0262-PLACEMENT:`) | 0.27.3 | fails on v0.27.1 (1 failing of 1) |
 | NODES0262-BASE | A task ordered on the PC could not check out a base branch that existed only on the Mac. | `tests/host-tasks.test.ts` (`^NODES0262-BASE:`) | 0.27.3 | fails on v0.27.1 (1 failing of 1) |
 | FIELD0256-LAUNCH | A window could exit at launch without evidence, a retry, or a usable recovery and dependency state. | `tests/queue.test.ts` (`^FIELD0256-LAUNCH:`)<br>`tests/field0253-gc.test.ts` (`^FIELD0256-DEAD-GC:`) | 0.27.1 | fails on v0.27.0 (2 failing of 2) |
