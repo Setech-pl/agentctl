@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-RESUME-LOCK', fixedIn: '0.27.2', proofAgainst: '64fdb988f5ece0aa7a97abd348151ad9039dac2a', symptom: 'A second resume over the same active task could wait for the first instead of seeing its admission reservation.', scenarios: [s('audit-0174.test.ts', '^W4 a stale resume plan')] },
   { id: 'REL0272-JOURNAL-APPEND', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Every journal append synchronously rewrote the entire file and a torn last line swallowed the next event.', scenarios: [s('review0256.test.ts', '^REL0272-JOURNAL-APPEND:')] },
   { id: 'REL0272-HOLD-WRITES', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'A load hold could block the entire watch tick by rewriting the journal and queue entry for each held order.', scenarios: [s('review0256.test.ts', '^REL0272-HOLD-WRITES:')] },
   { id: 'REL0272-TICK-PANES', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Watch verified each missing window with a separate tmux IPC call after the main inventory.', scenarios: [s('review0256.test.ts', '^REL0272-TICK-PANES:')] },

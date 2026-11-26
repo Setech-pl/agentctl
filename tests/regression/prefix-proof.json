@@ -1581,6 +1581,16 @@
       "REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group"
     ]
   },
+  "REL0272-RESUME-LOCK": {
+    "rev": "64fdb988f5ece0aa7a97abd348151ad9039dac2a",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W4 a stale resume plan cannot start the same window twice even when the provider has two slots",
+      "W4 a stale resume plan cannot start the same window twice even when the provider has two slots"
+    ]
+  },
   "REL0272-SMOKE-EVIDENCE": {
     "rev": "f702dcca477f2d708a55a3cf9ed540cae21001ed",
     "outcome": "FAILS",
