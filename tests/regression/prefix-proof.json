@@ -1641,6 +1641,16 @@
       "REVIEW0256-RESUME: a stalled tmux launch leaves the tick and releases its reservation"
     ]
   },
+  "REVIEW0263-F1": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0263-F1: accepted start probes do not hold the shared admission lock",
+      "REVIEW0263-F1: accepted start probes do not hold the shared admission lock"
+    ]
+  },
   "ROWSEL0252": {
     "rev": "v0.25.1",
     "outcome": "FAILS",

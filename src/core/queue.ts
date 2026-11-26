@@ -558,34 +558,42 @@ export async function validateAccepted(ctx: Context, notifier: Notifier, opts: Q
     batches.set(key, [...(batches.get(key) ?? []), entry]);
   }
   for (const batch of batches.values()) {
-    await withStartLock(ctx, async () => {
-      const all = readQueue(ctx.config);
-      const same = (a: QueueEntry, b: QueueEntry) => a.seq === b.seq && a.task === b.task;
-      const fresh = batch.map((e) => all.find((f) => same(e, f))).filter((e): e is QueueEntry => e?.status === 'accepted');
-      if (!fresh.length) return;
-      const others = all.filter((e) => !fresh.some((f) => same(e, f)));
-      const first = fresh[0]!;
-      try {
-        const raws = fresh.map((e) => splitSpecs(e.spec, `queue entry ${e.task}`)[0] as RawSpec);
-        const agent = first.agentOverride ? { agent: first.agentOverride } : {};
-        let items: QueueAddItem[];
-        if (first.direct) {
-          const knownAuthors = new Map(others.filter((e) => e.direct).map((e) => [e.task, { agent: e.agent, model: e.model }]));
-          // A confirmed start waits for a free window of its provider like every direct start; a full provider is not a reason to fail it.
-          const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
-          const specs = await planBatch(ctx, resolved, { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true, afterRows: await queueDependencyRows(ctx, resolved) });
-          for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
-          items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
-        } else {
-          items = await validateQueueAdd(ctx, raws, others, agent);
-          for (const { spec } of items) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
-        }
-        await commitQueueAdd(ctx, items, { ...agent, ...(first.reuse ? { reuse: true } : {}), ...(first.direct ? { direct: { noAgent: Boolean(first.noAgent) } } : {}), accepted: fresh });
-        await opts.log?.(`queue: ${fresh.map((e) => e.task).join(', ')} accepted spec validated`);
-      } catch (e) {
-        const error = e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e);
-        for (const entry of fresh) await rejectAccepted(ctx, entry, error, notifier, opts);
+    const config = ctx.config;
+    const all = readQueue(config);
+    const same = (a: QueueEntry, b: QueueEntry) => a.seq === b.seq && a.task === b.task && a.spec === b.spec && b.status === 'accepted';
+    if (!batch.every(entry => all.some(candidate => same(entry, candidate)))) continue;
+    const others = all.filter(entry => !batch.some(candidate => same(candidate, entry)));
+    const first = batch[0]!;
+    const agent = first.agentOverride ? { agent: first.agentOverride } : {};
+    let items: QueueAddItem[] | undefined;
+    let problem: string | undefined;
+    try {
+      const raws = batch.map(e => splitSpecs(e.spec, `queue entry ${e.task}`)[0] as RawSpec);
+      if (first.direct) {
+        const knownAuthors = new Map(others.filter(e => e.direct).map(e => [e.task, { agent: e.agent, model: e.model }]));
+        // A confirmed start waits for its selected provider. Its current capacity is checked at admission.
+        const resolved = raws.map(raw => resolveSpec(raw, {config}));
+        const specs = await planBatch(ctx, resolved, { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true, afterRows: await queueDependencyRows(ctx, resolved) });
+        items = specs.map((spec, i) => ({ raw: raws[i]!, spec }));
+      } else items = await validateQueueAdd(ctx, raws, others, agent);
+      for (const {spec} of items) {
+        const warnings = reportPathWarnings(config, spec);
+        if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`);
       }
+    } catch (error) {
+      problem = error instanceof AgentctlError && error.hint ? `${error.message}\nHint: ${error.hint}` : errorMessage(error);
+    }
+    await withStartLock(ctx, async () => {
+      if (ctx.config !== config) return;
+      const latest = readQueue(config);
+      const fresh = batch.map(entry => latest.find(candidate => same(entry, candidate)));
+      if (!fresh.every((entry): entry is QueueEntry => entry !== undefined)) return;
+      if (problem !== undefined) {
+        for (const entry of fresh) await rejectAccepted(ctx, entry, problem, notifier, opts);
+        return;
+      }
+      await commitQueueAdd(ctx, items!, { ...agent, ...(first.reuse ? { reuse: true } : {}), ...(first.direct ? { direct: { noAgent: Boolean(first.noAgent) } } : {}), accepted: fresh });
+      await opts.log?.(`queue: ${fresh.map(e => e.task).join(', ')} accepted spec validated`);
     });
   }
 }

@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Accepted starts run slow validation outside the admission lock, and lock waiters can wait for the full short holder budget. / Przyjęte starty wykonują wolne sprawdzenia poza blokadą, a operacje mogą przeczekać pełny limit krótkiego uchwytu.
 - Watch shares task and disk inventories across stages and retains the last complete rows and their original timestamp after a collection failure. / Watch współdzieli odczyty zadań i dysków, a po błędzie zachowuje ostatnie pełne wiersze z ich oryginalną datą.
 - A setup retry checks all reused checkouts with one bounded process census. / Ponowienie setupu sprawdza wszystkie używane worktree jednym odczytem procesów z limitem czasu.
 - High load raises alerts. Queue admission holds only with `queue.hold_on_load: true` and an explicit `capacity.load_threshold`. / Wysokie obciążenie zgłasza alert. Kolejka wstrzymuje starty po ustawieniu `queue.hold_on_load: true` i jawnego `capacity.load_threshold`.

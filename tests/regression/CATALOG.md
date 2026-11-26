@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REVIEW0263-F1 | Accepted start validation ran lengthy repository and tmux probes while holding the admission lock. | `tests/review0263.test.ts` (`^REVIEW0263-F1:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-TICK-ROWS | A status collection timeout replaced the last complete MCP snapshot with a rowless snapshot dated as fresh. | `tests/watch-snapshot.test.ts` (`^REL0272-TICK-ROWS:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-P19-RETRY | Retrying setup over kept worktrees ran a separate unbounded series of cwd probes for each checkout. | `tests/worktree-start.test.ts` (`^REL0272-P19-RETRY:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-GIT-REFUSAL | Local GC could override Git’s untracked-file protection after the hotfix merge. | `tests/fix0227-gc.test.ts` (`^D1: cached MCP preview checks every repo`) | 0.27.2 | fails on 5274994a68ce2d2fdaf2cc310ad602c00a6b0e94 (1 failing of 1) |

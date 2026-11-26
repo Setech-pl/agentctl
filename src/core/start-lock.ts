@@ -23,7 +23,7 @@ export async function withStartLock<T>(ctx: Context, action: () => Promise<T>, t
   if (ctx.runner.dryRun) return action();
   let recovered: { pid?: number; task?: string; at?: string } | undefined;
   try {
-    return await withFileLock(path.join(ctx.config.stateDir, 'start.lock'), () => withCommandStage(30_000, undefined, action), 5000, false, {
+    return await withFileLock(path.join(ctx.config.stateDir, 'start.lock'), () => withCommandStage(30_000, undefined, action), 60_000, false, {
       task, staleMs: ctx.config.startLockStaleS * 1000, recovered: owner => { recovered = owner; },
     });
   } finally {
