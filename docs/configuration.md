@@ -310,7 +310,7 @@ codex:
     - '\? for shortcuts'
     - '⚠ \d+ warnings?'
     - 'f2 to view'
-    - '^\s*[\w.-]+ (low|medium|high|xhigh|minimal|none) · '
+    - '^\s*[\w.-]+ (low|medium|high|xhigh|minimal|none)(?: [\w.+-]+){0,2} · '
     - '^\s*›\s*(Ask Codex to do anything)?\s*$'
     - 'Queued follow-up inputs|⇧.? (edit last queued message|to answer)'
   limit_patterns:
