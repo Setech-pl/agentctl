@@ -96,6 +96,24 @@ test('REVIEW0256-INDEX: repeated launch checks keep task reads and journal parsi
   assert.equal(readJournal(w.config).filter(event => event.changeId === 'once').length, 1);
 });
 
+test('REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up', async t => {
+  const w = world('delivery-fifo');
+  const items = Array.from({length: 12}, (_, i) => {
+    const pane = w.tmux.add(`fifo-${i}`, 'Working (esc to interrupt)');
+    return seedTask(w.config, `FIFO-${i}`, {agent: 'codex', windowId: pane.id, promptDelivery: 'sent'});
+  });
+  const active = items[0]!;
+  fs.writeFileSync(path.join(w.config.stateDir, active.window, 'prompt-queue.json'), JSON.stringify([
+    {id: 'fixture-follow-up', text: 'Queued follow-up.', queuedAt: new Date(w.runner.now()).toISOString()}
+  ]));
+  const open = t.mock.method(fs, 'openSync');
+  const memory = new WatchMemory();
+  t.after(() => memory.launchHealth?.close());
+  await watchTick(w.ctx, memory, notifier);
+  const locks = open.mock.calls.map(call => String(call.arguments[0])).filter(file => file.endsWith('/prompt-queue.json.lock'));
+  assert.deepEqual(locks, [path.join(w.config.stateDir, active.window, 'prompt-queue.json.lock')]);
+});
+
 test('REVIEW0256-LEGACY: dead legacy launching tasks are journaled once and wait for a named resume', async () => {
   const w = world('legacy');
   w.tmux.add('unrelated', '❯ ');

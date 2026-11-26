@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-DELIVERY-SCAN | Watch acquired the shared start lock once per active task even when there were no messages to send. | `tests/review0256.test.ts` (`^REL0272-DELIVERY-SCAN:`) | 0.27.2 | fails on e3a6373f67cc15323ad95af1e91bacb8c0d83760 (1 failing of 1) |
 | REL0272-SMOKE-EVIDENCE | A package install failure aborted the release gate before its production-scale check. | `tests/gate.test.ts` (`^REL0272-SMOKE-EVIDENCE:`) | 0.27.2 | fails on f702dcca477f2d708a55a3cf9ed540cae21001ed (1 failing of 1) |
 | REVIEW0256-RESUME | A hung launch-health retry could keep the watch tick and start reservation open. | `tests/review0256.test.ts` (`^REVIEW0256-RESUME:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |
 | REVIEW0256-LOAD | An alert threshold blocked all queue admission without an opt-in. | `tests/review0256.test.ts` (`^REVIEW0256-LOAD:`) | 0.27.2 | fails on v0.27.1 (1 failing of 1) |

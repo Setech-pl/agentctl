@@ -11,7 +11,7 @@ import { packageVersion } from './version.ts';
 import { recordMachineLoad } from './machine.ts';
 import { checkLaunchHealth, LaunchHealthMemory } from './launch-health.ts';
 import { limitedTick } from './limited.ts';
-import { drainPromptQueue } from './prompt-queue.ts';
+import { drainPromptQueue, queueFile, readPromptQueue } from './prompt-queue.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { reviewTick } from './review.ts';
 import { journalOutputs } from './outputs.ts';
@@ -52,7 +52,7 @@ import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
-import { findRecordAnywhere, readRecordFileAsync, readTaskRecord, setHeaderField, snapshotRecords, taskFile } from './taskstore.ts';
+import { findRecordAnywhere, readTaskRecord, setHeaderField, snapshotRecords, taskFile } from './taskstore.ts';
 import { syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
 import { errorMessage, formatDuration } from './util.ts';
@@ -311,20 +311,23 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     if (!observed) throw Error('status collection incomplete');
     let allRows = observed;
     if (await autoClosePulled(ctx, allRows)) allRows = await collect();
+    const inventory = await memory.launchHealth.records.current(ctx.config, ctx.runner.now());
+    const records = new Map(inventory.map(record => [record.window, record]));
     let changed = false;
     for (const row of allRows) {
       if (signal.aborted) break;
-      const record = !row.closed && !row.cancelled && !row.archived ? await readRecordFileAsync(taskFile(ctx.config, row.windowName)) : undefined;
+      const record = !row.closed && !row.cancelled && !row.archived ? records.get(row.windowName) : undefined;
       if (row.tmuxLost || row.launchExit || row.state === 'host-unreachable') continue;
-      if (record?.host && record.promptDelivery === 'launching' && row.window === 'alive') {
+      let delivery = record?.promptDelivery;
+      if (record?.host && delivery === 'launching' && row.window === 'alive') {
         await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'prompt_delivery', 'pending');
-        record.promptDelivery = 'pending';
+        delivery = 'pending';
       }
-      if (record && ['pending', 'sending', 'confirming', 'needs-attention', 'needs-input'].includes(record.promptDelivery ?? '')) {
-        if (record.promptDelivery === 'pending' && row.window !== 'alive') continue;
+      if (record && ['pending', 'sending', 'confirming', 'needs-attention', 'needs-input'].includes(delivery ?? '')) {
+        if (delivery === 'pending' && row.window !== 'alive') continue;
         const result = await deliverPendingPrompt(ctx, row.windowName);
         // The baseline tick has no transition notifier yet; later deadlines use NOTIFY_ON below.
-        if (result === 'needs-attention' && record.promptDelivery !== 'needs-attention' && !memory.started) {
+        if (result === 'needs-attention' && delivery !== 'needs-attention' && !memory.started) {
           const updated = readTaskRecord(ctx.config, row.windowName);
           const text = `${row.task}: ${updated?.promptError}`;
           await new Alerts(ctx, notifier, { self: options.self }).send({ task: row.task, window: row.windowName }, 'needs-attention', text, 'watch');
@@ -336,8 +339,16 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     if (signal.aborted) return;
     if (changed) allRows = await collect();
     const byWindow = new Map(allRows.map(row => [row.windowName, row.state]));
-    const current = await memory.launchHealth.records.current(ctx.config, ctx.runner.now());
-    for (const record of current) if (!signal.aborted && !record.closed && !record.cancelled && (!record.host || !ctx.hosts.connection(record.host).unreachable)) await drainPromptQueue(ctx, record.window, byWindow.get(record.window));
+    const current = changed ? await memory.launchHealth.records.current(ctx.config, ctx.runner.now()) : inventory;
+    for (const record of current) {
+      if (signal.aborted) break;
+      if (record.closed || record.cancelled || record.host && ctx.hosts.connection(record.host).unreachable) continue;
+      // Avoid opening the shared start lock for inactive FIFOs. Drain revalidates under the lock.
+      const pending = record.pendingPrompt && record.promptDelivery !== 'sent';
+      if (pending || fs.existsSync(queueFile(ctx, record.window)) && readPromptQueue(ctx, record.window).length) {
+        await drainPromptQueue(ctx, record.window, byWindow.get(record.window));
+      }
+    }
     // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
     if (!signal.aborted && await syncWaitingReports(ctx, allRows)) allRows = await collect();
     const ready = new Set(allRows.filter(row => row.state === 'report-ready').map(row => row.task));

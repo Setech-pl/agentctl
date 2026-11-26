@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-DELIVERY-SCAN', fixedIn: '0.27.2', proofAgainst: 'e3a6373f67cc15323ad95af1e91bacb8c0d83760', symptom: 'Watch acquired the shared start lock once per active task even when there were no messages to send.', scenarios: [s('review0256.test.ts', '^REL0272-DELIVERY-SCAN:')] },
   { id: 'REL0272-SMOKE-EVIDENCE', fixedIn: '0.27.2', proofAgainst: 'f702dcca477f2d708a55a3cf9ed540cae21001ed', symptom: 'A package install failure aborted the release gate before its production-scale check.', scenarios: [s('gate.test.ts', '^REL0272-SMOKE-EVIDENCE:')] },
   { id: 'REVIEW0256-RESUME', fixedIn: '0.27.2', symptom: 'A hung launch-health retry could keep the watch tick and start reservation open.', scenarios: [s('review0256.test.ts', '^REVIEW0256-RESUME:')] },
   { id: 'REVIEW0256-LOAD', fixedIn: '0.27.2', symptom: 'An alert threshold blocked all queue admission without an opt-in.', scenarios: [s('review0256.test.ts', '^REVIEW0256-LOAD:')] },
