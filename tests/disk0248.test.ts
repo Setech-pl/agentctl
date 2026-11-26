@@ -854,7 +854,12 @@ disk:
     await write(file, content);
     if (file.endsWith('/auto-gc-state.json')) finish();
   });
+  const { takeAutoGcKick } = await import('../src/core/auto-gc.ts');
+  // 0.26.4 (L1): the CLI process only leaves a request; the watcher runs it under its own stop signal.
   assert.match(await freshTaskDiskStartHold(w.ctx, undefined, [w.repo]) ?? '', /wstrzymane: dysk .*auto_gc/);
+  assert.ok(fs.existsSync(path.join(w.config.stateDir, 'auto-gc-kick.json')));
+  assert.equal(readJournal(w.config).some(entry => entry.kind === 'disk-auto-gc'), false);
+  assert.equal(await takeAutoGcKick(w.ctx, new AbortController().signal), true);
   await finished;
   assert.ok(fs.existsSync(target));
   const event = readJournal(w.config).find(entry => entry.kind === 'disk-auto-gc');

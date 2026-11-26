@@ -149,7 +149,7 @@ export async function purgeTrashItem(ctx: Context, item: TrashItem): Promise<voi
 }
 
 /** Receipts take precedence. Legacy names additionally need an agentctl ownership marker. */
-export function planTrashPurge(ctx: Context): TrashItem[] {
+export function planTrashPurge(ctx: Context, known?: TaskRecord[]): TrashItem[] {
   const result = new Map<string, TrashItem>();
   const recorded = new Set<string>();
   const dir = receiptDir(ctx);
@@ -179,7 +179,7 @@ export function planTrashPurge(ctx: Context): TrashItem[] {
       originals.set(target, matches);
     }
   };
-  const records = localRecords(ctx);
+  const records = known ?? localRecords(ctx);
   for (const record of records) {
     if (record.host || record.pin || !record.closed && !record.cancelled) continue;
     add(path.join(ctx.config.cache, record.window));

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
 import type { Link, GlobalConfig } from './config.ts';
 import { listTaskRecords, listArchivedRecords, type RecordScan } from './taskstore.ts';
+import type { TaskRecord } from './taskstore.ts';
 import { fillPlaceholders, resolvePath } from './util.ts';
 import type { Runner } from './runner.ts';
 import { AgentctlError, Problems } from './util.ts';
@@ -246,11 +247,13 @@ export function knownLinkReferences(config: GlobalConfig, inventory?: RecordScan
   const records = inventory?.all ?? [...current, ...listArchivedRecords(config)];
   const active = current.filter(r => !r.closed && !r.cancelled);
   const refs = active.flatMap(r => r.links.map(l => ({ target: l.to, source: `active task ${r.task}` })));
-  for (const repo of new Set(records.flatMap(r => r.repos.map(repo => repo.path)))) {
+  const byRepo = new Map<string, TaskRecord[]>();
+  for (const record of records) for (const repo of new Set(record.repos.map(x => x.path))) byRepo.set(repo, [...byRepo.get(repo) ?? [], record]);
+  for (const [repo, users] of byRepo) {
     try {
       const links = loadProjectConfig(repo)?.links ?? [];
       if (!links.length) continue;
-      for (const record of records.filter(r => r.repos.some(x => x.path === repo))) {
+      for (const record of users) {
         refs.push(...expandProjectLinks(links, repo, record.task, config.cache).map(l => ({ target: l.to, source: `${repo}/.agentctl.yaml` })));
       }
     } catch (error) {

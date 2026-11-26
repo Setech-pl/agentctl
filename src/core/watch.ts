@@ -18,6 +18,7 @@ import { journalOutputs } from './outputs.ts';
 import { deliverPendingPrompt } from './prompt-delivery.ts';
 import { overloadTick } from './overload.ts';
 import { collectDisk, diskTick } from './disk.ts';
+import { autoGcIdle, hostAutoGc } from './auto-gc.ts';
 import { WatchStalled, WatchSteps, type WatchStepObserver } from './watch-steps.ts';
 import { watchSnapshotPath, watchProgressPath } from './watch-snapshot.ts';
 import { atomicWriteFile, readStateWriteFailure, stateWriteFailure } from './atomic-file.ts';
@@ -607,6 +608,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
   };
   let stalled = false;
+  const unhost = hostAutoGc({ ...(opts.signal ? { signal: opts.signal } : {}), log: line => ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${line}\n`) });
   try {
     let startupAnnounced = false;
     const backgroundStarts = !ctx.runner.dryRun && (opts.backgroundStarts ?? (opts.maxTicks === undefined && !opts.onTick));
@@ -654,6 +656,9 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     throw error;
   } finally {
     fileWatcher?.close();
+    unhost();
+    // A stopped watcher lets an automatic GC run finish the item it is deleting; the run itself stops at the next item.
+    await autoGcIdle();
     memory.launchHealth.close();
     memory.archive.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
