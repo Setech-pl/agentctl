@@ -1079,12 +1079,34 @@ export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.AGENTCTL_HOME ? resolvePath(env.AGENTCTL_HOME) : path.join(os.homedir(), '.agentctl');
 }
 
+/** Allow rollback with known 0.27.x settings while keeping typo validation for this release. */
+function stripForwardConfig(raw: Record<string, unknown>): string[] {
+  const ignored: string[] = [];
+  const strip = (map: Record<string, unknown>, prefix: string, keys: string[]) => {
+    for (const key of keys) {
+      if (!Object.hasOwn(map, key)) continue;
+      ignored.push(prefix + key);
+      delete map[key];
+    }
+  };
+  strip(raw, '', ['launch', 'placement', 'perf']);
+  if (isObject(raw.limits)) strip(raw.limits, 'limits.', ['change_policy', 'profiles', 'schedule', 'active_profile', 'timed_overrides']);
+  if (isObject(raw.hosts)) {
+    strip(raw.hosts, 'hosts.', ['local']);
+    for (const [name, host] of Object.entries(raw.hosts)) {
+      if (isObject(host)) strip(host, `hosts.${name}.`, ['max_total', 'load_threshold', 'availability', 'sync', 'mac_ssh', 'fetch_remote', 'trust_work_dir']);
+    }
+  }
+  return ignored;
+}
+
 export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
   const file = path.join(dir, 'config.yaml');
   const exists = fs.existsSync(file);
   const raw = exists ? readYamlFile(file) : {};
   const p = new Problems();
   if (!isObject(raw)) throw new AgentctlError(`${file}: the top level must be a mapping`);
+  const ignored = stripForwardConfig(raw);
   checkKeys(raw, GLOBAL_KEYS, 'config', p);
   const layer = parseLayer(raw, 'config', p);
   const providers = parseProviders(raw.providers, p);
@@ -1361,7 +1383,7 @@ export function loadGlobalConfig(dir: string = configDir()): GlobalConfig {
     }
   }
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
-  const warnings: string[] = [];
+  const warnings: string[] = ignored.length ? [`Ignored 0.27.x config keys: ${ignored.join(', ')}`] : [];
   const usageMap = isObject(raw.usage) ? raw.usage : {};
   for (const id of PROVIDER_IDS.filter(id => !providers.includes(id))) {
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });

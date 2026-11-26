@@ -652,3 +652,21 @@ it('HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy 
   assert.ok(fs.existsSync(path.join(w.trash, 'personal')));
   assert.ok(fs.existsSync(marked));
 });
+
+it('HOTFIX0264-F4: a 0.27.x config loads with one warning and ordinary settings still apply', () => {
+  const config = makeConfig(scratch.sub('forward-config'), `
+launch: {grace_s: 90}
+placement: {default: auto}
+perf: {wait_max: 20m}
+limits: {claude: 4, change_policy: owner-approve, profiles: {day: {claude: 8}}, schedule: {}}
+hosts:
+  local: {load_threshold: 20}
+  pc: {ssh: owner@pc, work_dir: ~/work, repos: {app: ~/app}, providers: [claude], sync: fetch-back, availability: {yield: stop-new}}
+`);
+  assert.equal(config.limits.claude, 4);
+  assert.equal(config.hosts.pc?.ssh, 'owner@pc');
+  assert.deepEqual(Object.keys(config.hosts), ['pc']);
+  assert.equal(config.warnings?.length, 1);
+  assert.match(config.warnings![0]!, /0\.27\.x.*limits\.profiles.*hosts\.local.*hosts\.pc\.availability/);
+  assert.throws(() => makeConfig(scratch.sub('forward-typo'), 'placemet: {}'), /unknown key/);
+});
