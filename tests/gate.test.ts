@@ -28,6 +28,13 @@ it('REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results
   assert.deepEqual(ran, ['smoke-node22', 'smoke-node26', 'doctor-node26', 'regression', 'prodshape']);
   assert.deepEqual(failures, ['smoke-node22 (1)', 'prodshape (1)']);
 });
+it('REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group', async () => {
+  const { pressureWorkerArgs } = await import('../scripts/prodshape.ts');
+  assert.deepEqual(heavyCommand('node', ['scripts/prodshape.ts'], 'darwin'),
+    ['nice', ['-n', '10', 'taskpolicy', '-b', 'node', 'scripts/prodshape.ts']]);
+  assert.deepEqual(pressureWorkerArgs('darwin'), ['-n', '19', '/bin/sh', '-c', 'taskpolicy -B -p "$$" || exit\nwhile :; do :; done']);
+  assert.deepEqual(pressureWorkerArgs('linux'), ['-n', '19', '/bin/sh', '-c', 'while :; do :; done']);
+});
 it('plans tiers in order, keeping both runtimes sequential and live last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);
   assert.deepEqual(planTier('full', [], []), ['tests Node 22.14.0 (full)', 'tests Node 26 (full)', 'regression scenarios (tests/regression/CATALOG.md)']);

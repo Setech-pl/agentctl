@@ -4,11 +4,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { pathToFileURL } from 'node:url';
 import { liveCacheRoot } from './live-cache.ts';
 import { exerciseCanary, runIsolatedCanary, type CanaryMetrics } from '../src/core/canary.ts';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const load = () => os.loadavg()[0] ?? 0;
+
+export function pressureWorkerArgs(platform = process.platform): string[] {
+  // Competing application processes are outside the gate's Darwin background scheduling group.
+  // Clear that inherited policy for the CPU-only load workers while retaining their low nice priority.
+  const policy = platform === 'darwin' ? 'taskpolicy -B -p "$$" || exit\n' : '';
+  return ['-n', '19', '/bin/sh', '-c', `${policy}while :; do :; done`];
+}
 
 async function main() {
   const work = liveCacheRoot(process.env.AGENTCTL_PRODSHAPE_WORK);
@@ -28,11 +36,8 @@ async function main() {
   process.on('SIGINT', abort);
   process.on('SIGTERM', abort);
   try {
-    // Give the measurement process a scheduling share comparable to the production watcher.
-    // Each competing loop is a real, lower-priority runnable process rather than another
-    // thread with the watcher's priority. It cannot execute any agent or access state.
     for (let i = 0; i < 2 * cores + 8; i++) {
-      const child = spawn('nice', ['-n', '19', '/bin/sh', '-c', 'while :; do :; done'], {stdio: 'ignore'});
+      const child = spawn('nice', pressureWorkerArgs(), {stdio: 'ignore'});
       const closed = once(child, 'close').catch(error => { workerError = error; stop.abort(); });
       workers.push({process: child, closed});
       child.once('exit', () => { if (!closing && !stop.signal.aborted) { workerError = Error('CPU pressure loop exited early'); stop.abort(); } });
@@ -78,4 +83,6 @@ async function main() {
   }
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}

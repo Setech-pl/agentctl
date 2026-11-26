@@ -1520,6 +1520,16 @@
       "REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up"
     ]
   },
+  "REL0272-PRESSURE-POLICY": {
+    "rev": "6631d091d0b6f64af65184dbb37f68684d9faa43",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group",
+      "REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group"
+    ]
+  },
   "REL0272-SMOKE-EVIDENCE": {
     "rev": "f702dcca477f2d708a55a3cf9ed540cae21001ed",
     "outcome": "FAILS",
