@@ -27,6 +27,10 @@ export class GcSpace {
     } catch { /* a missing sample cannot prove reclaimed space */ }
   }
 
+  async freed(): Promise<number> {
+    return (await this.freedByVolume()).reduce((total, volume) => total + (volume.freedBytes ?? 0), 0);
+  }
+
   async freedByVolume(): Promise<GcVolumeFreed[]> {
     return Promise.all([...this.volumes].map(async ([device, { directory, before }]) => {
       let freedBytes: number | null = null;

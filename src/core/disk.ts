@@ -1,3 +1,4 @@
+import { kickAutoGc } from './auto-gc.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { probeHosts } from './host-health.ts';
@@ -227,7 +228,7 @@ export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
   } finally { refreshing.delete(key); }
 }
 const sampled = new Map<string, number>();
-export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>): Promise<void> {
+export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>, signal?: AbortSignal): Promise<void> {
   const background = (label: string, work: Promise<void>) => {
     void work.catch(error => log?.(`${label}: ${error instanceof Error ? error.message : String(error)}`)).catch(() => undefined);
   };
@@ -238,6 +239,10 @@ export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: st
   sampled.set(file, ctx.runner.now());
   await withFileLock(`${file}.lock`, async () => {
     const report = await collectDisk(ctx);
+    kickAutoGc(ctx, report.volumes.flatMap(volume =>
+      !volume.host && volume.device && volume.samplePath && volume.availableBytes !== null
+        ? [{ device: volume.device, path: volume.mount ?? volume.samplePath }] : []),
+    { ...(log ? { log } : {}), ...(signal ? { signal } : {}) });
     let previous: Record<string, DiskLevel> = {};
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
     const next = { ...previous };
@@ -373,7 +378,10 @@ export async function freshTaskDiskStartHold(ctx: Context, host: string | undefi
       const gb = availableBytes / 1024 ** 3;
       if (gb < config.disk.minFreeStartGb) {
         const mount = repos.find(repo => repo.worktree === target)?.worktreeMount ?? inferredWorktreeMount(target);
-        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
+        const held = `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
+        if (!config.disk.autoGc.enabled || ctx.runner.dryRun) return held;
+        kickAutoGc(ctx, [{ path: mount ?? ancestor, device: String(dev) }], { held: true });
+        return `${held}; uruchomiono auto_gc`;
       }
     }
     return undefined;

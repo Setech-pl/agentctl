@@ -1,6 +1,8 @@
+import { claimGcPath, pathsOverlap } from './start-paths.ts';
+import { pendingStarts } from './start-lock.ts';
 import { recordJournal } from './journal.ts';
 import { GcSpace, type GcVolumeFreed } from './gc-space.ts';
-import { moveToTrash, planTrashPurge, purgeTrashItem, type TrashItem } from './trash.ts';
+import { moveToTrash, planTrashPurge, purgeTrashItem, trashOwners, type TrashItem } from './trash.ts';
 import { planRemoteGc, applyRemoteGc } from './host-gc.ts';
 import { cacheProtection } from './gc-cache.ts';
 import { restoreDiskMeasurements } from './disk.ts';
@@ -26,7 +28,7 @@ import type { IntegrationGcScope } from './integration-gc.ts';
  * of agentctl names; the history, the reports (*.md) and anything it does not recognise stay. Branches go only with `git branch -d`.
  */
 
-import { staleNodeModules, removeStaleNodeModules } from './node-modules-store.ts';
+import { staleNodeModules, removeStaleNodeModules, storeOwnsPath } from './node-modules-store.ts';
 
 export type GcKind = 'worktree' | 'cache' | 'archive' | 'branch' | 'node-modules' | 'trash';
 
@@ -66,6 +68,7 @@ export interface GcSkip {
 
 export interface GcPlan {
   integration?: IntegrationGcScope;
+  automatic?: { device: string };
   /** An MCP plan may estimate sizes; safety checks are always fresh. */
   cachedSizes?: boolean;
   deleteMode?: 'delete' | 'trash';
@@ -85,6 +88,7 @@ export interface GcPlan {
 }
 
 export interface GcOptions {
+  localKinds?: ReadonlySet<GcKind>;
   purgeTrash?: boolean;
   /** MCP estimates never wait for recursive size walks. */
   cachedSizes?: boolean;
@@ -147,6 +151,7 @@ async function listWorktrees(ctx: Context, repo: string): Promise<WorktreeListin
 /** What `gc` would do now. Reads (files, git), changes nothing. */
 export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan> {
   const { config, runner } = ctx;
+  const selected = (kind: GcKind) => !opts.localKinds || opts.localKinds.has(kind);
   if (opts.purgeTrash) {
     if (opts.cohort || opts.branches || opts.olderThan || opts.includeCache || opts.keepCache?.length || opts.keep?.length || opts.forceDirty || opts.forceLinks) throw new AgentctlError('purge-trash selects only Trash items; remove other GC selection options');
     const items = planTrashPurge(ctx).map(trash => ({
@@ -164,7 +169,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const archived = new Set(archivedRecords.map(r => r.window));
   const currentNames = new Set(currentRecords.map(r => r.window));
   const all: TaskRecord[] = [...currentRecords, ...archivedRecords.filter(r => !currentNames.has(r.window))];
-  const live = new Set(await ctx.tmux.listWindows());
+  const live = new Set([...await (opts.localKinds ? ctx.localTmux : ctx.tmux).listWindows(), ...pendingStarts(config).filter(start => !start.host).map(start => start.window)]);
   const finished = (r: TaskRecord): boolean => (r.closed === true || r.cancelled === true || archived.has(r.window)) && !live.has(r.window);
   const items: GcItem[] = [];
   const skipped: GcSkip[] = [];
@@ -173,9 +178,9 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const others = all.filter((r) => !finished(r) || kept(r));
   for (const r of all.filter(r => finished(r) && kept(r) && (cohort === undefined || cohortKey(r.cohort ?? '') === cohortKey(cohort)))) {
     const reason = r.pin ? 'pinned task' : 'keep requested for task';
-    for (const repo of r.repos) if (!same(repo.path, repo.worktree) && fs.existsSync(repo.worktree)) skipped.push({task: r.task, kind: 'worktree', target: repo.worktree, bytes: await size(repo.worktree), reason});
+    for (const repo of r.repos) if (selected('worktree') && !same(repo.path, repo.worktree) && fs.existsSync(repo.worktree)) skipped.push({task: r.task, kind: 'worktree', target: repo.worktree, bytes: await size(repo.worktree), reason});
     const dir = r.report ? path.dirname(path.resolve(r.report)) : path.join(path.resolve(config.cache), r.window);
-    if (dir.startsWith(`${path.resolve(config.cache)}${path.sep}`) && fs.existsSync(dir)) skipped.push({task: r.task, kind: 'cache', target: dir, bytes: await size(dir), reason});
+    if (selected('cache') && dir.startsWith(`${path.resolve(config.cache)}${path.sep}`) && fs.existsSync(dir)) skipped.push({task: r.task, kind: 'cache', target: dir, bytes: await size(dir), reason});
   }
   const references = knownLinkReferences(config);
   const removing = new Set<string>();
@@ -187,7 +192,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   };
 
   // 1. worktrees
-  for (const record of mine) {
+  for (const record of selected('worktree') ? mine : []) {
     if (record.reviewMode) continue; // Borrowed worktrees are owned by the author record.
     for (const repo of record.repos) {
       const wt = repo.worktree;
@@ -231,7 +236,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   // worktrees nobody of agentctl owns: only said, never removed
   const repos = [...new Set(all.flatMap((r) => r.repos.map((x) => path.resolve(x.path))))];
   const known = new Set(all.flatMap((r) => r.repos.map((x) => path.resolve(x.worktree))));
-  for (const repo of repos) {
+  for (const repo of selected('worktree') ? repos : []) {
     for (const wt of (await listingOf(repo)) ?? []) {
       const p = path.resolve(wt.path);
       if (p === repo || known.has(p)) continue;
@@ -242,7 +247,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   // 2. what lies next to the reports (the *.md stay)
   const cacheRoot = path.resolve(config.cache);
   const seenCache = new Set<string>();
-  for (const record of mine) {
+  for (const record of selected('cache') ? mine : []) {
     const dir = record.report ? path.dirname(path.resolve(record.report)) : path.join(cacheRoot, record.window);
     if (dir === cacheRoot || !dir.startsWith(`${cacheRoot}${path.sep}`) || seenCache.has(dir)) continue;
     seenCache.add(dir);
@@ -286,7 +291,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   }
 
   // 3. state of closed tasks -> archive
-  for (const record of mine) {
+  for (const record of selected('archive') ? mine : []) {
     if (!record.closed || archived.has(record.window)) continue;
     const dir = taskDir(config, record.window);
     if (fs.existsSync(path.join(archiveDir(config), record.window))) {
@@ -345,12 +350,91 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     if (record?.cohort) item.cohort = record.cohort;
     if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await size(item.target);
   }
-  const remote = await planRemoteGc(ctx, opts, olderThanMs);
-  items.push(...remote.items); skipped.push(...remote.skipped);
-  if (cohort === undefined) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}` })));
+  if (!opts.localKinds) {
+    const remote = await planRemoteGc(ctx, opts, olderThanMs);
+    items.push(...remote.items); skipped.push(...remote.skipped);
+  }
+  if (cohort === undefined && selected('node-modules')) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}` })));
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);
   const foreignWorktrees = skipped.filter(s => s.kind === 'worktree-foreign').length;
   return { deleteMode: config.gc.deleteMode, keep: opts.keep ?? [], includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], forceDirty: mine.filter(r => permitsDirty(opts.forceDirty, r.task)).map(r => r.task), ...(opts.cachedSizes ? { cachedSizes: true } : {}), autoCacheFreedBytes: all.filter(r => cohort === undefined || (r.cohort && cohortKey(r.cohort) === cohortKey(cohort))).reduce((sum, r) => sum + worktreeCacheFreed(ctx, r), 0), ...(opts.forceLinks ? { forceLinks: true } : {}), items, skipped: cohort === undefined ? skipped : skipped.filter(s => s.kind !== 'worktree-foreign'), freeBytes, olderThanMs, unknownCacheDirs, ...(cohort !== undefined ? { foreignWorktrees } : {}) };
+}
+
+function currentLocalRecords(ctx: Context): TaskRecord[] {
+  const current = listTaskRecords(ctx.config);
+  const windows = new Set(current.map(record => record.window));
+  return [...current, ...listArchivedRecords(ctx.config).filter(record => !windows.has(record.window))].filter(record => !record.host);
+}
+
+async function assertSameDeviceTree(target: string, device: string): Promise<void> {
+  const stat = await fs.promises.lstat(target);
+  if (String(stat.dev) !== device) throw new Error('different filesystem or nested mount; kept');
+  if (stat.isDirectory()) {
+    for await (const entry of await fs.promises.opendir(target)) await assertSameDeviceTree(path.join(target, entry.name), device);
+  }
+}
+
+/** Extra safeguards for unattended deletion. The same facts are checked again with the path claimed. */
+export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number): Promise<void> {
+  const { config, runner } = ctx;
+  const stat = fs.lstatSync(item.target);
+  if (stat.isSymbolicLink() || String(stat.dev) !== device || String(fs.statSync(path.dirname(item.target)).dev) !== device ||
+      (process.getuid && stat.uid !== process.getuid())) throw new Error('unsafe owner, symlink or filesystem boundary; kept');
+  const real = fs.realpathSync(item.target);
+  if (real !== path.join(fs.realpathSync(path.dirname(item.target)), path.basename(item.target))) throw new Error('path resolved outside its directory');
+  const records = currentLocalRecords(ctx);
+  const excluded = new Set(config.disk.autoGc.cohortsExclude.map(cohortKey));
+  const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(config).filter(start => !start.host).map(start => start.window)]);
+  const source = item.trash?.original ?? item.target;
+  const isStore = item.kind === 'node-modules' || item.kind === 'trash' && storeOwnsPath(config, source);
+  const owners = item.kind === 'trash' ? trashOwners(ctx, source, records) : item.kind === 'worktree'
+    ? records.filter(record => record.repos.some(repo => pathsOverlap(location(repo.worktree), real)))
+    : item.kind === 'cache' ? records.filter(record => record.report && pathsOverlap(location(path.dirname(record.report)), real)) : [];
+  if (!owners.length && !isStore) throw new Error('no verifiable agentctl owner');
+  for (const owner of owners) {
+    if (owner.pin || owner.keepCache) throw new Error('pinned / keep_cache task');
+    if (owner.cohort && excluded.has(cohortKey(owner.cohort))) throw new Error('cohort excluded by owner');
+    if ((!owner.closed && !owner.cancelled) || live.has(owner.window)) throw new Error('active task');
+    const finishedAt = Date.parse(owner.closedAt ?? owner.cancelledAt ?? '');
+    if (Number.isFinite(finishedAt) && runner.now() - finishedAt < olderThanMs) throw new Error('task closed too recently');
+  }
+  if (isStore && records.some(record => record.cohort && excluded.has(cohortKey(record.cohort)) &&
+      record.repos.some(repo => storeOwnsPath(config, source, repo.path)))) throw new Error('cohort excluded by owner');
+  if (knownLinkReferences(config).some(ref => ref.target === '*' || pathsOverlap(location(ref.target.replace(/\/\*$/, '')), location(source)))) throw new Error('links target in use');
+  if (item.kind === 'worktree') {
+    const registered = item.repo && await listWorktrees(ctx, item.repo);
+    const row = registered && registered.find(worktree => same(worktree.path, item.target));
+    if (!row || same(registered[0]!.path, item.target) || row.branch && PROTECTED.has(row.branch)) throw new Error('not a registered task worktree or protected branch');
+    const owner = owners.find(record => record.task === item.task);
+    if (!owner || owner.reviewMode || !owner.repos.some(repo => !same(repo.path, repo.worktree) && same(repo.path, item.repo!) && same(repo.worktree, item.target))) throw new Error('worktree ownership changed');
+  }
+  if (item.kind === 'cache') {
+    const root = fs.realpathSync(config.cache);
+    const under = path.relative(path.resolve(config.cache), path.resolve(item.target));
+    if (real !== path.join(root, under) || !real.startsWith(root + path.sep) || !owners.some(owner => owner.task === item.task)) throw new Error('cache path is outside the owned cache');
+    for (const owner of owners) {
+      const protection = cacheProtection(owner, item.target);
+      if (protection) throw new Error(protection);
+    }
+  }
+  if (item.kind === 'trash') {
+    if (!item.trash) throw new Error('missing Trash identity');
+    for (const owner of owners) {
+      if (owner.report && pathsOverlap(path.resolve(owner.report), source)) throw new Error('contains or is a task report');
+      const worktree = owner.repos.find(repo => path.resolve(repo.worktree) === source);
+      if (worktree) {
+        const head = await git(ctx, ['-C', item.target, 'rev-parse', '--abbrev-ref', 'HEAD']);
+        if (head.code !== 0 || PROTECTED.has(head.out)) throw new Error('cannot verify worktree branch or protected branch');
+        const risk = await worktreeRisk(ctx, item.target, worktree.base);
+        if (risk.dirtyFiles || risk.unpushedCommits) throw new Error('dirty/unpushed worktree; owner decision');
+      } else if (owner.report && pathsOverlap(path.dirname(path.resolve(owner.report)), source)) {
+        const protection = cacheProtection(owner, source);
+        if (protection) throw new Error(protection);
+      }
+    }
+  }
+  await assertSameDeviceTree(item.target, device);
+  if (item.kind !== 'node-modules' && runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < olderThanMs) throw new Error('contents changed too recently');
 }
 
 export interface GcResult {
@@ -368,13 +452,23 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
   if (plan.deleteMode && plan.deleteMode !== config.gc.deleteMode) throw new AgentctlError('GC delete mode changed; preview again');
   const staged: { item: GcItem; trash: TrashItem }[] = [];
   const remove = async (item: GcItem): Promise<void> => {
-    if (config.gc.deleteMode === 'trash') staged.push({ item, trash: await moveToTrash(ctx, item.target) });
+    if (config.gc.deleteMode === 'trash') {
+      const trash = await moveToTrash(ctx, item.target);
+      if (plan.automatic) await purgeTrashItem(ctx, trash);
+      else staged.push({ item, trash });
+    }
     else if (!runner.dryRun) await runner.remove(item.target);
   };
   const order: GcKind[] = ['worktree', 'cache', 'archive', 'branch', 'node-modules', 'trash'];
   for (const kind of order) {
     for (const item of plan.items.filter((i) => i.kind === kind)) {
+      let release: (() => void) | undefined;
       try {
+        if (plan.automatic) {
+          if (!config.disk.autoGc.enabled || config.disk.autoGc.dryRun || !ctx.config.disk.autoGc.enabled || ctx.config.disk.autoGc.dryRun) throw new Error('automatic GC disabled or dry run');
+          release = await claimGcPath(ctx, item.target, async () => {});
+          await checkAutomaticGc(ctx, item, plan.automatic.device, plan.olderThanMs);
+        }
         if (kind === 'node-modules') {
           await removeStaleNodeModules(ctx, item.target, plan.olderThanMs, async () => {
             if (!runner.dryRun) await space.before(item.target);
@@ -440,7 +534,7 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
         if (!staged.some(staging => staging.item === item)) result.done.push(item);
       } catch (e) {
         result.failed.push({ item, reason: errorMessage(e) });
-      }
+      } finally { release?.(); }
     }
   }
   for (const { item, trash } of staged) {

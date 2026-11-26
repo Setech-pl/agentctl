@@ -701,9 +701,92 @@ it('MCP purge_trash previews and confirms receipts via watch with measured free 
   assert.match(confirm.text, /^Accepted/);
   await applyAcceptedWrites(w.ctx, w.notifier, {});
   const request = readMcpRequests(w.config).find(entry => entry.token === token);
-  assert.equal(request?.status, 'done', request?.error);
-  const result = JSON.parse(request.result!);
+  assert.equal(request?.status, 'done', request?.error ?? 'request not found');
+  const result = JSON.parse(request!.result!);
   assert.equal(result.freedBytes, 17 * 4096);
   assert.equal(result.freedByVolume[0].freedBytes, 17 * 4096);
   assert.ok(fs.existsSync(personal));
+});
+
+it('auto_gc bounds a local run, reports blockers, preserves personal Trash and stops at target', async t => {
+  const w = world('auto-gc-volumes', () => `
+disk:
+  auto_gc:
+    enabled: true
+    trigger_free_gb: 30
+    target_free_gb: 35
+    older_than: 2d
+    categories: [closed_clean_worktrees, own_trash, closed_task_cache]
+    max_per_run_gb: 1
+    cohorts_exclude: [KEEP-COHORT]
+`);
+  const { runAutoGc } = await import('../src/core/auto-gc.ts');
+  const { moveToTrash } = await import('../src/core/trash.ts');
+  const dirty = path.join(w.root, 'dirty');
+  git(w.repo, 'worktree', 'add', '-b', 'dirty', dirty);
+  fs.writeFileSync(path.join(dirty, 'only-copy'), 'uncommitted');
+  seedTask(w.config, 'DIRTY', { closed: true, repos: [{ path: w.repo, worktree: dirty, branch: 'dirty', base: 'main' }] });
+  const artifact = (task: string, fields: Parameters<typeof seedTask>[2] = {}) => {
+    const dir = path.join(w.config.cache, task.toLowerCase());
+    fs.mkdirSync(dir, { recursive: true });
+    seedTask(w.config, task, { closed: true, report: path.join(dir, 'report.md'), ...fields });
+    const target = path.join(dir, 'artifact.bin');
+    fs.writeFileSync(target, 'old fixture');
+    return target;
+  };
+  const owned = artifact('OWNED'), later = artifact('LATER'), pinned = artifact('PINNED', { pin: true });
+  const excluded = artifact('EXCLUDED', { cohort: 'keep-cohort' }), protectedCache = artifact('PROTECTED', { keepCache: true });
+  const receipt = await moveToTrash(w.ctx, owned);
+  const personal = path.join(w.trash, 'personal');
+  fs.writeFileSync(personal, 'keep');
+  await w.runner.sleep(3 * 86400_000);
+  const statfs = fs.promises.statfs;
+  const external = path.join(w.root, 'Crucial');
+  fs.mkdirSync(external);
+  const stat = fs.lstatSync(external);
+  const lstat = fs.lstatSync;
+  t.mock.method(fs, 'lstatSync', (target: fs.PathLike, options?: Parameters<typeof fs.lstatSync>[1]) =>
+    String(target) === external ? { ...stat, dev: stat.dev + 1 } : lstat(target, options));
+  t.mock.method(fs.promises, 'statfs', async (directory: string) => ({
+    ...await statfs(directory), bsize: 1024 ** 2,
+    bavail: (directory === external ? 80 : fs.existsSync(receipt.target) ? 20 : 36) * 1024,
+  }));
+  const volumes = [{ path: external, device: String(stat.dev + 1) }, { path: w.root, device: String(stat.dev) }];
+  await runAutoGc(w.ctx, volumes);
+  assert.ok(!fs.existsSync(receipt.target));
+  for (const target of [dirty, later, pinned, excluded, protectedCache, personal]) assert.ok(fs.existsSync(target), target);
+  const events = readJournal(w.config);
+  const event = events.find(entry => entry.kind === 'disk-auto-gc');
+  assert.match(event?.text ?? '', /odzyskano 16\.00 GiB/);
+  assert.match(event?.text ?? '', /dirty\/unpushed/);
+  assert.equal(events.filter(entry => entry.wall?.subject === 'Automatyczne GC — wynik').length, 1);
+});
+
+it('a local disk hold schedules auto_gc with the held reason, and dry run posts only a plan', async t => {
+  const w = world('auto-gc-held', () => `
+disk:
+  min_free_start_gb: 30
+  auto_gc: {enabled: true, dry_run: true, trigger_free_gb: 10, target_free_gb: 40, categories: [closed_task_cache]}
+`);
+  const { freshTaskDiskStartHold } = await import('../src/core/disk.ts');
+  const dir = path.join(w.config.cache, 'done');
+  fs.mkdirSync(dir, { recursive: true });
+  seedTask(w.config, 'DONE', { closed: true, report: path.join(dir, 'report.md') });
+  const target = path.join(dir, 'old.bin');
+  fs.writeFileSync(target, 'old fixture');
+  await w.runner.sleep(3 * 86400_000);
+  const statfs = fs.promises.statfs;
+  t.mock.method(fs.promises, 'statfs', async (directory: string) => ({ ...await statfs(directory), bsize: 1024 ** 2, bavail: 20 * 1024 }));
+  const finished = Promise.withResolvers<void>();
+  const write = w.runner.writeFile.bind(w.runner);
+  t.mock.method(w.runner, 'writeFile', async (file: string, content: string) => {
+    await write(file, content);
+    if (file.endsWith('/auto-gc-state.json')) finished.resolve();
+  });
+  assert.match(await freshTaskDiskStartHold(w.ctx, undefined, []) ?? '', /wstrzymane: dysk .*auto_gc/);
+  await finished.promise;
+  assert.ok(fs.existsSync(target));
+  const event = readJournal(w.config).find(entry => entry.kind === 'disk-auto-gc');
+  assert.match(event?.text ?? '', /plan: 1 pozycji.*old\.bin/s);
+  assert.doesNotMatch(event?.text ?? '', /usunięto|odzyskano/);
 });

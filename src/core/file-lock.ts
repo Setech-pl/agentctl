@@ -68,10 +68,12 @@ export function tryFileLock(file: string, recovery?: LockRecovery): (() => void)
 }
 
 export class FileLockTimeout extends Error {
-  constructor(readonly file: string) { super(`Timed out waiting for ${file}`); }
+  readonly file: string;
+  constructor(file: string) { super(`Timed out waiting for ${file}`); this.file = file; }
 }
 
 const ownership = new AsyncLocalStorage<Map<string, { active: boolean }>>();
+export const withoutFileLockOwnership = <T>(run: () => T): T => ownership.exit(run);
 export const taskLock = (file: string): string => path.join(path.dirname(path.resolve(file)), 'prompt-delivery.lock');
 
 /** Short, process-shared critical section. An admission lease can be recovered when its recorded timestamp expires. */

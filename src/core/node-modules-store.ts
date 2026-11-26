@@ -259,6 +259,16 @@ export function staleNodeModules(config: GlobalConfig, olderThanMs: number, now:
   });
 }
 
+export function storeOwnsPath(config: GlobalConfig, target: string, repo?: string): boolean {
+  const parent = path.dirname(target);
+  if (path.dirname(parent) !== storeRoot(config) || !repoName.test(path.basename(parent)) || !entryName.test(path.basename(target))) return false;
+  if (!repo) return true;
+  try {
+    const origin = fs.realpathSync(repo);
+    return path.basename(parent) === `${path.basename(origin)}-${hash(origin).slice(0, 16)}`;
+  } catch { return false; }
+}
+
 export async function removeStaleNodeModules(ctx: Context, target: string, olderThanMs: number, remove: () => Promise<void>): Promise<void> {
   const root = storeRoot(ctx.config), parent = path.dirname(target);
   if (path.dirname(parent) !== root || !repoName.test(path.basename(parent)) || !entryName.test(path.basename(target)) || !dir(root) || !dir(parent)) throw Error('invalid node_modules store entry');
