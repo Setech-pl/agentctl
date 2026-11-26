@@ -13,7 +13,7 @@ import { parseAge } from './archive.ts';
 import { findCohort } from './cohort.ts';
 import type { Context } from './context.ts';
 import { formatBytes } from './pull.ts';
-import { archiveDir, listArchivedRecords, listTaskRecords, taskDir } from './taskstore.ts';
+import { archiveDir, listArchivedRecords, listTaskRecords, snapshotRecords, taskDir } from './taskstore.ts';
 import type { TaskRecord } from './taskstore.ts';
 import { AgentctlError, cohortKey, errorMessage } from './util.ts';
 import { applyIntegrationGc } from './integration-gc.ts';
@@ -180,12 +180,14 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
   const measurement = lastMeasurement;
   const size = (target: string) => opts.cachedSizes ? Promise.resolve(measurement(target)?.bytes ?? 0) : sizeOf(target);
   const olderThanMs = parseAge(opts.olderThan ?? DEFAULT_OLDER_THAN);
-  const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort).name;
-  const currentRecords = listTaskRecords(config).filter(r => !r.host), archivedRecords = listArchivedRecords(config).filter(r => !r.host);
+  const inventory = await snapshotRecords(config, true);
+  const cohort = opts.cohort === undefined ? undefined : findCohort(config, opts.cohort, inventory.all).name;
+  const currentRecords = inventory.current.filter(r => !r.host), archivedRecords = inventory.archived.filter(r => !r.host);
   const archived = new Set(archivedRecords.map(r => r.window));
   const currentNames = new Set(currentRecords.map(r => r.window));
   const all: TaskRecord[] = [...currentRecords, ...archivedRecords.filter(r => !currentNames.has(r.window))];
-  const live = new Set(await ctx.tmux.listWindows());
+  const [local, remoteWindows] = await Promise.all([ctx.localTmux.listWindows(), ctx.hosts.windows(false, inventory.current)]);
+  const live = new Set([...local, ...remoteWindows.map(window => window.plain)]);
   const dead = deadWorktreeScope(ctx, live);
   const finished = (r: TaskRecord): boolean => (r.closed === true || r.cancelled === true || archived.has(r.window)) && !live.has(r.window);
   const items: GcItem[] = [];
@@ -199,7 +201,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     const dir = r.report ? path.dirname(path.resolve(r.report)) : path.join(path.resolve(config.cache), r.window);
     if (dir.startsWith(`${path.resolve(config.cache)}${path.sep}`) && fs.existsSync(dir)) skipped.push({task: r.task, kind: 'cache', target: dir, bytes: await size(dir), reason});
   }
-  const references = knownLinkReferences(config);
+  const references = knownLinkReferences(config, inventory);
   const removing = new Set<string>();
   const seenWorktrees = new Set<string>();
   const listings = new Map<string, WorktreeListing[] | undefined>();
@@ -373,7 +375,7 @@ export async function planGc(ctx: Context, opts: GcOptions = {}): Promise<GcPlan
     if (record?.cohort) item.cohort = record.cohort;
     if (item.bytes === undefined) item.bytes = item.kind === 'branch' || item.kind === 'worktree-foreign' ? 0 : await size(item.target);
   }
-  const remote = await planRemoteGc(ctx, opts, olderThanMs);
+  const remote = await planRemoteGc(ctx, opts, olderThanMs, inventory);
   items.push(...remote.items); skipped.push(...remote.skipped);
   if (cohort === undefined) items.push(...staleNodeModules(config, olderThanMs, runner.now()).map(entry => ({ ...entry, kind: 'node-modules' as const, task: 'nm-store', detail: `unused for ${opts.olderThan ?? DEFAULT_OLDER_THAN}` })));
   const freeBytes = items.reduce((n, i) => n + i.bytes, 0);

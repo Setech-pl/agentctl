@@ -298,7 +298,8 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   // Start both stores together. The recovery stage joins the same in-flight current-store scan.
   const inventoryReady = inventory();
   void inventoryReady.catch(() => undefined);
-  let initialInventory = true;
+  // The synchronous path applies accepted writes first; its status must read the post-write index.
+  let initialInventory = options.backgroundStarts === true;
   const statusInventory = async () => {
     if (!initialInventory) return inventory();
     initialInventory = false;

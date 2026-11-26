@@ -118,12 +118,12 @@ export async function touchCohort(ctx: Context, name: string): Promise<CohortMet
  * The cohort a person means by a name (any case): an error naming the known ones when there is none. A name that is used by a task but has no
  * file (the file was deleted) still counts, spelled the way the task has it.
  */
-export function findCohort(config: GlobalConfig, input: string): CohortMeta {
+export function findCohort(config: GlobalConfig, input: string, records?: readonly TaskRecord[]): CohortMeta {
   const problem = cohortNameProblem(input);
   if (problem) throw new AgentctlError(problem);
   const known = readCohort(config, input);
   if (known) return known;
-  const used = [...listTaskRecords(config), ...listArchivedRecords(config)].find((r) => r.cohort && cohortKey(r.cohort) === cohortKey(input));
+  const used = (records ?? [...listTaskRecords(config), ...listArchivedRecords(config)]).find((r) => r.cohort && cohortKey(r.cohort) === cohortKey(input));
   if (used?.cohort) return { name: used.cohort, created: '' };
   const names = listCohorts(config).map((c) => c.name);
   throw new AgentctlError(`no cohort "${input}"`, names.length > 0 ? `Cohorts: ${names.join(', ')}. "agentctl cohort list" shows them.` : 'There are no cohorts yet: a task joins one with "cohort: <name>" in its spec or --cohort <name>.');

@@ -10,6 +10,9 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-GC-INVENTORY | A narrow GC preview repeatedly scanned every task and reloaded the same repository link configuration. | `tests/review0256.test.ts` (`^REL0272-GC-INVENTORY:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |
+| REL0272-CANCEL-SNAPSHOT | The seeded watch inventory could miss a just-applied queue cancellation until a filesystem callback. | `tests/review0256.test.ts` (`^REL0272-CANCEL-SNAPSHOT:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |
+| REL0272-DOCTOR-IO | The cached doctor synchronously opened every task header and timed out under filesystem contention. | `tests/review0256.test.ts` (`^REL0272-DOCTOR-IO:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |
 | REL0272-ADMISSION-CHAIN | The background admission worker could start queuing before accepted requests had been applied. | `tests/review0256.test.ts` (`^REL0272-ADMISSION-CHAIN:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
 | REL0272-MCP-PAGES | Each MCP response fragment repeatedly encoded the original multi-page response. | `tests/hotfix-0173.test.ts` (`^REL0272-MCP-PAGES:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
 | REL0272-TICK-LEGACY | A large migration produced duplicate window-loss recovery for legacy launches held for manual resume. | `tests/review0256.test.ts` (`^REL0272-TICK-LEGACY:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |

@@ -1520,6 +1520,16 @@
       "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status"
     ]
   },
+  "REL0272-CANCEL-SNAPSHOT": {
+    "rev": "560b422462e02f28812e9251981ddddef4893d24",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks",
+      "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks"
+    ]
+  },
   "REL0272-CONTENTION": {
     "rev": "3484fbebdf0c7beaceec2a1b855cef0417044277",
     "outcome": "FAILS",
@@ -1538,6 +1548,26 @@
     "failing": [
       "REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up",
       "REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up"
+    ]
+  },
+  "REL0272-DOCTOR-IO": {
+    "rev": "560b422462e02f28812e9251981ddddef4893d24",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-DOCTOR-IO: cached doctor does not open task headers synchronously",
+      "REL0272-DOCTOR-IO: cached doctor does not open task headers synchronously"
+    ]
+  },
+  "REL0272-GC-INVENTORY": {
+    "rev": "560b422462e02f28812e9251981ddddef4893d24",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory",
+      "REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory"
     ]
   },
   "REL0272-GIT-REFUSAL": {

@@ -28,6 +28,9 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-GC-INVENTORY', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'A narrow GC preview repeatedly scanned every task and reloaded the same repository link configuration.', scenarios: [s('review0256.test.ts', '^REL0272-GC-INVENTORY:')] },
+  { id: 'REL0272-CANCEL-SNAPSHOT', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'The seeded watch inventory could miss a just-applied queue cancellation until a filesystem callback.', scenarios: [s('review0256.test.ts', '^REL0272-CANCEL-SNAPSHOT:')] },
+  { id: 'REL0272-DOCTOR-IO', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'The cached doctor synchronously opened every task header and timed out under filesystem contention.', scenarios: [s('review0256.test.ts', '^REL0272-DOCTOR-IO:')] },
   { id: 'REL0272-ADMISSION-CHAIN', fixedIn: '0.27.2', proofAgainst: '322af1c18634e368f996b72dcff6c7c22a221d4b', symptom: 'The background admission worker could start queuing before accepted requests had been applied.', scenarios: [s('review0256.test.ts', '^REL0272-ADMISSION-CHAIN:')] },
   { id: 'REL0272-MCP-PAGES', fixedIn: '0.27.2', proofAgainst: '322af1c18634e368f996b72dcff6c7c22a221d4b', symptom: 'Each MCP response fragment repeatedly encoded the original multi-page response.', scenarios: [s('hotfix-0173.test.ts', '^REL0272-MCP-PAGES:')] },
   { id: 'REL0272-TICK-LEGACY', fixedIn: '0.27.2', proofAgainst: '322af1c18634e368f996b72dcff6c7c22a221d4b', symptom: 'A large migration produced duplicate window-loss recovery for legacy launches held for manual resume.', scenarios: [s('review0256.test.ts', '^REL0272-TICK-LEGACY:')] },

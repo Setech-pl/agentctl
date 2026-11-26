@@ -461,6 +461,14 @@ interface CachedRecordFile {
 
 /** Parsed TASK.md files per scanned directory; an unchanged file (same reusable high-resolution file version) is not read again. */
 const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
+const activeRecordIndexes = new Map<string, Set<TaskRecordIndex>>();
+
+/** A committed local write is visible before the filesystem watch notification arrives. */
+export function invalidateTaskRecord(file: string): void {
+  const directory = path.dirname(file), root = path.dirname(directory);
+  recordScanCache.get(root)?.delete(file);
+  for (const index of activeRecordIndexes.get(root) ?? []) index.markChanged(path.basename(directory));
+}
 
 /** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
 const SCAN_CHUNK = 25;
@@ -540,6 +548,9 @@ export class TaskRecordIndex {
     if (this.root !== root) {
       this.close();
       this.root = root;
+      let indexes = activeRecordIndexes.get(root);
+      if (!indexes) activeRecordIndexes.set(root, indexes = new Set());
+      indexes.add(this);
     }
     if (this.pending) return this.pending;
     if (!this.watcher) {
@@ -547,7 +558,7 @@ export class TaskRecordIndex {
         this.watcher = fs.watch(root, {recursive: true, persistent: false}, (_event, file) => {
           if (!file) { this.reconcileAt = 0; return; }
           const [window, leaf] = file.split(path.sep);
-          if (window && (!leaf || leaf === 'TASK.md')) this.changed.add(window);
+          if (window && (!leaf || leaf === 'TASK.md')) this.markChanged(window);
         });
         this.reconcileAt = 0;
         this.watcher.on('error', () => this.close());
@@ -558,6 +569,8 @@ export class TaskRecordIndex {
     this.pending = pending;
     return pending;
   }
+
+  markChanged(window: string): void { this.changed.add(window); }
 
   private async refresh(root: string, now: number, generation: number): Promise<TaskRecord[]> {
     const stat = await fs.promises.stat(root, {bigint: true}).catch(() => undefined);
@@ -601,6 +614,11 @@ export class TaskRecordIndex {
   }
 
   close(): void {
+    if (this.root) {
+      const indexes = activeRecordIndexes.get(this.root);
+      indexes?.delete(this);
+      if (!indexes?.size) activeRecordIndexes.delete(this.root);
+    }
     this.watcher?.close();
     this.watcher = undefined;
     this.root = undefined;
@@ -663,10 +681,9 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
     else doc.set(key, value);
   }
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
-  // Known writes invalidate even if a filesystem preserves its metadata tuple.
-  recordScanCache.get(path.dirname(path.dirname(file)))?.delete(file);
   try { await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`); }
   catch (error) { noteStateWriteFailure(file, error); throw error; }
+  if (!runner.dryRun) invalidateTaskRecord(file);
   return true;
   };
   try { return runner.dryRun ? await change() : await withStateWriteLock(taskLock(file), change); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }

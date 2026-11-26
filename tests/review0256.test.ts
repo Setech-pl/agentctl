@@ -5,8 +5,10 @@ import path from 'node:path';
 import {test} from 'node:test';
 import {collectEvents} from '../src/core/chat-events.ts';
 import {checkLaunchHealth, LaunchHealthMemory} from '../src/core/launch-health.ts';
+import {planGc} from '../src/core/gc.ts';
 import {Context} from '../src/core/context.ts';
 import {readJournal, recordJournalOnce} from '../src/core/journal.ts';
+import {recordMcpRequest} from '../src/core/mcp-requests.ts';
 import {MCP_TOOLS} from '../src/core/mcp-tools.ts';
 import {queueTick, queueViews, QueueMemory, saveEntry} from '../src/core/queue.ts';
 import {planResume} from '../src/core/resume.ts';
@@ -289,4 +291,40 @@ test('FIX-5246F46: an interrupted checkout before a worktree exists stays under 
   seedTask(w.config, 'NO-TREE', {started: '', promptDelivery: 'launching',
     repos: [{path: w.repo, worktree: path.join(w.repo, 'missing')}]});
   assert.equal((await collectStatus(w.ctx, {progress: false})).some(row => row.task === 'NO-TREE'), false);
+});
+
+test('REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks', async t => {
+  const w = world('cancel-index', 'mcp: {allow: [queue_rm]}\nqueue: {enabled: false}\ncapacity: {snapshot: false, codex_refresh: false}\n');
+  const task = seedTask(w.config, 'CANCEL-INDEX', {started: '', promptDelivery: 'launching'});
+  await saveEntry(w.ctx, {seq: 1, order: 1, task: task.task, priority: 'normal', status: 'queued', queuedAt: new Date(w.runner.now()).toISOString(),
+    agent: 'claude', model: 'sonnet', effort: 'high', after: [], spec: '---\ntask: CANCEL-INDEX\nagent: claude\n---\nWait.'});
+  await recordMcpRequest(w.ctx, {tool: 'queue_rm', args: {task: task.task}, scope: null, key: 'rm', label: task.task, task: task.task});
+  const watch = fs.watch;
+  t.mock.method(fs, 'watch', (file: fs.PathLike) => watch(file));
+  const memory = new WatchMemory();
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  await memory.launchHealth.records.current(w.config, w.runner.now());
+  await watchTick(w.ctx, memory, notifier);
+  assert.equal(memory.rows?.find(row => row.task === task.task)?.state, 'cancelled');
+});
+
+test('REL0272-DOCTOR-IO: cached doctor does not open task headers synchronously', async t => {
+  const w = world('doctor-index');
+  for (let i = 0; i < 5; i++) seedTask(w.config, 'DOCTOR-IO-' + i);
+  const opened = t.mock.method(fs, 'openSync');
+  const doctor = MCP_TOOLS.find(tool => tool.name === 'doctor')!;
+  const output = await doctor.run({context: () => w.ctx, notify: async () => {}}, {});
+  assert.match(output.text, /5 current, 0 archived/);
+  assert.equal(opened.mock.calls.filter(call => String(call.arguments[0]).endsWith('/TASK.md')).length, 0);
+});
+
+test('REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory', async t => {
+  const w = world('gc-inventory');
+  seedTask(w.config, 'GC-MEMBER', {cohort: 'target', closed: true});
+  seedTask(w.config, 'GC-OTHER', {closed: true});
+  const opened = t.mock.method(fs, 'openSync');
+  const preview = await planGc(w.ctx, {cohort: 'target', cachedSizes: true});
+  assert.ok(preview.items.some(item => item.task === 'GC-MEMBER'));
+  assert.ok(preview.items.every(item => item.task !== 'GC-OTHER'));
+  assert.equal(opened.mock.calls.filter(call => String(call.arguments[0]).endsWith('/TASK.md')).length, 0);
 });

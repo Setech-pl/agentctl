@@ -49,7 +49,7 @@ import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import { assertReviewBase, ReviewBlocked } from './review-freshness.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
-import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { archiveDir, invalidateTaskRecord, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, refreshExpiredStartPlan, usageSummaryLines } from './usage-limits.ts';
 import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, windowName } from './util.ts';
@@ -672,7 +672,9 @@ export async function writeCancelledRecord(ctx: Context, entry: QueueEntry, opts
   record.started = '';
   Object.assign(record, { cancelled: true, cancelledAt: opts.at ?? new Date(runner.now()).toISOString(), ...(opts.reason ? { cancelReason: opts.reason } : {}), cancelSource: opts.source ?? 'cli' });
   await runner.mkdir(taskDir(config, record.window));
-  await runner.writeFile(taskFile(config, record.window), renderTaskMd(record, prompt));
+  const file = taskFile(config, record.window);
+  await runner.writeFile(file, renderTaskMd(record, prompt));
+  if (!runner.dryRun) invalidateTaskRecord(file);
 }
 
 /**
