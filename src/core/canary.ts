@@ -323,7 +323,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   };
   runner.tick = 1;
   markEligible(1);
-  await runWatch(ctx, notifier, {signal, insideTmux: false, ...(opts.observeStep ? {observeStep: opts.observeStep} : {}), async onTick(tick, memory, elapsedMs) {
+  await runWatch(ctx, notifier, {signal, insideTmux: false, backgroundStarts: true, ...(opts.observeStep ? {observeStep: opts.observeStep} : {}), async onTick(tick, memory, elapsedMs) {
     metrics.ticks = tick;
     if (tick === 1) metrics.firstTickMs = elapsedMs;
     metrics.maxTickMs = Math.max(metrics.maxTickMs, elapsedMs);
@@ -333,6 +333,8 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
       metrics.minLoad1 = Math.min(metrics.minLoad1, load);
     }
     opts.sample?.(metrics);
+    if (opts.scale) assert.ok(elapsedMs <= 15_000, `WATCH_LATENCY tick ${tick}: ${elapsedMs.toFixed(1)} ms (limit 15000 ms)`);
+    await memory.admission;
     await memory.queue.idle();
     const snap = readSnapshot(config);
     const age = runner.now() - snap.at;
@@ -341,7 +343,6 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     previousSnapshot = snap.at;
     metrics.maxSnapshotAgeMs = Math.max(metrics.maxSnapshotAgeMs, age, gap);
     opts.sample?.(metrics);
-    if (opts.scale) assert.ok(elapsedMs <= 15_000, `WATCH_LATENCY tick ${tick}: ${elapsedMs.toFixed(1)} ms (limit 15000 ms)`);
     assert.ok(age < 60_000 && !snap.degraded, `snapshot age ${age} ms, degraded=${snap.degraded ?? 'no'}`);
     assert.ok(Array.isArray(snap.rows), 'watch snapshot has no task rows');
     metrics.states = [...new Set([...metrics.states, ...snap.rows.map(row => row.state)])].sort();

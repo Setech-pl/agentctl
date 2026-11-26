@@ -92,6 +92,7 @@ export class WatchMemory {
   readonly decorated = new Map<string, string>();
   /** Queued tasks this watcher is in the middle of starting. */
   readonly queue = new QueueMemory();
+  admission?: Promise<void>;
   readonly launchHealth = new LaunchHealthMemory();
   readonly archive = new TaskRecordIndex();
   rows?: StatusRow[];
@@ -100,6 +101,7 @@ export class WatchMemory {
   /** The pairs of colliding tasks already announced, and when git was last asked. */
   readonly collisions = new CollisionMemory();
   readonly recoveredWrites = new Set<string>();
+  readonly journaledReports = new WeakMap<TaskRecord, string>();
 }
 
 /** Revalidate the last complete task state under its normal lock. Watch then derives fresh updates from the current task. */
@@ -119,8 +121,8 @@ async function recoverTaskWrites(ctx: Context, memory: WatchMemory, signal: Abor
       if ((error as NodeJS.ErrnoException).code !== 'ENOSPC') ctx.out(`state recovery ${record.task}: ${errorMessage(error)}`);
     });
   };
-  for (let i = 0; i < records.length && !signal.aborted; i += 25) {
-    await Promise.all(records.slice(i, i + 25).map(recover));
+  for (let i = 0; i < records.length && !signal.aborted; i += 96) {
+    await Promise.all(records.slice(i, i + 96).map(recover));
   }
 }
 
@@ -261,16 +263,19 @@ export interface TickOptions {
  */
 export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Notifier, options: TickOptions = {}): Promise<WatchEvent[]> {
   const stages = new Map<string, { run: (signal: AbortSignal) => Promise<unknown>; needs: string[] }>();
-  const done = new Set<string>();
+  const executions = new Map<string, Promise<void>>();
   const stage = (name: string, run: (signal: AbortSignal) => Promise<unknown>, ...needs: string[]) => { stages.set(name, {run, needs}); };
-  const execute = async (name: string): Promise<void> => {
+  const execute = (name: string): Promise<void> => {
+    const existing = executions.get(name);
+    if (existing) return existing;
     const item = stages.get(name);
-    if (!item || done.has(name) || options.signal?.aborted) return;
-    for (const dependency of item.needs) await execute(dependency);
-    done.add(name);
-    const running = withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, item.run, options.stepClock));
-    if (options.backgroundStarts && (name === 'accepted MCP writes' || name === 'queue')) void running.catch(error => ctx.out(errorMessage(error)));
-    else await running;
+    if (!item || options.signal?.aborted) return Promise.resolve();
+    const running = (async () => {
+      for (const dependency of item.needs) await execute(dependency);
+      await withoutResponseBudget(() => memory.steps.run(ctx, watchLogPath(ctx), name, item.run, options.stepClock));
+    })();
+    executions.set(name, running);
+    return running;
   };
   let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
   const allRows = () => processed ?? observed;
@@ -388,7 +393,15 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
     if (!signal.aborted && await syncWaitingReports(ctx, allRows, records)) allRows = await collect();
     const ready = new Set(allRows.filter(row => row.state === 'report-ready').map(row => row.task));
-    for (const record of current) if (!signal.aborted && (ready.has(record.task) || record.closed || record.cancelled)) await journalOutputs(ctx, record);
+    const byTask = new Map(allRows.map(row => [row.task, row]));
+    for (const record of current) {
+      if (signal.aborted) break;
+      const row = byTask.get(record.task);
+      const signature = row?.reportSignature;
+      if (!signature || row.report !== 'yes' || !(ready.has(record.task) || record.closed || record.cancelled) || memory.journaledReports.get(record) === signature) continue;
+      await journalOutputs(ctx, record);
+      if (row.outputs_pending !== true && !signal.aborted) memory.journaledReports.set(record, signature);
+    }
     if (!signal.aborted) memory.rows = processed = allRows;
   }, 'status collection');
   for (const [name, run] of [
@@ -403,7 +416,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('reviews', async () => reviewTick(ctx, await inventory()));
   stage('consultations', () => consultTick(ctx));
   stage('blocked queue', () => processed ? announceBlocked(ctx, notifier, processed, {self: options.self, log: startLog}) : Promise.resolve(), 'task delivery and reports');
-  stage('cohorts', () => processed ? cohortTick(ctx, notifier, processed, startLog) : Promise.resolve(), 'task delivery and reports');
+  stage('cohorts', async () => { if (processed) await cohortTick(ctx, notifier, processed, startLog, (await inventory()).current); }, 'task delivery and reports');
   stage('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
   stage('machine load', () => recordMachineLoad(ctx));
   stage('disk alerts', async () => diskTick(ctx, notifier, startLog, (await inventory()).all, disk));
@@ -475,7 +488,16 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('integration GC proposals', async () => watchIntegrationGc(ctx, options.signal, await inventory()));
   const priority = memory.steps.priority(stages);
   if (priority) await execute(priority);
-  for (const name of stages.keys()) await execute(name);
+  if (options.backgroundStarts) {
+    if (!memory.admission) memory.admission = execute('queue').catch(error => ctx.out(errorMessage(error))).finally(() => { memory.admission = undefined; });
+    else for (const name of ['accepted MCP writes', 'queue']) memory.steps.busy(name);
+    // Read the first complete inventory while recovery checks its independent write markers.
+    void execute('status collection').catch(error => ctx.out(errorMessage(error)));
+  }
+  for (const name of stages.keys()) {
+    if (options.backgroundStarts && (name === 'accepted MCP writes' || name === 'queue')) continue;
+    await execute(name);
+  }
   memory.steps.flush(ctx);
   return events;
 }
@@ -491,6 +513,8 @@ export interface WatchOptions {
   signal?: AbortSignal;
   /** Stop after this many ticks (tests). */
   maxTicks?: number;
+  /** Run queue admission independently of status even when collecting per-tick diagnostics. */
+  backgroundStarts?: boolean;
   /** This very agentctl as a command line, for the click action of notifications. */
   self?: SelfArgv | undefined;
   /** A supervisor relaunches the watch process after a stuck stage. */
@@ -533,8 +557,8 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
 }
 
 /** One notification "N zadań do wznowienia" when the watcher starts and tasks can be resumed (`agentctl resume`). Returns how many. */
-export async function announceResumable(ctx: Context, notifier: Notifier, rows?: StatusRow[]): Promise<number> {
-  const n = (await findResumable(ctx, {rows})).filter(candidate => !candidate.explicitOnly).length;
+export async function announceResumable(ctx: Context, notifier: Notifier, rows?: StatusRow[], records?: ReadonlyMap<string, TaskRecord>): Promise<number> {
+  const n = (await findResumable(ctx, {rows, records, automaticOnly: true})).length;
   if (n === 0) return 0;
   const text = resumeText(n);
   await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  resume: ${text}\n`);
@@ -585,11 +609,14 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
       const tickStarted = performance.now();
       await reload();
       await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal,
-        backgroundStarts: !ctx.runner.dryRun && opts.maxTicks === undefined && !opts.onTick });
+        backgroundStarts: !ctx.runner.dryRun && (opts.backgroundStarts ?? (opts.maxTicks === undefined && !opts.onTick)) });
       if (!startupAnnounced && memory.rows) {
         startupAnnounced = true;
         const rows = memory.rows;
-        void memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', () => announceResumable(ctx, current, rows));
+        void memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', async () => {
+          const records = await memory.launchHealth.records.current(ctx.config, ctx.runner.now());
+          await announceResumable(ctx, current, rows, new Map(records.map(record => [record.window, record])));
+        });
       }
       if (!ctx.runner.dryRun && !opts.signal?.aborted) {
         try {
@@ -604,6 +631,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
         await recordJournal(ctx, {kind: 'watch-stage-restarted', owner: 'owner', text});
         await postMessage(ctx, OWNER_IDENTITY, {kind: 'info', channel: 'agentctl', to: 'owner', subject: 'Watch wznowił pętlę etapów', body: text}).catch(error => ctx.out(errorMessage(error)));
         if (opts.onStall) opts.onStall();
+        await memory.admission;
         await memory.queue.idle();
         memory.launchHealth.close();
         memory.archive.close();
@@ -620,6 +648,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     memory.archive.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
     if (!stalled && !(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
+      await memory.admission;
       await memory.queue.idle();
       const restored = await restoreWindowNames(ctx, memory);
       if (restored > 0) ctx.out(`Window names restored (${restored}).`);

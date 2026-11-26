@@ -531,6 +531,7 @@ export class TaskRecordIndex {
   private readonly changed = new Set<string>();
   private root?: string;
   private watcher?: fs.FSWatcher;
+  private rootVersion?: string;
   private reconcileAt = 0;
   private pending: Promise<TaskRecord[]> | undefined;
   private generation = 0;
@@ -559,19 +560,39 @@ export class TaskRecordIndex {
   }
 
   private async refresh(root: string, now: number, generation: number): Promise<TaskRecord[]> {
+    const stat = await fs.promises.stat(root, {bigint: true}).catch(() => undefined);
+    if (this.generation !== generation) return [];
+    const version = stat && fileVersion(stat);
     if (now >= this.reconcileAt) {
       this.reconcileAt = now + 60_000;
       const all = await scanRecordsIn(root, true);
       if (this.generation !== generation) return [];
       this.records.clear();
       for (const record of all) this.records.set(record.window, record);
+    } else if (version !== this.rootVersion) {
+      // A new or moved state directory is visible even before the recursive watcher delivers its callback.
+      const names = new Set(await fs.promises.readdir(root).catch(() => []));
+      if (this.generation !== generation) return [];
+      for (const [window, record] of this.records) {
+        if (!names.has(window)) this.records.delete(window);
+        else if (!record.closed && !record.cancelled && !record.supersededBy) this.changed.add(window);
+      }
+      for (const window of names) if (!this.records.has(window)) this.changed.add(window);
     }
+    this.rootVersion = version;
     const changes = [...this.changed];
     this.changed.clear();
     for (let i = 0; i < changes.length; i += ASYNC_SCAN_CHUNK) {
       await Promise.all(changes.slice(i, i + ASYNC_SCAN_CHUNK).map(async window => {
-        const record = await readRecordFileAsync(path.join(root, window, 'TASK.md'));
+        const file = path.join(root, window, 'TASK.md');
+        const stat = await fs.promises.lstat(file, {bigint: true}).catch(() => undefined);
+        const version = stat && fileVersion(stat);
+        const files = recordScanCache.get(root);
+        const cached = files?.get(file);
+        const record = !stat ? undefined : version !== undefined && cached?.version === version ? cached.record : await readRecordFileAsync(file);
         if (this.generation !== generation) return;
+        if (stat) files?.set(file, {version, record});
+        else files?.delete(file);
         if (record) this.records.set(window, record);
         else this.records.delete(window);
       }));
@@ -586,6 +607,7 @@ export class TaskRecordIndex {
     this.pending = undefined;
     this.generation++;
     this.reconcileAt = 0;
+    this.rootVersion = undefined;
     this.records.clear();
     this.changed.clear();
   }
@@ -597,8 +619,7 @@ export class TaskRecordIndex {
  * Callers must not mutate the returned records: they are the cache (collectStatus works on copies).
  */
 export async function snapshotRecords(config: GlobalConfig, asyncIO = false): Promise<RecordScan> {
-  const current = await scanRecordsIn(config.stateDir, asyncIO);
-  const archived = await scanRecordsIn(archiveDir(config), asyncIO);
+  const [current, archived] = await Promise.all([scanRecordsIn(config.stateDir, asyncIO), scanRecordsIn(archiveDir(config), asyncIO)]);
   return { current, archived, all: [...current, ...archived] };
 }
 

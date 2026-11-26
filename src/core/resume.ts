@@ -52,14 +52,14 @@ export interface ResumeCandidate {
 }
 
 /** Active tasks with a worktree and no window. Without `all`, the ones whose report is ready are left out. */
-export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: StatusRow[] } = {}): Promise<ResumeCandidate[]> {
+export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: StatusRow[]; records?: ReadonlyMap<string, TaskRecord>; automaticOnly?: boolean } = {}): Promise<ResumeCandidate[]> {
   const rows = opts.rows ?? await collectStatus(ctx, { progress: false, archived: false, records: await snapshotRecords(ctx.config, true) });
   const out: ResumeCandidate[] = [];
   for (const row of rows) {
     if (row.window !== 'gone' || row.closed || row.cancelled || row.archived || row.hidden || row.supersededBy) continue;
     if (row.state === 'superseded' || row.state === 'orphan') continue;
-    const record = readTaskRecord(ctx.config, row.windowName);
-    if (!record || record.agent === 'unknown') continue;
+    const record = opts.records ? opts.records.get(row.windowName) : readTaskRecord(ctx.config, row.windowName);
+    if (!record || record.agent === 'unknown' || opts.automaticOnly && legacyLaunch(record)) continue;
     const worktree = record.repos[0]?.worktree;
     if (!worktree) continue;
     if (record.host) {

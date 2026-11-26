@@ -78,9 +78,9 @@ export class HostRuntime {
     (this.connection(name).screens ??= {})[window] = { ...screen, stdout: screen.stdout.slice(-256 * 1024) };
     await this.persist(name);
   }
-  async windows(cachedOnly = false): Promise<WindowInfo[]> {
+  async windows(cachedOnly = false, current?: readonly TaskRecord[]): Promise<WindowInfo[]> {
     if (!this.hasTrackedHosts()) return [];
-    const records = listTaskRecords(this.config).filter(r => r.host && !r.closed && !r.cancelled);
+    const records = (current ?? listTaskRecords(this.config)).filter(r => r.host && !r.closed && !r.cancelled);
     const names = [...new Set(records.map(r => r.host!))];
     return (await Promise.all(names.map(async name => {
       const c = this.connection(name);

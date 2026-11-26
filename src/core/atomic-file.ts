@@ -54,7 +54,6 @@ export function stateWriteFailure(file: string): StateWriteFailure | undefined {
 /** A recovery sweep does not need the synchronous interrupted-temp scan used by individual task reads. */
 export async function readStateWriteFailure(file: string): Promise<StateWriteFailure | undefined> {
   const key = path.resolve(file);
-  if (!fs.existsSync(marker(file))) return failures.get(key);
   try {
     const value = JSON.parse(await fs.promises.readFile(marker(file), 'utf8')) as StateWriteFailure;
     if (value.file === key && typeof value.reason === 'string') return value;

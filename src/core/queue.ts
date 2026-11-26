@@ -1291,10 +1291,13 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   const stillHeld = new Set<string>();
   const candidates: QueueEntry[] = [];
   const loadHold = queueLoadHold(config);
+  const heldProviders = providerHolds(config, ctx.runner.now());
+  let occupiedSetups = setupSlots(config, entries);
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
     && !chatQuotaWait(config, entry, live) && !checkHostLimit(config, entry, live);
   const start = async (entry: QueueEntry): Promise<void> => {
     if (!await beginStart(ctx, memory, notifier, entry, opts)) return;
+    occupiedSetups++;
     used[entry.agent]++;
     live.push({ window: windowName(entry.task), agent: entry.agent, host: entry.host, owner: entry.owner });
     began.push(entry.task);
@@ -1309,14 +1312,12 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (loadHold) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
-    const author = directAuthorState(config, entry, readQueue(config));
+    const author = directAuthorState(config, entry, entries);
     if (author.failed) { await failEntry(ctx, entry, author.failed, notifier, opts, true); continue; }
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
     if (checkHostLimit(config, entry, live)) continue;
-    if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
-    if (setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
-    if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
+    if (occupiedSetups >= config.queue.maxParallelSetups || heldProviders[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
     if (entry.reviewBlock?.retryOnUpdate) {
       try {
         const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0]!, { config });
@@ -1445,9 +1446,10 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
     return true;
   };
   const claimed = await withStartLock(ctx, async () => {
-    const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
+    const current = readQueue(config);
+    const fresh = current.find(e => e.seq === entry.seq && e.task === entry.task);
     if (!fresh || fresh.status !== 'queued' || fresh.spec !== initial.spec || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
-    const author = directAuthorState(config, fresh, readQueue(config));
+    const author = directAuthorState(config, fresh, current);
     if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
     if (author.waiting) return false;
     if (!fresh.autoReview) return claim(fresh);

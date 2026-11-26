@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
 import {collectEvents} from '../src/core/chat-events.ts';
+import {checkLaunchHealth, LaunchHealthMemory} from '../src/core/launch-health.ts';
 import {Context} from '../src/core/context.ts';
 import {readJournal, recordJournalOnce} from '../src/core/journal.ts';
 import {MCP_TOOLS} from '../src/core/mcp-tools.ts';
@@ -12,6 +13,7 @@ import {planResume} from '../src/core/resume.ts';
 import {RealRunner} from '../src/core/runner.ts';
 import {pendingStarts} from '../src/core/start-lock.ts';
 import {collectStatus} from '../src/core/status.ts';
+import {openReader, readPlans} from '../src/core/usage.ts';
 import {runWatch, watchTick, WatchMemory} from '../src/core/watch.ts';
 import {DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch} from './helpers.ts';
 
@@ -180,6 +182,64 @@ test('REL0272-TICK-PANES: many missing windows share one second tmux observation
   assert.equal(rows.filter(row => row.task.startsWith('PANE-') && row.window === 'gone').length, 12);
   assert.equal(w.tmux.seen.filter(command => command.startsWith('list-panes')).length, 1);
   assert.ok(!w.tmux.seen.some(command => command.startsWith('display-message @9')));
+});
+
+test('REL0272-TICK-LEGACY: interrupted legacy launches never enter tmux loss recovery', async t => {
+  const w = world('tick-legacy');
+  w.tmux.add('unrelated', '❯ ');
+  const task = seedTask(w.config, 'LEGACY-NO-LOSS', {windowId: '@989', promptDelivery: 'launching', repos: [{path: w.repo, worktree: w.repo}]});
+  const memory = new WatchMemory();
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  await watchTick(w.ctx, memory, notifier);
+  assert.equal(readJournal(w.config).filter(event => event.kind === 'launch-legacy' && event.task === task.task).length, 1);
+  assert.equal(readJournal(w.config).filter(event => event.kind === 'tmux-lost' && event.task === task.task).length, 0);
+  assert.equal((await planResume(w.ctx, [task.task])).items[0]?.task, task.task);
+});
+
+test('REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory', async t => {
+  const w = world('tick-inventory');
+  fs.mkdirSync(path.join(w.config.stateDir, 'hosts'), {recursive: true});
+  w.tmux.add('unrelated', '❯ ');
+  seedTask(w.config, 'SCAN-LAUNCH', {windowId: '@989', promptDelivery: 'launching'});
+  for (let index = 0; index < 4; index++) seedTask(w.config, `SCAN-CLOSED-${index}`, {closed: true});
+  const health = new LaunchHealthMemory();
+  t.after(() => health.close());
+  await health.records.current(w.config, w.runner.now());
+  const opened = t.mock.method(fs, 'openSync');
+  await checkLaunchHealth(w.ctx, health, notifier);
+  readPlans(w.config, openReader(w.config), w.runner.now());
+  assert.deepEqual(opened.mock.calls.map(call => String(call.arguments[0])).filter(file => file.includes('scan-closed-') && file.endsWith('/TASK.md')), []);
+});
+
+test('REL0272-TICK-NEW-FOLDER: a newly created task is indexed before a native notification', async t => {
+  const w = world('tick-new-folder');
+  fs.mkdirSync(w.config.stateDir, {recursive: true});
+  const health = new LaunchHealthMemory();
+  t.after(() => health.close());
+  const watch = fs.watch;
+  t.mock.method(fs, 'watch', (file: fs.PathLike) => watch(file));
+  assert.deepEqual(await health.records.current(w.config, w.runner.now()), []);
+  seedTask(w.config, 'SCAN-NEW');
+  assert.deepEqual((await health.records.current(w.config, w.runner.now())).map(task => task.task), ['SCAN-NEW']);
+});
+
+test('REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status', async t => {
+  const w = world('admission-chain');
+  let unblock!: () => void, queueRan = false, statusRan = false;
+  const accepted = new Promise<void>(resolve => { unblock = resolve; });
+  const memory = new WatchMemory(async (name, work) => {
+    if (name === 'accepted MCP writes') await accepted;
+    if (name === 'queue') queueRan = true;
+    if (name === 'status collection') statusRan = true;
+    return work();
+  });
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  try {
+    await watchTick(w.ctx, memory, notifier, {backgroundStarts: true});
+    assert.ok(statusRan);
+    assert.equal(queueRan, false);
+  } finally { unblock(); await memory.admission; }
+  assert.equal(queueRan, true);
 });
 
 test('REVIEW0256-DOWNGRADE: check lists incompatible keys and prunes only expired overrides', async () => {

@@ -13,7 +13,7 @@ import type { RawSpec } from './spec.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
 import { accountTasks } from './task-accounting.ts';
-import { listArchivedRecords, listTaskRecords, setHeaderField, taskFile } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords, setHeaderField, taskFile, type TaskRecord } from './taskstore.ts';
 import type { GlobalConfig } from './config.ts';
 import { AgentctlError, cohortKey, cohortNameProblem, isObject } from './util.ts';
 
@@ -329,7 +329,7 @@ export const cohortDoneText = (name: string, n: number): string => `kohorta ${na
  * Once per cohort: when every task of the cohort that was not cancelled has a report, "kohorta <nazwa>: wszystkie raporty gotowe (N)".
  * The cohort file remembers which tasks that covered; it speaks again only when a task joined since. Returns the texts announced.
  */
-export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonly StatusRow[], log?: (line: string) => Promise<void> | void): Promise<string[]> {
+export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonly StatusRow[], log?: (line: string) => Promise<void> | void, current?: readonly TaskRecord[]): Promise<string[]> {
   const entries = readQueue(ctx.config);
   const said: string[] = [];
   for (const meta of listCohorts(ctx.config)) {
@@ -357,7 +357,7 @@ export async function cohortTick(ctx: Context, notifier: Notifier, rows: readonl
     if (meta.observed !== observed) {
       if (meta.observed === undefined && meta.changedAt === undefined) {
         const times = [Date.parse(meta.created), ...cohortEntries(entries, meta.name).map(e => Date.parse(e.queuedAt))];
-        for (const record of listTaskRecords(ctx.config).filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(meta.name))) {
+        for (const record of (current ??= listTaskRecords(ctx.config)).filter(r => r.cohort && cohortKey(r.cohort) === cohortKey(meta.name))) {
           times.push(...[record.started, record.attemptStarted, record.turnEndedAt, record.closedAt, record.cancelledAt, record.reportCopied].filter((t): t is string => Boolean(t)).map(t => Date.parse(t)));
           for (const file of [record.report, taskFile(ctx.config, record.window)]) { try { times.push(fs.statSync(file).mtimeMs); } catch { /* absent */ } }
         }

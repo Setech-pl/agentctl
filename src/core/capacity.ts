@@ -14,7 +14,7 @@ import { computeStats, selectHistory } from './history.ts';
 import { collectLimits, reservationText } from './limits.ts';
 import { liveWindows } from './plan.ts';
 import { readQueue, waiting } from './queue.ts';
-import { codexPlanFile, openReader, planWindowCurrent, readPlans, stalePlanLabel } from './usage.ts';
+import { codexPlanFile, openReader, planWindowCurrent, readPlans, readPlanStates, stalePlanLabel } from './usage.ts';
 import type { PlanWindowView } from './usage.ts';
 import { readSamples } from './usage-samples.ts';
 import type { UsageSample } from './usage-samples.ts';
@@ -64,7 +64,7 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
   if (!opts.cachedOnly) for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
   const now = ctx.runner.now();
   const reader = openReader(ctx.config);
-  const plans = readPlans(ctx.config, reader, now);
+  const plans = opts.rows && opts.save === false ? readPlanStates(ctx.config, reader, now) : readPlans(ctx.config, reader, now);
   if (opts.save !== false) {
     reader.save();
     await recordStaleCapacity(ctx, plans);

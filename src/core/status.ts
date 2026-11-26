@@ -4,7 +4,7 @@ import { quotaError, quotaReset } from './quota-error.ts';
 import { transcriptQuotaError } from './transcript.ts';
 import { PATTERN_FLAGS } from './config.ts';
 import { tmuxLoss } from './tmux-loss.ts';
-import { expectedStartClosure, inLaunchGrace, launchExitText, readLaunchExit, saveLaunchTail } from './start-failure.ts';
+import { expectedStartClosure, inLaunchGrace, launchExitText, legacyLaunch, readLaunchExit, saveLaunchTail } from './start-failure.ts';
 import type { LaunchExit } from './start-failure.ts';
 import { readQueue } from './queue.ts';
 import { provider, matchesProviderCommand, isProviderLauncher } from './providers/registry.ts';
@@ -16,7 +16,7 @@ import { promptQueueView } from './prompt-queue.ts';
 import { readOutputs, dependencyVerdict, outputsPending, reviewVerdict, reviewVerdictAsOutput } from './outputs.ts';
 import type { OutputData, OutputVerdict } from './outputs.ts';
 import path from 'node:path';
-import { inspectReport } from './report-state.ts';
+import { inspectReport, type ReportState } from './report-state.ts';
 import { sessionQuestion } from './codex-question.ts';
 import { menuOptionLines } from './answer.ts';
 import { findCandidates, shortPath } from './report-detect.ts';
@@ -198,7 +198,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
   // Nested planners inherit the MCP request contract too, without relying on facade-local wrappers.
   if (cachedRequest()) opts = { ...opts, cachedOnly: true };
   const { runner, tmux, config } = ctx;
-  const infos = [...await ctx.localTmux.windows(), ...await ctx.hosts.windows(opts.cachedOnly || opts.remoteCachedOnly)];
+  const infos = (await Promise.all([ctx.localTmux.windows(), ctx.hosts.windows(opts.cachedOnly || opts.remoteCachedOnly, opts.records?.current)])).flat();
   const windowByName = new Map(infos.map(info => [info.plain, info]));
   const windowHosts = new Set(infos.map(info => info.host ?? ''));
   let verifiedWindows: ReturnType<typeof ctx.localTmux.windows> | undefined;
@@ -252,7 +252,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let reportVersion: string | undefined;
     try {
       if (record.report && historical) {
-        const stat = fs.statSync(record.report, {bigint: true, throwIfNoEntry: false});
+        const stat = fs.lstatSync(record.report, {bigint: true, throwIfNoEntry: false});
         reportVersion = stat ? fileVersion(stat) : 'missing';
         if (stat) reportMtime = Number(stat.mtimeNs) / 1e6;
       } else reportMtime = record.report ? fs.statSync(record.report).mtimeMs : undefined;
@@ -275,15 +275,15 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let screenRead = !alive;
     if (alive && !unreachable) {
       let screen;
-      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await tmux.capture(record.window, undefined, infos, record.windowId); }
+      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await (record.host ? tmux : ctx.localTmux).capture(record.window, undefined, infos, record.windowId); }
       catch (error) { if (!(error instanceof HostUnreachable)) throw error; unreachable = true; screen = { code: 255, stdout: '', stderr: error.message }; }
       if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }
     const screenAgent = record.agent === 'unknown' ? guessAgent(screenText) : record.agent;
     const settings = config.agents[screenAgent] ?? provider(screenAgent).defaultSettings();
     if (!record.host && !opts.cachedOnly && !cachedRequest()) await provider(screenAgent).events.poll?.(ctx, record);
-    const stored = readStoredEvent(config, record);
-    const reportState = inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
+    const stored = reportVersion === 'missing' ? undefined : readStoredEvent(config, record);
+    const reportState: ReportState = reportVersion === 'missing' ? {ready: false, exists: false, reason: 'no report'} : inspectReport(config, { ...record, ...(stored?.outcome === 'turn-complete' ? { turnEndedAt: stored.at } : {}) }, runner.now(), !record.attemptId && (!alive || (config.reportSettleS === 0 && classifyScreen(screenText, settings) === 'idle')));
     reportReady = reportState.ready;
     const completed = reportState.sentinel || reportState.structured;
     const statusSettings = completed && screenRead ? { ...settings, idleRequiresInput: false } : settings;
@@ -312,7 +312,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     const missingDuringLaunch = !alive && sessionPresent && record.launchAt && inLaunchGrace(config, record, runner.now()) && !expectedStartClosure(config, record);
     const launchDead = !alive && (launchExit !== undefined || paneExit !== undefined || missingDuringLaunch);
     if (alive && record.launchAt && !opts.cachedOnly && !unreachable && inLaunchGrace(config, record, runner.now())) await saveLaunchTail(ctx, record, screenText);
-    const lossHint = record.host || launchDead ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, sessionPresent, opts.verifyWatchLoss || opts.cachedOnly);
+    const lossHint = record.host || launchDead || legacyLaunch(record) ? undefined : await tmuxLoss(ctx, record, alive, reportReady || cancelled || closed || archived || !!record.supersededBy, sessionPresent, opts.verifyWatchLoss || opts.cachedOnly);
     if (lossHint && hiddenBy === 'auto') hiddenBy = null;
     let state: TaskState = unreachable ? 'host-unreachable' : cancelled ? 'cancelled' : closed ? 'closed' : record.supersededBy ? 'superseded' : launchDead ? (reportReady ? 'report-ready' : 'dead') : lossHint ? 'needs-attention' : writeFailure ? 'needs-attention' : deliveryReport ? 'report-ready' : startupDialog ? 'needs-input' : unconfirmed ? 'needs-attention' : taskState({ alive, screen: screenText, settings: statusSettings, reportReady: reportReady && (!alive || screenRead), event: stored?.outcome });
     const quota = alive && !unreachable && !reportReady && !cancelled && !closed ? ((classifyScreen(screenText, settings) === 'limited' ? quotaError(screenText) : undefined) ?? (stored?.outcome === 'limited' ? stored.text : undefined) ?? (!record.host && !opts.cachedOnly && !cachedRequest() ? transcriptQuotaError(ctx, record)?.text : undefined)) : undefined;

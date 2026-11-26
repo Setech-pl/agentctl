@@ -36,11 +36,13 @@ export class LaunchHealthMemory {
 export async function checkLaunchHealth(ctx: Context, memory: LaunchHealthMemory, notifier: Notifier, self?: SelfArgv, signal?: AbortSignal): Promise<void> {
   if (ctx.runner.dryRun) return;
   const {config, runner} = ctx;
-  const records = (await memory.records.current(config, runner.now())).filter(record => !record.closed && !record.cancelled && !record.supersededBy
+  const currentRecords = await memory.records.current(config, runner.now());
+  const records = currentRecords.filter(record => !record.closed && !record.cancelled && !record.supersededBy
     && (record.launchAt || legacyLaunch(record) || record.launchRetried));
   if (!records.length || signal?.aborted) return;
   const starting = new Set([...pendingStarts(config), ...readQueue(config).filter(entry => entry.status !== 'failed')].map(entry => entry.task));
-  const windows = await withCommandStage(3000, signal, () => ctx.tmux.windows());
+  const listWindows = async () => (await Promise.all([ctx.localTmux.windows(), ctx.hosts.windows(false, currentRecords)])).flat();
+  const windows = await withCommandStage(3000, signal, listWindows);
   const byName = new Map(windows.map(window => [window.plain, window]));
   const windowHosts = new Set(windows.map(window => window.host ?? ''));
   let ids: Awaited<ReturnType<typeof journalChangeIds>> | undefined;
@@ -59,7 +61,7 @@ export async function checkLaunchHealth(ctx: Context, memory: LaunchHealthMemory
       const current = await readRecordFileAsync(taskFile(config, record.window));
       if (!current || launchIdentity(current) !== launchIdentity(record) || expectedStartClosure(config, current)) continue;
       // A separate observation prevents replay after a transient tmux inventory failure.
-      checkedLegacy ??= new Set((await withCommandStage(3000, signal, () => ctx.tmux.windows())).map(window => window.plain));
+      checkedLegacy ??= new Set((await withCommandStage(3000, signal, listWindows)).map(window => window.plain));
       if (signal?.aborted || checkedLegacy.has(record.window)) continue;
       legacy.push({kind: 'launch-legacy', task: record.task, owner: record.owner, cohort: record.cohort, changeId,
         text: `${record.task}: przerwany start ze starszej wersji. Wznów ręcznie poleceniem agentctl resume ${record.task}.`});

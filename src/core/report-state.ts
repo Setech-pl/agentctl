@@ -52,9 +52,13 @@ export function invalidateReportDigest(file: string): void { reportDigests.delet
 /** Single report readiness rule for status, hooks, history, cohorts and dependency consumers. */
 export function inspectReport(config: Pick<GlobalConfig, 'reportSettleS'> & Partial<Pick<GlobalConfig, 'cache'>>, record: TaskRecord, now: number, turnEnded: boolean, file = record.report): ReportState {
   try {
+    let st = fs.lstatSync(file, { bigint: true, throwIfNoEntry: false });
+    if (!st) return { ready: false, exists: false, reason: 'no report' };
     // Authorization is never cached: owners, roots and ancestor components can change.
-    if (config.cache) checkReportPath({ cache: config.cache }, record, file, { existing: true });
-    const st = fs.lstatSync(file, { bigint: true });
+    if (config.cache) {
+      checkReportPath({ cache: config.cache }, record, file, { existing: true });
+      st = fs.lstatSync(file, { bigint: true });
+    }
     const mtimeMs = Number(st.mtimeNs) / 1_000_000;
     if (!st.isFile() || st.isSymbolicLink()) return { ready: false, exists: true, reason: 'not a regular report' };
     const start = Date.parse(record.attemptStarted ?? record.started);

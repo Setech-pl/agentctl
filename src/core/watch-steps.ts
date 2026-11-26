@@ -51,6 +51,14 @@ export class WatchSteps {
     return pick;
   }
 
+  busy(name: string): void {
+    const since = this.running.get(name);
+    if (since === undefined) return;
+    const previous = this.skipped.get(name);
+    if (previous) previous.count++;
+    else this.skipped.set(name, {since, count: 1, promoted: 0});
+  }
+
   stalled(now: number): string[] {
     return [...new Set([
       ...[...this.running].filter(([, since]) => now - since >= WATCH_STALL_MS).map(([name]) => name),

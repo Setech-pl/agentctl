@@ -1510,6 +1510,16 @@
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
     ]
   },
+  "REL0272-ADMISSION-CHAIN": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status",
+      "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status"
+    ]
+  },
   "REL0272-CONTENTION": {
     "rev": "3484fbebdf0c7beaceec2a1b855cef0417044277",
     "outcome": "FAILS",
@@ -1570,6 +1580,16 @@
       "REL0272-LEGACY-JOURNAL: legacy launch events share a single append"
     ]
   },
+  "REL0272-MCP-PAGES": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-MCP-PAGES: a continuation measures only a bounded fragment",
+      "REL0272-MCP-PAGES: a continuation measures only a bounded fragment"
+    ]
+  },
   "REL0272-P19-RETRY": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",
@@ -1611,6 +1631,26 @@
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
     ]
   },
+  "REL0272-TICK-LEGACY": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-LEGACY: interrupted legacy launches never enter tmux loss recovery",
+      "REL0272-TICK-LEGACY: interrupted legacy launches never enter tmux loss recovery"
+    ]
+  },
+  "REL0272-TICK-NEW-FOLDER": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-NEW-FOLDER: a newly created task is indexed before a native notification",
+      "REL0272-TICK-NEW-FOLDER: a newly created task is indexed before a native notification"
+    ]
+  },
   "REL0272-TICK-PANES": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",
@@ -1629,6 +1669,16 @@
     "failing": [
       "REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age",
       "REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age"
+    ]
+  },
+  "REL0272-TICK-SCANS": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory",
+      "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory"
     ]
   },
   "REVIEW0256-DOWNGRADE": {

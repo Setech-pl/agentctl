@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Watch reuses indexed headers for launch and status, checks plan readings separately from token accounting, and runs admission independently of status. Legacy launches wait for a named resume without a duplicate window-loss alert. / Watch współdzieli indeks nagłówków, oddziela odczyt limitów od zliczania tokenów i uruchamia kolejkę niezależnie od odczytu stanu. Przerwane starty starszej wersji czekają na jawne wznowienie bez powielonego alertu o oknie.
+- MCP continues large responses by encoding one bounded fragment at a time. / MCP koduje każdą kolejną część dużej odpowiedzi osobno, zgodnie z limitem.
 - Journal writes append asynchronously and preserve the state of previous complete lines. / Dziennik dopisuje zdarzenia asynchronicznie i zachowuje wcześniejsze pełne wpisy.
 - Watch batches hold events and keeps diagnostic heartbeat writes off stage boundaries. / Watch zapisuje zdarzenia wstrzymania grupowo i ogranicza zapisy diagnostyczne między etapami.
 - Integration GC removes a worktree under its own Git timeout. Prompt delivery keeps the pending prompt queued when the admission deadline is close. / GC po integracji usuwa worktree z limitem Git. Dostarczanie odkłada wiadomość, gdy zbliża się koniec czasu operacji.

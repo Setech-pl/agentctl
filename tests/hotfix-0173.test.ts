@@ -147,6 +147,17 @@ it('0173-1: continuation preserves Unicode and errors, isolates sessions and nev
   assert.match(joined, /no task/);
 });
 
+it('REL0272-MCP-PAGES: a continuation measures only a bounded fragment', async t => {
+  const f = fixture('bounded-continuation', 'mcp: {max_response_kb: 1}\n');
+  const first = JSON.parse((await f.call('task_spec', {task: 'UNKNOWN'.repeat(4000)})).text);
+  assert.ok(first.has_more);
+  const measured = t.mock.method(Buffer, 'byteLength');
+  const next = await f.call('response_page', {response_id: first.response_id, response_offset: first.next_response_offset});
+  assert.equal(JSON.parse(next.text).total_bytes, first.total_bytes);
+  assert.ok(responseWireBytes(next) <= 1024);
+  assert.ok(!measured.mock.calls.some(call => typeof call.arguments[0] === 'string' && call.arguments[0].length > 4096));
+});
+
 it('0173-1/4: config validates response limits and cohort grace, while accepting legacy candidate icon config', () => {
   const f = fixture('settings', 'mcp: {max_response_kb: 2}\ncohort: {done_grace_s: 7}\nwatch: {window_icons: {report-candidate: "?"}}\n');
   assert.equal(f.config.mcp.maxResponseKb, 2); assert.equal(f.config.cohort.doneGraceS, 7);

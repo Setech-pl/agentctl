@@ -103,12 +103,14 @@ export function readPlanStates(config: GlobalConfig, reader: UsageReader, now: n
   return plans;
 }
 
-export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records: readonly TaskRecord[] = allRecords(config)): ProviderValues<PlanState> {
+export function readPlans(config: GlobalConfig, reader: UsageReader, now: number, records?: readonly TaskRecord[], usage?: ReadonlyMap<string, TaskUsage>): ProviderValues<PlanState> {
   const ids = activeProviders(config);
   const plans = readPlanStates(config, reader, now);
-  const totals = perProvider(ids, () => 0);
-  for (const u of collectTaskUsage(config, reader, records, now).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
-  recordSamples(config, plans, totals, now);
+  recordSamples(config, plans, () => {
+    const totals = perProvider(ids, () => 0);
+    for (const u of (usage ?? collectTaskUsage(config, reader, records ?? allRecords(config), now)).values()) if ((ids as string[]).includes(u.agent)) totals[u.agent as AgentName] += freshTokens(u.total);
+    return totals;
+  }, now);
   return plans;
 }
 
@@ -161,9 +163,9 @@ const within = (cwd: string, dir: string): boolean => {
 };
 
 /** When a task stops owning sessions: the start of the task that continues it, its close or its cancel. */
-function endOf(record: TaskRecord, all: readonly TaskRecord[]): number {
-  const ends = [record.closedAt, record.cancelledAt, ...all.filter((r) => r.continues === record.task).map((r) => r.started)].map((t) => (t ? Date.parse(t) : NaN)).filter((n) => !Number.isNaN(n));
-  return ends.length > 0 ? Math.min(...ends) + START_SLACK_MS : Infinity;
+function endOf(record: TaskRecord, continuedAt: ReadonlyMap<string, number>): number {
+  const closed = Date.parse(record.closedAt ?? ''), cancelled = Date.parse(record.cancelledAt ?? '');
+  return Math.min(Number.isNaN(closed) ? Infinity : closed, Number.isNaN(cancelled) ? Infinity : cancelled, continuedAt.get(record.task) ?? Infinity) + START_SLACK_MS;
 }
 
 interface Candidate {
@@ -200,9 +202,14 @@ export function observationWarning(record: TaskRecord, observed: NonNullable<Tas
 export function collectTaskUsage(config: GlobalConfig, reader: UsageReader, records: readonly TaskRecord[], now: number): Map<string, TaskUsage> {
   const codexScan = new Map<string, string[]>();
   const claimed = new Map<string, { record: TaskRecord; candidate: Candidate }>();
+  const continuedAt = new Map<string, number>();
   for (const record of records) {
     const started = Date.parse(record.started);
-    const end = endOf(record, records);
+    if (record.continues && Number.isFinite(started)) continuedAt.set(record.continues, Math.min(continuedAt.get(record.continues) ?? Infinity, started));
+  }
+  for (const record of records) {
+    const started = Date.parse(record.started);
+    const end = endOf(record, continuedAt);
     for (const c of candidates(config, reader, record, now, codexScan)) {
       if (!c.explicit) {
         if (Number.isNaN(started) || c.firstAt === null || c.firstAt < started - START_SLACK_MS || c.firstAt >= end) continue;

@@ -401,7 +401,14 @@ function planSummary(ctx: Context, save = true): string {
 async function runUsage(deps: McpDeps, args: { cohort?: string | undefined; since?: string | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
-  const report = await collectUsage(ctx, { cohort, since: args.since });
+  let rows: StatusRow[] | undefined;
+  try {
+    const snapshot = JSON.parse(await fs.promises.readFile(watchSnapshotPath(ctx.config), 'utf8'));
+    const age = ctx.runner.now() - snapshot.at;
+    if (snapshot.version === 1 && !snapshot.degraded && age >= 0 && age < 60_000 && Array.isArray(snapshot.rows)
+      && snapshot.configHash === createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) rows = snapshot.rows;
+  } catch { /* a CLI without a running watch collects status directly */ }
+  const report = await collectUsage(ctx, { cohort, since: args.since, rows });
   const limits = (Object.keys(report.plans) as AgentName[]).map((p) => `${p}: ${planLine(providerValue(report.plans, p), report.now)}`).join('; ');
   return ok(`Plan limits - ${limits}. Tokens = input + output + cache writes of the tasks agentctl started (cache reads are listed apart); period: days since ${report.sinceDay}.\n\n${JSON.stringify(report, null, 2)}`);
 }
@@ -2653,7 +2660,8 @@ for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
 }
 
 /** Session-local snapshots: continuing a response never repeats a write or consumes another event page. */
-const responses = new WeakMap<McpDeps, Map<string, { tool: string; text: string; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number }>>();
+interface CachedResponse { tool: string; text: string; bytes: number; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number }
+const responses = new WeakMap<McpDeps, Map<string, CachedResponse>>();
 MCP_TOOLS.push(def({ name: 'response_page', title: 'Continue a bounded response', kind: 'read', description: 'Retrieve a cached response fragment without repeating the original operation. CLI: no equivalent (MCP response transport).', input: { response_id: z.string().max(100), response_offset: z.number().int().min(0) }, annotations: readOnly('Continue a bounded response'), run: async () => fail('response_id is required') }));
 export function responseWireBytes(result: ToolResult): number {
   return Buffer.byteLength(JSON.stringify({ content: [{ type: 'text', text: result.text }], ...(result.isError ? { isError: true } : {}) }));
@@ -2667,7 +2675,7 @@ for (const tool of MCP_TOOLS) {
     let cache = responses.get(deps);
     if (!cache) { cache = new Map(); responses.set(deps, cache); }
     let id = response_id as string | undefined;
-    let saved: { tool: string; text: string; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number };
+    let saved: CachedResponse;
     if (id) {
       const found = cache.get(id);
       if (!found || (tool.name !== 'response_page' && found.tool !== tool.name)) return fail('Response expired or belongs to another tool. Repeat the original read/preview; do not repeat a confirmed write.');
@@ -2676,15 +2684,16 @@ for (const tool of MCP_TOOLS) {
       if (response_offset !== undefined) return fail('response_offset requires response_id');
       const result = await guarded(() => run(deps, input));
       if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) { await result.onDelivered?.(); const { onDelivered: _callback, ...delivered } = result; return delivered; }
-      saved = { tool: tool.name, text: result.text, onDelivered: result.onDelivered, covered: 0, ...(result.isError ? { isError: true } : {}) };
+      saved = { tool: tool.name, text: result.text, bytes: Buffer.byteLength(result.text), onDelivered: result.onDelivered, covered: 0, ...(result.isError ? { isError: true } : {}) };
       id = crypto.randomUUID();
-      while (cache.size >= 16 || [...cache.values()].reduce((n, r) => n + Buffer.byteLength(r.text), 0) > 8 * 1024 * 1024) cache.delete(cache.keys().next().value!);
+      while (cache.size >= 16 || [...cache.values()].reduce((n, r) => n + r.bytes, 0) > 8 * 1024 * 1024) cache.delete(cache.keys().next().value!);
       cache.set(id, saved);
     }
     const offset = Number(response_offset ?? 0);
     if (offset > saved.text.length) return fail('response_offset is beyond end');
-    const page = (end: number): ToolResult => ({ text: JSON.stringify({ truncated: true, response_id: id, response_offset: offset, next_response_offset: end, has_more: end < saved.text.length, total_bytes: Buffer.byteLength(saved.text), fragment: saved.text.slice(offset, end), continuation: 'Call response_page with response_id and response_offset=next_response_offset only; concatenate fragments. No operation is repeated.' }), ...(saved.isError ? { isError: true } : {}) });
-    let lo = offset, hi = saved.text.length;
+    const page = (end: number): ToolResult => ({ text: JSON.stringify({ truncated: true, response_id: id, response_offset: offset, next_response_offset: end, has_more: end < saved.text.length, total_bytes: saved.bytes, fragment: saved.text.slice(offset, end), continuation: 'Call response_page with response_id and response_offset=next_response_offset only; concatenate fragments. No operation is repeated.' }), ...(saved.isError ? { isError: true } : {}) });
+    // The JSON wire page cannot contain more UTF-16 code units than its UTF-8 byte budget.
+    let lo = offset, hi = Math.min(saved.text.length, offset + budget);
     while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); const result = page(mid); if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) lo = mid; else hi = mid - 1; }
     if (lo > offset && /[\uD800-\uDBFF]/.test(saved.text[lo - 1]!)) lo--;
     if (offset <= (saved.covered ?? 0)) saved.covered = Math.max(saved.covered ?? 0, lo);

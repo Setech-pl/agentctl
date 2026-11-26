@@ -10,6 +10,11 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-ADMISSION-CHAIN | The background admission worker could start queuing before accepted requests had been applied. | `tests/review0256.test.ts` (`^REL0272-ADMISSION-CHAIN:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
+| REL0272-MCP-PAGES | Each MCP response fragment repeatedly encoded the original multi-page response. | `tests/hotfix-0173.test.ts` (`^REL0272-MCP-PAGES:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
+| REL0272-TICK-LEGACY | A large migration produced duplicate window-loss recovery for legacy launches held for manual resume. | `tests/review0256.test.ts` (`^REL0272-TICK-LEGACY:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
+| REL0272-TICK-SCANS | Checking launches and unchanged provider plans reopened historical task headers during watch. | `tests/review0256.test.ts` (`^REL0272-TICK-SCANS:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
+| REL0272-TICK-NEW-FOLDER | A new task folder could be missing from the initial tick inventory until a native filesystem event arrived. | `tests/review0256.test.ts` (`^REL0272-TICK-NEW-FOLDER:`) | 0.27.2 | fails on 322af1c18634e368f996b72dcff6c7c22a221d4b (1 failing of 1) |
 | REL0272-CONTENTION | The production-shape fixture could not generate its required measured load on a quiet machine. | `tests/gate.test.ts` (`^REL0272-CONTENTION:`) | 0.27.2 | fails on 3484fbebdf0c7beaceec2a1b855cef0417044277 (1 failing of 1) |
 | REL0272-RESUME-LOCK | A second resume over the same active task could wait for the first instead of seeing its admission reservation. | `tests/audit-0174.test.ts` (`^W4 a stale resume plan`) | 0.27.2 | fails on 64fdb988f5ece0aa7a97abd348151ad9039dac2a (1 failing of 1) |
 | REL0272-JOURNAL-APPEND | Every journal append synchronously rewrote the entire file and a torn last line swallowed the next event. | `tests/review0256.test.ts` (`^REL0272-JOURNAL-APPEND:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |

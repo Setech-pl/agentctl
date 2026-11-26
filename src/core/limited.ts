@@ -8,7 +8,7 @@ import type { Context } from './context.ts';
 import type { AgentName } from './config.ts';
 import type { StatusRow } from './status.ts';
 import type { Notifier } from './notify.ts';
-import { formatReset, openReader, readPlans } from './usage.ts';
+import { formatReset, openReader, readPlanStates } from './usage.ts';
 import type { PlanState } from './usage.ts';
 import { recordJournal } from './journal.ts';
 import { withFileLock } from './file-lock.ts';
@@ -18,7 +18,7 @@ import { errorMessage } from './util.ts';
 interface Retry { firstAt: number; since: number; attempts: number; attention?: boolean; workingSince?: number }
 interface Episode { since: number; reset: number | null; notified: boolean; tasks: Record<string, Retry> }
 const readState = (file: string): Partial<Record<AgentName, Episode>> => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return {}; } };
-const plansNow = (ctx: Context) => { const reader = openReader(ctx.config); const plans = readPlans(ctx.config, reader, ctx.runner.now()); reader.save(); return plans; };
+const plansNow = (ctx: Context) => { const reader = openReader(ctx.config); const plans = readPlanStates(ctx.config, reader, ctx.runner.now()); reader.save(); return plans; };
 export function limitedRecovered(ctx: Context, plan: PlanState, episode: Pick<Episode, 'since' | 'reset'>): boolean {
   return (episode.reset !== null && ctx.runner.now() >= episode.reset) || (plan.available && !plan.stale && plan.readAt !== null && plan.readAt >= episode.since && plan.maxPercent !== null && 100 - plan.maxPercent > ctx.config.limited.resumeAbovePercent);
 }
@@ -34,6 +34,8 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
   const file = path.join(path.dirname(ctx.config.path), 'limited-retries.json');
   await withFileLock(`${file}.lock`, async () => {
     const state = readState(file), now = ctx.runner.now(), settings = ctx.config.limited;
+    if (!Object.keys(state).length && !rows.some(row => row.state === 'limited' && row.window === 'alive')) return;
+    const previous = JSON.stringify(state);
     const plans = supplied ?? plansNow(ctx);
     const persist = () => ctx.runner.writeFile(file, JSON.stringify(state));
     for (const provider of activeProviders(ctx.config)) {
@@ -83,6 +85,6 @@ export async function limitedTick(ctx: Context, rows: StatusRow[], notifier: Not
       }
       if (!limited.length && !Object.keys(episode.tasks).length && !exhausted.length && (episode.reset === null || episode.reset <= now)) delete state[provider];
     }
-    await persist();
+    if (JSON.stringify(state) !== previous) await persist();
   });
 }
