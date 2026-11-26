@@ -1979,7 +1979,15 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
     }
   }
   const result = request.tool === 'gc'
-    ? await writeTool(applying, 'gc', {}, async fresh => { verifyMcpGcScope(fresh, request.args, scope as GcPlan); const result = await applyGc(fresh, scope as GcPlan); await refreshDiskAfterGc(fresh, result.freedBytes); return {text: JSON.stringify(result), executed: true, announce: `gc: ${result.done.length} items, ${result.freedBytes} bytes`}; })
+    ? await writeTool(applying, 'gc', {}, async fresh => {
+      const plan = scope as GcPlan;
+      verifyMcpGcScope(fresh, request.args, plan);
+      const result = await applyGc(fresh, plan);
+      await refreshDiskAfterGc(fresh, result.freedBytes);
+      // The durable MCP result is bounded, so write measurements before the item lists.
+      const { freedBytes, freedByVolume, done, failed } = result;
+      return { text: JSON.stringify({ freedBytes, freedByVolume, done, failed }), executed: true, announce: `gc: ${done.length} items, ${freedBytes} bytes` };
+    })
     : request.tool === 'archive'
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
     : await guarded(() => run(applying, { ...request.args, confirm: true, _apply: true } as never));

@@ -517,12 +517,12 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           const forced = permitsDirty(plan.forceDirty, item.task);
           if ((risk.dirtyFiles || risk.unpushedCommits) && !forced) throw new Error(`worktree has ${risk.dirtyFiles} dirty files and ${risk.unpushedCommits} unpushed commits; kept`);
           if (forced && (risk.dirtyFiles !== item.dirtyFiles || risk.unpushedCommits !== item.unpushedCommits)) throw new Error('worktree risk counts changed since preview; kept');
-          assertUnpinned();
           if (!runner.dryRun) await space.before(item.target);
           const forceRemove = forced && risk.dirtyFiles > 0;
           if (forceRemove || forced && risk.unpushedCommits > 0) await recordJournal(ctx, {
             kind: 'gc-force-dirty', task: item.task, text: `Owner-authorized worktree removal: ${item.target} (${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits)`,
           });
+          assertUnpinned();
           const r = await runner.exec('git', ['-C', item.repo as string, 'worktree', 'remove', ...(forceRemove ? ['--force'] : []), item.target], { timeoutMs: config.git.timeoutS * 1000 });
           if (r.code !== 0) throw new Error(r.stderr.trim().split('\n')[0] || `git exit ${r.code}`);
         } else if (kind === 'cache') {
@@ -532,8 +532,8 @@ export async function applyGc(ctx: Context, plan: GcPlan, space = new GcSpace())
           const protection = cacheProtection(record, item.target);
           if (protection || plan.keepCache?.some(t => t.toLowerCase() === item.task.toLowerCase())) throw new Error(protection ?? 'keep_cache requested for task');
           if (runner.now() - await newestMtime(item.target, { fresh: true, now: () => runner.now() }) < plan.olderThanMs) throw new Error('cache contents changed since the plan; kept because they are too recent');
-          assertUnpinned();
           if (!runner.dryRun) await space.before(item.target);
+          assertUnpinned();
           await remove(item);
         } else if (kind === 'archive') {
           assertUnpinned();

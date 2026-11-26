@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { atomicWriteFile } from './atomic-file.ts';
 import type { Context } from './context.ts';
 import { withStartLock } from './start-lock.ts';
 import { AgentctlError } from './util.ts';
@@ -44,8 +45,11 @@ export async function claimStartPaths(ctx: Context, kind: PathClaim['kind'], tar
     }
   }
   const file = path.join(dir, `${randomUUID()}.json`);
-  await ctx.runner.writeFile(file, JSON.stringify({ pid: process.pid, kind, paths }));
-  return () => { fs.unlinkSync(file); };
+  atomicWriteFile(file, JSON.stringify({ pid: process.pid, kind, paths }));
+  return () => {
+    try { fs.unlinkSync(file); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  };
 }
 
 export function claimGcPath(ctx: Context, target: string, check: () => Promise<void>): Promise<() => void> {
