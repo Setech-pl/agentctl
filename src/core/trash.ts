@@ -78,7 +78,11 @@ function legacyMarker(target: string, original: string, owners: TaskRecord[]): s
       if (record && owners.some(owner => owner.task === record.task && owner.window === record.window)) return name;
     }
     const worktrees = owners.flatMap(record => record.repos.filter(repo => !record.reviewMode && repo.worktree !== repo.path));
-    if (path.basename(original) === 'node_modules' && worktrees.some(repo => path.resolve(repo.worktree) === path.dirname(original))) return 'node_modules in task worktree';
+    const modules = fs.lstatSync(path.join(target, 'node_modules'), { throwIfNoEntry: false });
+    if (modules?.isDirectory() && modules.uid === uid &&
+        worktrees.some(repo => path.resolve(repo.worktree) === original && path.basename(repo.worktree) === path.basename(target))) {
+      return 'node_modules under a recorded task worktree';
+    }
     const git = file('.git');
     if (git) {
       const gitdir = /^gitdir: (.+)$/m.exec(fs.readFileSync(git, 'utf8'))?.[1];

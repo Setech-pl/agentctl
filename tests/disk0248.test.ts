@@ -12,7 +12,7 @@ import { loadGlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { collectDisk, diskStartHold } from '../src/core/disk.ts';
 import { applyGc, planGc } from '../src/core/gc.ts';
-import { readJournal } from '../src/core/journal.ts';
+import { readJournal, recordJournal } from '../src/core/journal.ts';
 import { readTaskRecord, taskDir } from '../src/core/taskstore.ts';
 import { newTasks } from '../src/core/new.ts';
 import { applyAcceptedWrites, describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, retryEntry, unblockEntry } from '../src/core/queue.ts';
@@ -643,12 +643,25 @@ it('HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy 
   const marked = path.join(w.trash, 'marked');
   const marker = path.join(marked, 'TASK.md');
   fs.copyFileSync(path.join(taskDir(w.config, 'marked'), 'TASK.md'), marker);
+  const legacyTree = path.join(w.trash, 'marked-worktree');
+  fs.mkdirSync(path.join(legacyTree, 'node_modules'), { recursive: true });
+  seedTask(w.config, 'MARKED-TREE', { closed: true, repos: [{ path: w.repo, worktree: path.join(w.root, 'marked-worktree') }] });
+  const otherTree = path.join(w.root, 'existing-worktree');
+  fs.mkdirSync(otherTree);
+  seedTask(w.config, 'EXISTING-TREE', { closed: true, repos: [{ path: w.repo, worktree: otherTree }] });
+  const personalModules = path.join(w.trash, 'node_modules');
+  fs.mkdirSync(personalModules);
+  await recordJournal(w.ctx, {
+    kind: 'close-cleanup', task: 'EXISTING-TREE', text: 'moved to Trash',
+    cleanup: { moved: [{ path: path.join(otherTree, 'node_modules'), bytes: 1 }], bytes: 1 },
+  });
   const plan = await planGc(w.ctx, { purgeTrash: true });
-  assert.deepEqual(plan.items.map(item => item.target), [marked]);
+  assert.deepEqual(plan.items.map(item => item.target), [marked, legacyTree]);
   const preview = await runCli(w.config, w.runner, ['gc', '--purge-trash']);
-  assert.match(preview.stdout, /Legacy Trash with ownership markers: 1/);
+  assert.match(preview.stdout, /Legacy Trash with ownership markers: 2/);
   fs.unlinkSync(marker);
-  assert.equal((await applyGc(w.ctx, plan)).done.length, 0);
+  assert.deepEqual((await applyGc(w.ctx, plan)).done.map(item => item.target), [legacyTree]);
+  assert.ok(fs.existsSync(personalModules));
   assert.ok(fs.existsSync(path.join(w.trash, 'personal')));
   assert.ok(fs.existsSync(marked));
 });
