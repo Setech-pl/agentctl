@@ -67,9 +67,12 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
       assert.ok(!confirmed.error, confirmed.text);
       assert.match(confirmed.text, /^Registered: SLOW-1/);
       assert.ok(confirmMs < 5000, `confirm took ${confirmMs} ms`);
-      const journal = fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8');
-      assert.match(journal, /"kind":"mcp-write","text":"new: new SLOW-1"/);
       assert.equal(fs.existsSync(path.join(h.agentctlHome, 'queue')), true);
+      const journal = path.join(h.agentctlHome, 'journal.jsonl');
+      const auditRecorded = () => {
+        try { return /"kind":"mcp-write","text":"new: new SLOW-1"/.test(fs.readFileSync(journal, 'utf8')); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+      };
 
       // reads, from the same server and from another chat's, while the watcher is in the setup
       let sawSetup = false;
@@ -83,7 +86,7 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
           slowest.push(r.ms);
           if (tool === 'queue_list' && /setup w toku \(repo \d\/2/.test(r.text)) sawSetup = true;
         }
-        if (sawSetup && !again) {
+        if (sawSetup && !again && auditRecorded()) {
           // a repeated confirm during the setup, and the death of the first server in the middle of it
           again = (await call(b.client, 'new', { spec, confirm: true })).text;
           assert.match(again, /SLOW-1: already being started/);
@@ -94,6 +97,7 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
         await sleep(300);
       }
       assert.ok(sawSetup, 'queue_list said where the setup was');
+      assert.ok(auditRecorded(), 'the asynchronous order audit reached the journal');
       assert.match(again, /SLOW-1: already being started/);
       assert.ok(Math.max(...slowest) < 2000, `reads took up to ${Math.max(...slowest)} ms`);
 
