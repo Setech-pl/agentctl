@@ -12,11 +12,15 @@ import { profileWatch } from './watch-profile.ts';
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const load = () => os.loadavg()[0] ?? 0;
 
-export function pressureWorkerArgs(platform = process.platform): string[] {
+export function pressureWorkerArgs(platform = process.platform, extraNice = 19): string[] {
   // Competing application processes are outside the gate's Darwin background scheduling group.
   // Clear that inherited policy for the CPU-only load workers while retaining their low nice priority.
   const policy = platform === 'darwin' ? 'taskpolicy -B -p "$$" || exit\n' : '';
-  return ['-n', '19', '/bin/sh', '-c', `${policy}while :; do :; done`];
+  return ['-n', String(extraNice), '/bin/sh', '-c', `${policy}while :; do :; done`];
+}
+
+export function additionalPressureWorkers(cores: number, workers: number, load1: number): number {
+  return load1 < 2 * cores + 4 ? Math.max(0, Math.min(cores, 6 * cores - workers)) : 0;
 }
 
 function installStopHandlers() {
@@ -86,18 +90,34 @@ async function main() {
   const workers: { process: ChildProcess; closed: Promise<unknown> }[] = [];
   let closing = false;
   let workerError: Error | undefined;
-  try {
-    for (let i = 0; i < 2 * cores + 8; i++) {
-      const child = spawn('nice', pressureWorkerArgs(), {stdio: 'ignore'});
+  let addedAt = 0;
+  const addWorkers = (count: number, extraNice: number) => {
+    for (let i = 0; i < count; i++) {
+      const child = spawn('nice', pressureWorkerArgs(process.platform, extraNice), {stdio: 'ignore'});
       const closed = once(child, 'close').catch(error => { workerError = error; stop.abort(); });
       workers.push({process: child, closed});
       child.once('exit', () => { if (!closing && !stop.signal.aborted) { workerError = Error('CPU pressure loop exited early'); stop.abort(); } });
     }
+  };
+  const keepPressure = () => {
+    if (stop.signal.aborted || Date.now() - addedAt < 30_000) return;
+    const additional = additionalPressureWorkers(cores, workers.length, load());
+    if (!additional) return;
+    addedAt = Date.now();
+    addWorkers(additional, 0);
+    console.log(`prodshape pressure increased to ${workers.length} CPU workers at load1 ${load().toFixed(2)}`);
+  };
+  let pressureTimer: NodeJS.Timeout | undefined;
+  try {
+    addWorkers(2 * cores + 8, 19);
     const warm = Date.now();
-    while (load() < target && !stop.signal.aborted) {
+    addedAt = warm;
+    while (load() < target + 4 && !stop.signal.aborted) {
       assert.ok(Date.now() - warm < 180_000, `CPU contention did not reach load1 ${target}, observed ${load()}`);
+      keepPressure();
       await sleep(1000);
     }
+    pressureTimer = setInterval(keepPressure, 5000);
     console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
     await applicationFixture(work, evidence, stop.signal);
     if (workerError) throw workerError;
@@ -108,6 +128,7 @@ async function main() {
     if (saved.status !== 'FAIL' || workerError) fs.writeFileSync(evidence, JSON.stringify({cores, target, ...saved, status: 'FAIL', error: String(failure)}, null, 2) + '\n');
     throw failure;
   } finally {
+    clearInterval(pressureTimer);
     close();
     closing = true;
     for (const worker of workers) worker.process.kill('SIGTERM');

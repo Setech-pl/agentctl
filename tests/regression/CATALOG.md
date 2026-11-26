@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-CONTENTION | The production-shape fixture could not generate its required measured load on a quiet machine. | `tests/gate.test.ts` (`^REL0272-CONTENTION:`) | 0.27.2 | fails on 3484fbebdf0c7beaceec2a1b855cef0417044277 (1 failing of 1) |
 | REL0272-RESUME-LOCK | A second resume over the same active task could wait for the first instead of seeing its admission reservation. | `tests/audit-0174.test.ts` (`^W4 a stale resume plan`) | 0.27.2 | fails on 64fdb988f5ece0aa7a97abd348151ad9039dac2a (1 failing of 1) |
 | REL0272-JOURNAL-APPEND | Every journal append synchronously rewrote the entire file and a torn last line swallowed the next event. | `tests/review0256.test.ts` (`^REL0272-JOURNAL-APPEND:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |
 | REL0272-HOLD-WRITES | A load hold could block the entire watch tick by rewriting the journal and queue entry for each held order. | `tests/review0256.test.ts` (`^REL0272-HOLD-WRITES:`) | 0.27.2 | fails on 795247ab32fc91b345ada1f9ce1ede77cdfcfb72 (1 failing of 1) |

@@ -28,12 +28,20 @@ it('REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results
   assert.deepEqual(ran, ['smoke-node22', 'smoke-node26', 'doctor-node26', 'regression', 'prodshape']);
   assert.deepEqual(failures, ['smoke-node22 (1)', 'prodshape (1)']);
 });
-it('REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group', async () => {
+it('REL0272-PRESSURE-POLICY: load workers keep their configured nice level outside the Darwin background group', async () => {
   const { pressureWorkerArgs } = await import('../scripts/prodshape.ts');
   assert.deepEqual(heavyCommand('node', ['scripts/prodshape.ts'], 'darwin'),
     ['nice', ['-n', '10', 'taskpolicy', '-b', 'node', 'scripts/prodshape.ts']]);
   assert.deepEqual(pressureWorkerArgs('darwin'), ['-n', '19', '/bin/sh', '-c', 'taskpolicy -B -p "$$" || exit\nwhile :; do :; done']);
   assert.deepEqual(pressureWorkerArgs('linux'), ['-n', '19', '/bin/sh', '-c', 'while :; do :; done']);
+});
+it('REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target', async () => {
+  const { additionalPressureWorkers, pressureWorkerArgs } = await import('../scripts/prodshape.ts');
+  assert.equal(additionalPressureWorkers(18, 44, 15), 18);
+  assert.equal(additionalPressureWorkers(18, 100, 39), 8);
+  assert.equal(additionalPressureWorkers(18, 108, 39), 0);
+  assert.equal(additionalPressureWorkers(18, 44, 40), 0);
+  assert.equal(pressureWorkerArgs('darwin', 0)[1], '0');
 });
 it('plans tiers in order, keeping both runtimes sequential and live last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);

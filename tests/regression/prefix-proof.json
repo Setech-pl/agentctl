@@ -1510,6 +1510,16 @@
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
     ]
   },
+  "REL0272-CONTENTION": {
+    "rev": "3484fbebdf0c7beaceec2a1b855cef0417044277",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target",
+      "REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target"
+    ]
+  },
   "REL0272-DELIVERY-SCAN": {
     "rev": "e3a6373f67cc15323ad95af1e91bacb8c0d83760",
     "outcome": "FAILS",
