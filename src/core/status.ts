@@ -226,18 +226,14 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     if (record.host && !archived && !record.closed && !record.cancelled && !opts.cachedOnly && !opts.remoteCachedOnly) await syncRemoteFiles(ctx, record);
     let unreachable = !!record.host && !record.closed && !record.cancelled && !archived && ctx.hosts.connection(record.host).unreachable;
     let alive = live.has(record.window) || unreachable;
-    let verifiedOnly = false;
     if (!alive && opts.verifyWatchLoss && !record.host && !archived && !record.closed && !record.cancelled && record.started) {
-      verifiedWindows ??= ctx.localTmux.windows();
+      verifiedWindows ??= ctx.localTmux.livePanes();
       const found = ctx.localTmux.resolve(record.window, await verifiedWindows, record.windowId);
       if (found && found.exitCode === undefined) {
         infos.push(found);
         windowByName.set(record.window, found);
         live.add(record.window);
         alive = true;
-      } else if (record.windowId && await ctx.localTmux.paneExists(record.window, record.windowId)) {
-        alive = verifiedOnly = true;
-        live.add(record.window);
       }
     }
     // Re-queued records retain attempt history, but no window has been launched yet. The queue owns their display.
@@ -279,7 +275,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
     let screenRead = !alive;
     if (alive && !unreachable) {
       let screen;
-      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await tmux.capture(record.window, undefined, verifiedOnly ? undefined : infos, record.windowId); }
+      try { screen = record.host && (opts.cachedOnly || opts.remoteCachedOnly) ? ctx.hosts.cachedCapture(record.host, record.window) : await tmux.capture(record.window, undefined, infos, record.windowId); }
       catch (error) { if (!(error instanceof HostUnreachable)) throw error; unreachable = true; screen = { code: 255, stdout: '', stderr: error.message }; }
       if (screen.code === 0) { screenText = screen.stdout; screenRead = true; }
     }

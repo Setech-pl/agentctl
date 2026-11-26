@@ -1530,6 +1530,16 @@
       "D1: cached MCP preview checks every repo including untracked files in the second"
     ]
   },
+  "REL0272-LEGACY-JOURNAL": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-LEGACY-JOURNAL: legacy launch events share a single append",
+      "REL0272-LEGACY-JOURNAL: legacy launch events share a single append"
+    ]
+  },
   "REL0272-P19-RETRY": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",
@@ -1559,6 +1569,16 @@
     "failing": [
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results",
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
+    ]
+  },
+  "REL0272-TICK-PANES": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-PANES: many missing windows share one second tmux observation",
+      "REL0272-TICK-PANES: many missing windows share one second tmux observation"
     ]
   },
   "REL0272-TICK-ROWS": {

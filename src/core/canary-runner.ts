@@ -89,7 +89,8 @@ export class CanaryRunner extends RealRunner {
     switch (sub) {
       case '-V': return ok('tmux 3.5');
       case 'has-session': return this.panes.size ? ok() : absent('no server running');
-      case 'list-windows': return ok([...this.panes.values()].map(format).join('\n'));
+      case 'list-windows':
+      case 'list-panes': return ok([...this.panes.values()].map(format).join('\n'));
       case 'display-message': return pane ? ok(format(pane)) : absent('can\'t find pane');
       case 'new-session':
       case 'new-window': {

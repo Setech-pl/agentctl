@@ -2,7 +2,7 @@ import { withCommandStage } from './command-stage.ts';
 import type { Context } from './context.ts';
 import type { SelfArgv } from './events.ts';
 import { tryFileLock } from './file-lock.ts';
-import { indexedJournalChange, journalChangeIds, recordJournalOnce } from './journal.ts';
+import { indexedJournalChange, journalChangeIds, recordJournalOnce, recordLegacyLaunches } from './journal.ts';
 import type { Notifier } from './notify.ts';
 import { readQueue } from './queue.ts';
 import { inspectReport } from './report-state.ts';
@@ -44,10 +44,10 @@ export async function checkLaunchHealth(ctx: Context, memory: LaunchHealthMemory
   const byName = new Map(windows.map(window => [window.plain, window]));
   const windowHosts = new Set(windows.map(window => window.host ?? ''));
   let ids: Awaited<ReturnType<typeof journalChangeIds>> | undefined;
-  let marked = 0;
+  const legacy: Parameters<typeof recordLegacyLaunches>[1] = [];
   let checkedLegacy: Set<string> | undefined;
   for (const record of records) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) break;
     const pane = byName.get(record.window);
     if ((pane && pane.exitCode === undefined) || starting.has(record.task) || (record.host && ctx.hosts.connection(record.host).unreachable)) continue;
     const id = `${record.task}:${launchIdentity(record)}`;
@@ -55,14 +55,13 @@ export async function checkLaunchHealth(ctx: Context, memory: LaunchHealthMemory
     if (!pane && indexedJournalChange(ids, 'launch-failed', `launch-failed:${id}`)) continue;
     if (legacyLaunch(record) && !pane) {
       const changeId = `launch-legacy:${id}`;
-      if (marked >= 20 || indexedJournalChange(ids, 'launch-legacy', changeId)) continue;
+      if (legacy.length >= 20 || indexedJournalChange(ids, 'launch-legacy', changeId)) continue;
       const current = await readRecordFileAsync(taskFile(config, record.window));
       if (!current || launchIdentity(current) !== launchIdentity(record) || expectedStartClosure(config, current)) continue;
       // A separate observation prevents replay after a transient tmux inventory failure.
       checkedLegacy ??= new Set((await withCommandStage(3000, signal, () => ctx.tmux.windows())).map(window => window.plain));
       if (signal?.aborted || checkedLegacy.has(record.window)) continue;
-      marked++;
-      await recordJournalOnce(ctx, {kind: 'launch-legacy', task: record.task, changeId,
+      legacy.push({task: record.task, changeId,
         text: `${record.task}: przerwany start ze starszej wersji. Wznów ręcznie poleceniem agentctl resume ${record.task}.`});
       continue;
     }
@@ -116,4 +115,5 @@ export async function checkLaunchHealth(ctx: Context, memory: LaunchHealthMemory
       }, error => ctx.info(errorMessage(error)));
     } finally { if (!transferred) release(); }
   }
+  if (!signal?.aborted) await recordLegacyLaunches(ctx, legacy);
 }

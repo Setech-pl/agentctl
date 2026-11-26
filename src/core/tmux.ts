@@ -78,6 +78,21 @@ export class Tmux {
     return r.code === 0 && session === this.session && (!id || windowId === id) && !!name && stripIcon(name, this.icons) === window && /^%\d+$/.test(paneId ?? '') && dead === '0';
   }
 
+  /** A second session-scoped observation rechecks window and pane identities in one IPC round trip. */
+  async livePanes(): Promise<WindowInfo[]> {
+    const format = '#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_dead}\t#{@agentctl-role}';
+    const r = await this.runner.exec('tmux', ['list-panes', '-s', '-t', `=${this.session}`, '-F', format], {readOnly: true, timeoutMs: 1500});
+    if (r.code !== 0 && !/no server running|failed to connect to server|can't find session|no sessions/i.test(r.stderr)) {
+      throw Error(`Cannot verify tmux pane inventory: ${r.stderr.trim() || `exit ${r.code}`}`);
+    }
+    return r.stdout.split('\n').flatMap(line => {
+      const [session, id, name, pane, dead, role] = line.split('\t');
+      if (session !== this.session || !id || !name || !/^%\d+$/.test(pane ?? '') || dead !== '0') return [];
+      const plain = role && this.taskRoles && role !== 'task' && /^[a-z0-9][a-z0-9_-]*$/.test(role) ? role : stripIcon(name, this.icons);
+      return [{id, name, plain, ...(role ? {role} : {})}];
+    });
+  }
+
   /** The windows of the agentctl session (empty when the session does not exist). */
   async windows(): Promise<WindowInfo[]> {
     const r = await this.runner.exec('tmux', ['list-windows', '-t', `=${this.session}`, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}\t#{pane_dead}\t#{pane_dead_status}'], {

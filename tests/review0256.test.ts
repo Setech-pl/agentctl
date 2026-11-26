@@ -129,6 +129,29 @@ test('REVIEW0256-LEGACY: dead legacy launching tasks are journaled once and wait
   } finally { memory.launchHealth?.close(); }
 });
 
+test('REL0272-LEGACY-JOURNAL: legacy launch events share a single append', async t => {
+  const w = world('legacy-batch');
+  w.tmux.add('unrelated', '❯ ');
+  for (let index = 0; index < 3; index++) seedTask(w.config, `BATCH-${index}`, {windowId: `@${989 + index}`, promptDelivery: 'launching'});
+  const write = t.mock.method(w.runner, 'appendFile');
+  const memory = new WatchMemory();
+  t.after(() => memory.launchHealth.close());
+  for (let tick = 0; tick < 2; tick++) await watchTick(w.ctx, memory, notifier);
+  const legacyWrites = write.mock.calls.filter(call => String(call.arguments[0]).endsWith('/journal.jsonl') && String(call.arguments[1]).includes('launch-legacy'));
+  assert.equal(legacyWrites.length, 1);
+  assert.equal(readJournal(w.config).filter(event => event.kind === 'launch-legacy').length, 3);
+});
+
+test('REL0272-TICK-PANES: many missing windows share one second tmux observation', async () => {
+  const w = world('tick-panes');
+  w.tmux.add('unrelated', '❯ ');
+  for (let index = 0; index < 12; index++) seedTask(w.config, `PANE-${index}`, {windowId: `@${989 + index}`});
+  const rows = await collectStatus(w.ctx, {progress: false, verifyWatchLoss: true});
+  assert.equal(rows.filter(row => row.task.startsWith('PANE-') && row.window === 'gone').length, 12);
+  assert.equal(w.tmux.seen.filter(command => command.startsWith('list-panes')).length, 1);
+  assert.ok(!w.tmux.seen.some(command => command.startsWith('display-message @9')));
+});
+
 test('REVIEW0256-DOWNGRADE: check lists incompatible keys and prunes only expired overrides', async () => {
   const w = world('downgrade', 'launch: {grace_s: 5}\nlimits: {timed_overrides: {claude: {value: 2, until: 2020-01-01T00:00:00Z}, codex: {value: 2, until: 2099-01-01T00:00:00Z}}}\nquotas: {floor: 1}\n');
   fs.writeFileSync(path.join(path.dirname(w.config.path), 'reservations.json'), JSON.stringify({claude: {count: 1, until: '2099-01-01'}}));

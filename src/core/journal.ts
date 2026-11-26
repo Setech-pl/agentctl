@@ -73,7 +73,7 @@ export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'
   }
   return appendJournal(ctx, entry);
 }
-async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
+async function prepareJournalEntry(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<JournalEntry> {
   const record = entry.task ? readTaskRecord(ctx.config, windowName(entry.task)) : undefined;
   const cohort = entry.cohort ?? record?.cohort;
   const owner = entry.owner ?? record?.owner ?? (entry.task && ctx.config.quotas ? 'default' : undefined);
@@ -84,6 +84,11 @@ async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Pro
   // The phone gets what was announced on the Mac (this is written once per announcement), and the entry says whether it went.
   const phone = await notifyPhone(ctx, full).catch(() => undefined);
   if (phone) full.phone = phone;
+  return full;
+}
+
+async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
+  const full = await prepareJournalEntry(ctx, entry);
   try {
     await ctx.runner.appendFile(journalPath(ctx.config), `${JSON.stringify(full)}\n`);
   } catch {
@@ -162,6 +167,23 @@ export function journalChangeIds(config: Pick<GlobalConfig, 'path'>): Promise<Se
 }
 
 export const indexedJournalChange = (ids: ReadonlySet<string>, kind: JournalKind, id: string): boolean => ids.has(changeKey(kind, id));
+
+/** One durable append and one deduplication pass for a batch of independent legacy launch events. */
+export async function recordLegacyLaunches(ctx: Context, entries: (Omit<JournalEntry, 'at' | 'kind' | 'changeId'> & {changeId: string})[]): Promise<void> {
+  if (!entries.length) return;
+  const file = journalPath(ctx.config);
+  await withFileLock(`${file}.launch-legacy.lock`, async () => {
+    const ids = await journalChangeIds(ctx.config);
+    const added = new Set<string>();
+    const lines: string[] = [];
+    for (const entry of entries) {
+      if (added.has(entry.changeId) || indexedJournalChange(ids, 'launch-legacy', entry.changeId)) continue;
+      added.add(entry.changeId);
+      lines.push(JSON.stringify(await prepareJournalEntry(ctx, {...entry, kind: 'launch-legacy'})));
+    }
+    if (lines.length) await ctx.runner.appendFile(file, `${lines.join('\n')}\n`).catch(() => undefined);
+  });
+}
 
 /** Record unless the last entry of this kind said the same within `withinMs` (two writers of one fact: a command and the watcher that noticed it). */
 export async function recordJournalOnce(ctx: Context, entry: Omit<JournalEntry, 'at'>, withinMs = 5 * 60_000): Promise<void> {

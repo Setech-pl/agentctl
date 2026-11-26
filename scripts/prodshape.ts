@@ -32,8 +32,7 @@ async function main() {
   let closing = false;
   let workerError: Error | undefined;
   let current: CanaryMetrics | undefined;
-  let attempt = 1;
-  const save = (details: object) => fs.writeFileSync(evidence, JSON.stringify({cores, target, attempt, ...details, ...(current ? {metrics: current} : {})}, null, 2) + '\n');
+  const save = (details: object) => fs.writeFileSync(evidence, JSON.stringify({cores, target, ...details, ...(current ? {metrics: current} : {})}, null, 2) + '\n');
   process.on('SIGINT', abort);
   process.on('SIGTERM', abort);
   try {
@@ -49,26 +48,16 @@ async function main() {
       await sleep(1000);
     }
     console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
-    const run = async () => {
-      const profile = profileWatch(console.log);
-      try { return await runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
-      scale: true, minTicks: 20, signal: stop.signal, load, observeStep: profile.observe,
-      sample: metrics => {
-        current = {...metrics};
-        if (metrics.ticks % 5 === 0) console.log(`prodshape ticks=${metrics.ticks}, starts=${metrics.started}, max MCP=${metrics.maxMcpMs.toFixed(0)}ms`);
-        save({status: 'RUNNING'});
-      },
-      }), 2, 5); }
-      finally { profile.restore(); }
-    };
-    try { current = await run(); }
-    catch (error) {
-      if (!String(error).includes('MCP_LATENCY') || load() <= 3 * cores || stop.signal.aborted) throw error;
-      console.log(`prodshape retry after MCP latency above 3 × cores: ${String(error)}`);
-      save({status: 'RETRY', reason: String(error)});
-      attempt++;
-      current = await run();
-    }
+    const profile = profileWatch(console.log);
+    try {
+      current = await runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
+        scale: true, minTicks: 20, signal: stop.signal, load, observeStep: profile.observe,
+        sample: metrics => {
+          current = {...metrics};
+          save({status: 'RUNNING'});
+        },
+      }), 2, 5);
+    } finally { profile.restore(); }
     if (workerError) throw workerError;
     assert.ok(current.ticks >= 20 && current.tasks >= 1500 && current.worktreeDirs >= 2000 && current.queued === 40 && current.wall >= 150);
     assert.ok(current.minLoad1 >= target, `CPU contention fell below ${target} during the watch`);
