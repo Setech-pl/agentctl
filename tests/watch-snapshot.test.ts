@@ -84,6 +84,30 @@ it('REL0272-COLD-SNAPSHOT: an initial scan failure does not publish a rowless re
   assert.equal(fs.existsSync(snapshotFile(ctx)), false);
 });
 
+it('REL0272-INVENTORY-EIO: a directory read error preserves the last complete snapshot', async t => {
+  const config = makeConfig(scratch.sub('inventory-eio'));
+  seedTask(config, 'KEEP-GOOD-ROW', {closed: true});
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  const memory = new WatchMemory();
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  const tick = () => watchTick(ctx, memory, {notify: async () => {}});
+  await tick();
+  const good = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  assert.equal(good.rows[0]?.task, 'KEEP-GOOD-ROW');
+  await runner.sleep(61_000);
+  const readdir = fs.promises.readdir;
+  t.mock.method(fs.promises, 'readdir', async (file: fs.PathLike, options: Parameters<typeof readdir>[1]) => {
+    if (file === config.stateDir) throw Object.assign(Error('state directory I/O failure'), {code: 'EIO'});
+    return Reflect.apply(readdir, fs.promises, [file, options]);
+  });
+  await tick();
+  const degraded = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  assert.equal(degraded.degraded, 'status collection');
+  assert.equal(degraded.at, good.at);
+  assert.deepEqual(degraded.rows, good.rows);
+});
+
 it('REL0272-MAINTENANCE: a delayed usage observation does not delay publishing status', async t => {
   const config = makeConfig(scratch.sub('slow-usage'));
   seedTask(config, 'READY-TO-OBSERVE', {closed: true});

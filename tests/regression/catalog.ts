@@ -28,6 +28,8 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-INVENTORY-EIO', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'A transient inventory directory read failure was published as a new successful snapshot without task rows.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-INVENTORY-EIO:')] },
+  { id: 'REL0272-PRESSURE-TEARDOWN', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'The injector kept burning CPU while the completed canary was deleting thousands of disposable directories.', scenarios: [s('canary-mirror.test.ts', '^REL0272-PRESSURE-TEARDOWN:')] },
   { id: 'REL0272-HEADER-PIPELINE', fixedIn: '0.27.2', proofAgainst: 'ce3f8972f18b810361bc43d7c99ce71999157970', symptom: 'One slow task header held up every later batch in a cold or incremental inventory.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-HEADER-PIPELINE:')] },
   { id: 'REL0272-INDEX-ROOT-WRITES', fixedIn: '0.27.2', proofAgainst: 'ce3f8972f18b810361bc43d7c99ce71999157970', symptom: 'A durable snapshot or progress write in the state directory caused another metadata check of every active task.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-INDEX-ROOT-WRITES:')] },
   { id: 'REL0272-QUEUE-IO', fixedIn: '0.27.2', proofAgainst: 'ce3f8972f18b810361bc43d7c99ce71999157970', symptom: 'Multiple watch stages synchronously reopened the same unchanged queued specs on the first tick.', scenarios: [s('queue.test.ts', '^REL0272-QUEUE-IO:')] },

@@ -12,6 +12,20 @@ import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 
+test('REL0272-PRESSURE-TEARDOWN: pressure is released before cleaning an unsuccessful canary', async () => {
+  let fixture: string | undefined;
+  let stopped = false;
+  await assert.rejects(runIsolatedCanary(scratch.sub('release-pressure'), () => {}, async world => {
+    fixture = world.runner.root;
+    throw Error('tick deadline');
+  }, 0, 1, async () => {
+    assert.ok(fixture && fs.existsSync(fixture));
+    stopped = true;
+  }), /tick deadline/);
+  assert.ok(stopped, 'the cleanup hook was never called');
+  assert.equal(fs.existsSync(fixture!), false);
+});
+
 test('shadow mirror preserves inventory and scheduling inputs while replacing contents and paths used by the runner', async () => {
   const root = scratch.sub('source');
   const source = makeConfig(root, 'env: {API_TOKEN: test_secret_value_only_in_source}\n');

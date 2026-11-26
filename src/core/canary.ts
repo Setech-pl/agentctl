@@ -460,7 +460,7 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
   return metrics;
 }
 
-export async function runIsolatedCanary<T>(root: string, out: (line: string) => void, action: (world: CanaryWorld) => Promise<T>, slowMs = 0, interval = 1): Promise<T> {
+export async function runIsolatedCanary<T>(root: string, out: (line: string) => void, action: (world: CanaryWorld) => Promise<T>, slowMs = 0, interval = 1, beforeCleanup?: () => Promise<void>): Promise<T> {
   const sandbox = fs.mkdtempSync(path.join(root, 'canary-'));
   const previousKimi = process.env.KIMI_CODE_HOME;
   process.env.KIMI_CODE_HOME = path.join(sandbox, 'kimi');
@@ -472,6 +472,7 @@ export async function runIsolatedCanary<T>(root: string, out: (line: string) => 
   } finally {
     if (previousKimi === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = previousKimi;
-    fs.rmSync(sandbox, {recursive: true, force: true});
+    try { await beforeCleanup?.(); }
+    finally { fs.rmSync(sandbox, {recursive: true, force: true}); }
   }
 }

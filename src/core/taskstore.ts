@@ -474,6 +474,14 @@ export function invalidateTaskRecord(file: string): void {
 const SCAN_CHUNK = 25;
 const ASYNC_SCAN_CONCURRENCY = 96;
 
+async function readTaskDirectory(dir: string): Promise<string[]> {
+  try { return await fs.promises.readdir(dir); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
 async function scanNames<T>(names: readonly string[], scan: (name: string) => Promise<T>): Promise<T[]> {
   const results = new Array<T>(names.length);
   let next = 0;
@@ -490,11 +498,11 @@ async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[
     files = new Map();
     recordScanCache.set(dir, files);
   }
-  let names: string[] = [];
-  try {
-    names = (asyncIO ? await fs.promises.readdir(dir) : fs.readdirSync(dir)).sort();
-  } catch {
-    names = [];
+  let names: string[];
+  if (asyncIO) names = (await readTaskDirectory(dir)).sort();
+  else {
+    try { names = fs.readdirSync(dir).sort(); }
+    catch { names = []; }
   }
   const prefix = `${dir}${path.sep}`;
   const seen = new Set<string>();
@@ -584,14 +592,14 @@ export class TaskRecordIndex {
     if (this.generation !== generation) return [];
     const version = stat && fileVersion(stat);
     if (now >= this.reconcileAt) {
-      this.reconcileAt = now + 60_000;
       const all = await scanRecordsIn(root, true);
       if (this.generation !== generation) return [];
+      this.reconcileAt = now + 60_000;
       this.records.clear();
       for (const record of all) this.records.set(record.window, record);
     } else if (version !== this.rootVersion) {
       // A new or moved state directory is visible even before the recursive watcher delivers its callback.
-      const names = new Set(await fs.promises.readdir(root).catch(() => []));
+      const names = new Set(await readTaskDirectory(root));
       if (this.generation !== generation) return [];
       for (const window of this.records.keys()) if (!names.has(window)) this.records.delete(window);
       for (const window of names) if (!this.records.has(window)) this.changed.add(window);

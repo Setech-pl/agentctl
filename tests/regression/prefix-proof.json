@@ -1724,6 +1724,16 @@
       "REL0272-INDEX-ROOT-WRITES: snapshot and progress writes do not recheck unchanged active tasks"
     ]
   },
+  "REL0272-INVENTORY-EIO": {
+    "rev": "41389e16720925de95d380fa026cc2f6b6633812",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-INVENTORY-EIO: a directory read error preserves the last complete snapshot",
+      "REL0272-INVENTORY-EIO: a directory read error preserves the last complete snapshot"
+    ]
+  },
   "REL0272-JOURNAL-APPEND": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",
@@ -1803,6 +1813,16 @@
     "failing": [
       "REL0272-PRESSURE-START: initial synthetic load accounts for existing host pressure",
       "REL0272-PRESSURE-START: initial synthetic load accounts for existing host pressure"
+    ]
+  },
+  "REL0272-PRESSURE-TEARDOWN": {
+    "rev": "41389e16720925de95d380fa026cc2f6b6633812",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-TEARDOWN: pressure is released before cleaning an unsuccessful canary",
+      "REL0272-PRESSURE-TEARDOWN: pressure is released before cleaning an unsuccessful canary"
     ]
   },
   "REL0272-PRODSHAPE-ORDER": {

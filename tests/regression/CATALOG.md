@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-INVENTORY-EIO | A transient inventory directory read failure was published as a new successful snapshot without task rows. | `tests/watch-snapshot.test.ts` (`^REL0272-INVENTORY-EIO:`) | 0.27.2 | fails on 41389e16720925de95d380fa026cc2f6b6633812 (1 failing of 1) |
+| REL0272-PRESSURE-TEARDOWN | The injector kept burning CPU while the completed canary was deleting thousands of disposable directories. | `tests/canary-mirror.test.ts` (`^REL0272-PRESSURE-TEARDOWN:`) | 0.27.2 | fails on 41389e16720925de95d380fa026cc2f6b6633812 (1 failing of 1) |
 | REL0272-HEADER-PIPELINE | One slow task header held up every later batch in a cold or incremental inventory. | `tests/watch-snapshot.test.ts` (`^REL0272-HEADER-PIPELINE:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
 | REL0272-INDEX-ROOT-WRITES | A durable snapshot or progress write in the state directory caused another metadata check of every active task. | `tests/watch-snapshot.test.ts` (`^REL0272-INDEX-ROOT-WRITES:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |
 | REL0272-QUEUE-IO | Multiple watch stages synchronously reopened the same unchanged queued specs on the first tick. | `tests/queue.test.ts` (`^REL0272-QUEUE-IO:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |

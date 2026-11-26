@@ -38,7 +38,7 @@ function installStopHandlers() {
   return {stop, close() { process.off('SIGINT', abort); process.off('SIGTERM', abort); }};
 }
 
-async function runFixture(work: string, evidence: string, signal: AbortSignal, beforeWatch: () => Promise<void>): Promise<void> {
+async function runFixture(work: string, evidence: string, signal: AbortSignal, beforeWatch: () => Promise<void>, afterWatch: () => Promise<void>): Promise<void> {
   const cores = os.cpus().length, target = 2 * cores;
   let current: CanaryMetrics | undefined;
   const save = (details: object) => fs.writeFileSync(evidence, JSON.stringify({cores, target,
@@ -49,7 +49,7 @@ async function runFixture(work: string, evidence: string, signal: AbortSignal, b
     current = await runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
       scale: true, minTicks: 20, signal, load, observeStep: profile.observe, beforeWatch,
       sample: metrics => { current = {...metrics}; save({status: 'RUNNING'}); },
-    }), 2, 5);
+    }), 2, 5, afterWatch);
     assert.ok(current.ticks >= 20 && current.tasks >= 1500 && current.worktreeDirs >= 2000 && current.queued === 40 && current.wall >= 150);
     assert.ok(current.minLoad1 >= target, `CPU contention fell below ${target} during the watch`);
     save({status: 'PASS'});
@@ -60,8 +60,8 @@ async function runFixture(work: string, evidence: string, signal: AbortSignal, b
   } finally { profile.restore(); }
 }
 
-async function applicationFixture(work: string, evidence: string, signal: AbortSignal, warmPressure: (signal: AbortSignal) => Promise<void>): Promise<void> {
-  if (process.platform !== 'darwin') return runFixture(work, evidence, signal, () => warmPressure(signal));
+async function applicationFixture(work: string, evidence: string, signal: AbortSignal, warmPressure: (signal: AbortSignal) => Promise<void>, endPressure: () => Promise<void>): Promise<void> {
+  if (process.platform !== 'darwin') return runFixture(work, evidence, signal, () => warmPressure(signal), endPressure);
   // The gate controller stays in Darwin background policy. A tmux watch on the real machine runs as an application.
   // Keep the gate's nice level and the same CPU workers and filesystem delays for the measured service process.
   console.log('prodshape watcher uses application scheduling (inherited nice and observed CPU contention)');
@@ -75,12 +75,19 @@ async function applicationFixture(work: string, evidence: string, signal: AbortS
   const lifetime = new AbortController();
   let warming: Promise<void> | undefined;
   let pressureError: unknown;
-  worker.once('message', message => {
-    warming = (async () => {
+  worker.on('message', message => {
+    const respond = async () => {
+      if (message === 'watch-finished') {
+        await endPressure();
+        if (worker.connected) worker.send('pressure-stopped');
+        return;
+      }
       assert.equal(message, 'fixture-ready');
       await warmPressure(AbortSignal.any([signal, lifetime.signal]));
       if (worker.connected) worker.send('pressure-ready');
-    })().catch(error => { pressureError = error; stop(); });
+    };
+    const responding = respond().catch(error => { pressureError = error; stop(); });
+    if (message === 'fixture-ready') warming = responding;
   });
   signal.addEventListener('abort', stop, {once: true});
   if (signal.aborted) stop();
@@ -103,14 +110,17 @@ async function main() {
   liveCacheRoot(path.dirname(evidence));
   const {stop, close} = installStopHandlers();
   if (process.argv[2] === '--watch-workload') {
+    const exchange = async (message: string, expected: string) => {
+      assert.ok(process.send && process.connected, 'prodshape watch workload requires its controller');
+      const reply = once(process, 'message', {signal: stop.signal});
+      process.send(message);
+      assert.equal((await reply)[0], expected);
+    };
     try {
-      return await runFixture(work, evidence, stop.signal, async () => {
-        assert.ok(process.send && process.connected, 'prodshape watch workload requires its controller');
-        const reply = once(process, 'message', {signal: stop.signal});
-        process.send('fixture-ready');
-        const [message] = await reply;
-        assert.equal(message, 'pressure-ready');
-      });
+      return await runFixture(work, evidence, stop.signal,
+        () => exchange('fixture-ready', 'pressure-ready'), async () => {
+          if (!stop.signal.aborted) await exchange('watch-finished', 'pressure-stopped');
+        });
     } finally {
       close();
       if (process.connected) process.disconnect?.();
@@ -159,8 +169,17 @@ async function main() {
     pressureTimer = setInterval(keepPressure, 5000);
     console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
   };
+  let pressureEnded: Promise<void> | undefined;
+  const endPressure = () => pressureEnded ??= (async () => {
+    clearInterval(pressureTimer);
+    closing = true;
+    for (const worker of workers) worker.process.kill('SIGTERM');
+    const escalate = setTimeout(() => { for (const worker of workers) if (worker.process.exitCode === null) worker.process.kill('SIGKILL'); }, 2000);
+    try { await Promise.allSettled(workers.map(worker => worker.closed)); }
+    finally { clearTimeout(escalate); }
+  })();
   try {
-    await applicationFixture(work, evidence, stop.signal, warmPressure);
+    await applicationFixture(work, evidence, stop.signal, warmPressure, endPressure);
     if (workerError) throw workerError;
   } catch (error) {
     const failure = workerError ?? error;
@@ -169,13 +188,8 @@ async function main() {
     if (saved.status !== 'FAIL' || workerError) fs.writeFileSync(evidence, JSON.stringify({cores, target, ...saved, status: 'FAIL', error: String(failure)}, null, 2) + '\n');
     throw failure;
   } finally {
-    clearInterval(pressureTimer);
     close();
-    closing = true;
-    for (const worker of workers) worker.process.kill('SIGTERM');
-    const escalate = setTimeout(() => { for (const worker of workers) if (worker.process.exitCode === null) worker.process.kill('SIGKILL'); }, 2000);
-    try { await Promise.allSettled(workers.map(worker => worker.closed)); }
-    finally { clearTimeout(escalate); }
+    await endPressure();
   }
 }
 
