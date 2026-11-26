@@ -412,6 +412,7 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 | `gc` | mapping | Integration cleanup settings. |
 | `gc.after_integration` | `off` or `propose` | `propose` | When watch sees local `main` or `master` advance, prepare a confirmation-bound plan of eligible worktrees and route one WALL info message to each affected chat owner. |
 | `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
+| `start_lock_stale_s` | `180` | Seconds before reclaiming a lock without an owner. A lock with an exited PID can be reclaimed immediately. |
 
 `capacity` (including JSON/MCP), MCP `status`, CLI `status`, `doctor`, and the board show disk facts. Unknown readings are `null` / `n/d`. Filesystems holding the global worktree root, known projects' `.agentctl.yaml` roots, recorded worktrees, cache and state are deduplicated by device. `statfs` falls back to `df -kP`. Worktree sizes are cached for five minutes; symlinks are not followed. The watcher checks every five minutes, persists the previous level, and records `disk-warn`, `disk-critical`, `disk-ok` once per transition. These events can be selected in `notify.ntfy.events`.
 

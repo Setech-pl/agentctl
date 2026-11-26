@@ -286,6 +286,7 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `disk.measurement_timeout_s` | `600` | Deadline pomiaru; błąd zachowuje poprzednią wartość. |
 | `git` | mapping | Limity czasu startu. |
 | `git.timeout_s` | `600` | Timeout worktree add i każdego setup. |
+| `start_lock_stale_s` | `180` | Czas w sekundach przed odzyskaniem blokady bez właściciela. Blokadę po zakończonym PID można odzyskać od razu. |
 | `gc` | mapowanie | Ustawienia sprzątania po integracji. |
 | `gc.after_integration` | `propose` | `propose` tworzy plan GC z identyfikatorem żądania po przesunięciu lokalnego `main`/`master` i przekazuje wiadomość WALL każdemu czatowi będącemu właścicielem zadań. `off` wyłącza propozycje. |
 | `mcp.client` | — | Opcjonalny wspólny sufiks kursora; domyślnie sesje niezależne. |

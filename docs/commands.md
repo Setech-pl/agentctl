@@ -1417,6 +1417,12 @@ agentctl config downgrade-check [options]
 |---|---|---|
 | `--to <version>` | 0.26.x, 0.26.0 or 0.26.1 | required |
 
+Examples:
+
+```sh
+agentctl config downgrade-check --to 0.26.x
+```
+
 ## agentctl upgrade-health
 
 Check a newly restarted stable watcher from agentctl-update.
@@ -1468,7 +1474,7 @@ agentctl watch [options]
 | `--tmux` | run it in window "watch" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session |  |
 | `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--no-status-line` | with --tmux: leave the status bar of the session alone |  |
-| `--supervise` |  |  |
+| `--supervise` | run the tmux watch supervisor |  |
 
 Examples:
 

@@ -119,7 +119,7 @@ export function renderCatalog(proof: Proof = readProof()): string {
 
 async function against(rev: string, ids: string[] | undefined, record: boolean): Promise<void> {
   const cache = liveCacheRoot();
-  const entries = BUGS.filter(b => !b.noProof && (ids ? ids.includes(b.id) : PREVIOUS_RELEASE[b.fixedIn] === rev));
+  const entries = BUGS.filter(b => !b.noProof && (ids ? ids.includes(b.id) : (b.proofAgainst ?? PREVIOUS_RELEASE[b.fixedIn]) === rev));
   if (!entries.length) throw new Error(`no catalog entry has ${rev} as its previous release (use --ids)`);
   const scratch = path.join(cache, `gate-work-${process.pid}`) // the name `gate clean` removes;
   fs.mkdirSync(scratch, { recursive: true });

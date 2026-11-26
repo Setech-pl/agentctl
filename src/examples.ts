@@ -84,6 +84,7 @@ export const COMMAND_EXAMPLES: Record<string, string[]> = {
     'agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N',
   ],
   canary: ['agentctl canary --from "$PROD_AGENTCTL_HOME" --minutes 30'],
+  'config downgrade-check': ['agentctl config downgrade-check --to 0.26.x'],
   'upgrade-health': ['agentctl upgrade-health --expect 0.27.2 --since "$watch_start_ms"  # invoked by agentctl-update'],
   watch: ['agentctl watch --tmux                  # in window "watch" of the agentctl session', 'agentctl watch                         # in this terminal'],
   board: ['agentctl board --tmux                  # in window "board" of the agentctl session', 'agentctl board'],
