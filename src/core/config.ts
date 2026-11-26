@@ -292,6 +292,7 @@ export interface CollisionSettings {
 }
 
 export interface McpSettings {
+  gcScope: 'owner' | 'own-cohort' | 'all';
   maxResponseKb: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
@@ -408,7 +409,7 @@ export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'inc
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'selection', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
-export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
+export const MCP_KEYS = ['gc_scope', 'allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
@@ -943,7 +944,7 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
  * of agentctl names tools this one does not know). The offending entry is ignored and said so in `warnings`.
  */
 function parseMcp(v: unknown): McpSettings {
-  const mcp: McpSettings = { maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
+  const mcp: McpSettings = { gcScope: 'all', maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
   if (v === undefined || v === null) return mcp;
   if (!isObject(v)) {
     mcp.warnings.push(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}: ignored, writing is off`);
@@ -951,6 +952,7 @@ function parseMcp(v: unknown): McpSettings {
   }
   const q = new Problems();
   checkKeys(v, MCP_KEYS, 'config.mcp', q);
+  if (v.gc_scope !== undefined) mcp.gcScope = parseEnumValue(v.gc_scope, ['owner', 'own-cohort', 'all'] as const, 'config.mcp.gc_scope', q) ?? 'owner';
   if (v.client !== undefined) { if (typeof v.client === 'string' && v.client.trim()) mcp.client = v.client.trim(); else q.add('config.mcp.client must be nonempty text'); }
   if (v.max_response_kb !== undefined) {
     if (typeof v.max_response_kb === 'number' && Number.isFinite(v.max_response_kb) && v.max_response_kb >= 1 && v.max_response_kb <= 1024) mcp.maxResponseKb = v.max_response_kb;

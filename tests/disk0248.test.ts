@@ -777,16 +777,69 @@ disk:
   await w.runner.sleep(3 * 86400_000);
   const statfs = fs.promises.statfs;
   t.mock.method(fs.promises, 'statfs', async (directory: string) => ({ ...await statfs(directory), bsize: 1024 ** 2, bavail: 20 * 1024 }));
-  const finished = Promise.withResolvers<void>();
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
   const write = w.runner.writeFile.bind(w.runner);
   t.mock.method(w.runner, 'writeFile', async (file: string, content: string) => {
     await write(file, content);
-    if (file.endsWith('/auto-gc-state.json')) finished.resolve();
+    if (file.endsWith('/auto-gc-state.json')) finish();
   });
   assert.match(await freshTaskDiskStartHold(w.ctx, undefined, []) ?? '', /wstrzymane: dysk .*auto_gc/);
-  await finished.promise;
+  await finished;
   assert.ok(fs.existsSync(target));
   const event = readJournal(w.config).find(entry => entry.kind === 'disk-auto-gc');
   assert.match(event?.text ?? '', /plan: 1 pozycji.*old\.bin/s);
   assert.doesNotMatch(event?.text ?? '', /usunięto|odzyskano/);
+});
+
+it('mcp.gc_scope limits cohort writes and rechecks owner policy at deferred apply', async () => {
+  const w = world('mcp-gc-scope', () => `
+mcp: {allow: [gc], gc_scope: own-cohort}
+wall:
+  chats:
+    alpha: {clients: [alpha-client]}
+    beta: {clients: [beta-client]}
+`);
+  const artifact = (task: string, cohort: string, owner: string) => {
+    const dir = path.join(w.config.cache, task.toLowerCase());
+    fs.mkdirSync(dir, { recursive: true });
+    seedTask(w.config, task, { closed: true, cohort, owner, report: path.join(dir, 'report.md') });
+    const file = path.join(dir, 'artifact.bin');
+    fs.writeFileSync(file, 'old');
+    return file;
+  };
+  const alpha = artifact('ALPHA', 'alpha-set', 'chat:alpha');
+  const beta = artifact('BETA', 'beta-set', 'chat:beta');
+  await w.runner.sleep(8 * 86400_000);
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {}, clientId: 'alpha-client' };
+  assert.match((await gc.run(deps, { cohort: 'beta-set' })).text, /requires all/);
+  assert.match((await gc.run(deps, { as: 'chat:beta' })).text, /requires your configured chat identity/);
+  const first = await gc.run(deps, { include_cache: true });
+  assert.match(first.text, /ALPHA/);
+  assert.doesNotMatch(first.text, /Would remove:[^]*BETA.*artifact\.bin/);
+  const token = /preview_token: ([\w-]+)/.exec(first.text)?.[1];
+  assert.ok(token, first.text);
+  const confirmed = await gc.run(deps, { preview_token: token, confirm: true });
+  assert.ok(!confirmed.isError, confirmed.text);
+  assert.ok(!fs.existsSync(alpha));
+  assert.ok(fs.existsSync(beta));
+
+  const config = w.ctx.config;
+  fakeWatcher(config);
+  fs.writeFileSync(path.join(config.stateDir, 'queue-worker.json'), JSON.stringify({ pid: process.pid, at: w.runner.now(), interval: config.watch.interval }));
+  w.ctx.setConfig({ ...config, mcp: { ...config.mcp, gcScope: 'all' } });
+  const accepted = await gc.run(deps, { cohort: 'beta-set', include_cache: true });
+  const id = /request_id: ([\w-]+)/.exec(accepted.text)?.[1];
+  assert.ok(id, accepted.text);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  const second = await gc.run(deps, { request_id: id });
+  const secondToken = /preview_token: ([\w-]+)/.exec(second.text)?.[1];
+  assert.ok(secondToken, second.text);
+  assert.match((await gc.run(deps, { preview_token: secondToken, confirm: true })).text, /^Accepted/);
+  w.ctx.setConfig({ ...config, mcp: { ...config.mcp, gcScope: 'owner' } });
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  assert.match(readMcpRequests(config).find(request => request.token === secondToken)?.error ?? '', /owner reserves GC writes/);
+  assert.ok(fs.existsSync(beta));
+  assert.match((await gc.run(deps, { purge_trash: true })).text, /owner reserves GC writes/);
 });
