@@ -21,7 +21,8 @@ import { isObject } from './util.ts';
  *    A collapsed paste is recorded wrapped in `<pasted_content id="…">` (paste-wrapper.ts).
  *  - Codex 0.166.0 writes the message as `response_item` (role user, `input_text`) and `event_msg` `item_completed` (item `UserMessage`) at the
  *    moment it takes it, also for a message that steers a running turn. Older versions wrote `event_msg` `user_message` (`message`).
- * Only the files of this task's own sessions are read: the id that its hook/statusLine/notify pinned to the current attempt. No cwd/mtime fallback is allowed.
+ * Only the files of this task's own sessions are read: the id that its hook/statusLine/notify pinned to the current attempt. No cwd/mtime fallback is allowed;
+ * the one exception (0.26.4, attemptTranscript) identifies an initial Claude prompt by its unique attempt marker when no hook named the session.
  */
 
 export interface TranscriptMessage {
@@ -178,6 +179,10 @@ export function transcriptMessage(ctx: Context, record: TaskRecord, pending: str
   if (record.agent === 'unknown' || !pending || Number.isNaN(sinceMs)) return undefined;
   const selected = selectedFile(ctx, record);
   const files = selected?.file ? [selected.file] : [];
+  if (!selected?.file) {
+    const found = attemptTranscript(ctx, record, pending, sinceMs);
+    if (found) return found;
+  }
   for (const file of files) {
     let text: string;
     try {
@@ -195,6 +200,35 @@ export function transcriptMessage(ctx: Context, record: TaskRecord, pending: str
     if (hit) { unchanged.delete(`${file}|${record.deliveryId ?? sinceMs}|${pending}`); return hit; }
   }
   return undefined;
+}
+
+/**
+ * 0.26.4: when no hook or statusLine named the session (a hook failed at startup), an initial Claude prompt is still confirmed by its
+ * transcript. The file is identified by content, not by cwd or mtime: it must be in the project folder of the task's own worktree and hold,
+ * after the delivery began, a user message equal to the pending prompt, which carries this attempt's unique marker. Exactly one such file counts.
+ */
+function attemptTranscript(ctx: Context, record: TaskRecord, pending: string, sinceMs: number): TranscriptMessage | undefined {
+  if (record.agent === 'unknown' || !claudeShaped(record.agent) || record.host || record.promptKind === 'followup' || !record.attemptId || !pending.includes(`agentctl:attempt ${record.attemptId}`)) return undefined;
+  const agent = record.agent;
+  const homeEnv = provider(agent).usage.homeEnv;
+  const home = (homeEnv ? record.env[homeEnv] : undefined) ?? agentHomes(ctx.config)[agent];
+  if (!home) return undefined;
+  const hits: TranscriptMessage[] = [];
+  for (const repo of record.repos) {
+    const dir = path.join(home, 'projects', claudeProjectName(repo.worktree));
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir).filter(name => name.endsWith('.jsonl')); } catch { continue; }
+    for (const name of names) {
+      const file = path.join(dir, name);
+      try {
+        const st = fs.statSync(file);
+        if (!st.isFile() || st.mtimeMs < sinceMs) continue;
+        const hit = claudeMessages(readTail(file, fileIdentity(st))).find(row => row.kind === 'user' && row.at >= sinceMs && !row.ambiguous && sameMessage(row.text, pending, record.agent));
+        if (hit) hits.push(hit);
+      } catch { /* replaced while reading */ }
+    }
+  }
+  return hits.length === 1 ? hits[0] : undefined;
 }
 
 /** Last error of the pinned, current-attempt session. Human/tool text is never provider evidence. */

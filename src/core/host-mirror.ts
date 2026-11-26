@@ -5,7 +5,7 @@ import type { TaskRecord } from './taskstore.ts';
 export function remoteMirrorScript(record: TaskRecord): string {
   const files = { report: record.remoteReport, receipt: path.posix.join(record.remoteDir!, 'receipt.json') };
   return `const fs=require('fs'),path=require('path'),os=require('os');
-const record=${JSON.stringify({ agent: record.agent, env: Object.fromEntries(['CODEX_HOME', 'KIMI_CODE_HOME'].flatMap(key => record.env[key] === undefined ? [] : [[key, record.env[key]]])), repos: record.repos.map(r => r.worktree), attempt: record.attemptId, started: record.attemptStarted ?? record.started, dir: record.remoteDir })};
+const record=${JSON.stringify({ agent: record.agent, env: Object.fromEntries(['CODEX_HOME', 'KIMI_CODE_HOME', 'CLAUDE_CONFIG_DIR'].flatMap(key => record.env[key] === undefined ? [] : [[key, record.env[key]]])), repos: record.repos.map(r => r.worktree), attempt: record.attemptId, started: record.attemptStarted ?? record.started, dir: record.remoteDir })};
 const files=${JSON.stringify(files)},out={};
 const read=(f,max=16*1024*1024)=>{try{const st=fs.lstatSync(f);if(st.isFile()&&!st.isSymbolicLink()&&st.size<=max)return fs.readFileSync(f,'utf8')}catch(e){if(e.code!=='ENOENT')throw e}};
 for(const [key,file] of Object.entries(files)){const text=read(file);if(text!==undefined)out[key]=text}
@@ -16,6 +16,14 @@ if(receipt?.attempt===record.attempt && record.agent==='codex' && /^[a-zA-Z0-9-]
  const matches=[],root=path.join(record.env.CODEX_HOME||process.env.CODEX_HOME||path.join(os.homedir(),'.codex'),'sessions');
  const walk=(dir,depth)=>{if(depth>3)return;for(const e of list(dir)){const f=path.join(dir,e.name);if(e.isDirectory())walk(f,depth+1);else if(e.isFile()&&e.name.startsWith('rollout-')&&e.name.endsWith('-'+receipt.session.id+'.jsonl'))matches.push(f)}};walk(root,0);
  if(matches.length===1)out.transcript=tail(matches[0]);
+}
+if((record.agent==='claude'||record.agent==='glm')&&record.attempt){
+ // 0.26.4: a hook may fail at startup. The task's own transcript is the one in its worktree's project folder that holds this attempt's marker.
+ const home=record.env.CLAUDE_CONFIG_DIR||process.env.CLAUDE_CONFIG_DIR||path.join(os.homedir(),'.claude'),marker='agentctl:attempt '+record.attempt,found=[];
+ const named=receipt?.attempt===record.attempt&&typeof receipt.session?.file==='string'?receipt.session.file:undefined;
+ const candidates=named?[named]:record.repos.flatMap(wt=>{const dir=path.join(home,'projects',wt.replace(/[^A-Za-z0-9]/g,'-'));return list(dir).filter(e=>e.isFile()&&e.name.endsWith('.jsonl')).map(e=>path.join(dir,e.name))});
+ for(const file of candidates){try{const st=fs.statSync(file);if(st.mtimeMs<Date.parse(record.started)-60000)continue;const text=tail(file);if(text.includes(marker))found.push(text)}catch{}}
+ if(found.length===1)out.transcript=found[0];
 }
 if(record.agent==='kimi'){
  const home=record.env.KIMI_CODE_HOME||process.env.KIMI_CODE_HOME||path.join(os.homedir(),'.kimi-code'),root=path.join(home,'sessions'),matches=[];

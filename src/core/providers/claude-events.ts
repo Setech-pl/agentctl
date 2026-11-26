@@ -11,6 +11,7 @@ import path from 'node:path';
 const str = (v: unknown): string => typeof v === 'string' ? v : '';
 import { taskDir } from '../taskstore.ts';
 import { buildTapStatusLine } from '../usage-tap.ts';
+import { agentHomes } from '../usage-sources.ts';
 /** The `--kind` of `agentctl event` for Claude hooks. */
 export const CLAUDE_KINDS = ['notification', 'stop', 'stop-failure', 'user-prompt-submit', 'session-start'] as const;
 export type ClaudeKind = (typeof CLAUDE_KINDS)[number];
@@ -51,6 +52,9 @@ export function buildClaudeSettings(task: string, self: SelfArgv, statusLine?: R
     const command = [...self, ...eventArgs(task, agent, kind), ...(attempt ? ['--attempt', attempt] : [])].map(shellWord).join(' ');
     hooks[CLAUDE_HOOK_NAME[kind]] = [{ hooks: [{ type: 'command', command, timeout: 15 }] }];
   }
+  // Every entry is a command hook, SessionStart included: the only type every supported Claude Code version (2.1.309 … 2.1.332) accepts for
+  // every event (2.1.332 refuses prompt-type SessionStart hooks). The first prompt never waits for a hook: screen readiness pastes it and the
+  // transcript confirms it (transcript.ts attemptTranscript, host-mirror.ts).
   // Claude Code shows a dim suggestion of the next prompt in the empty field; it is not the human's text, so it is switched off for the tasks agentctl starts.
   return statusLine ? { hooks, statusLine, promptSuggestionEnabled: false } : { hooks, promptSuggestionEnabled: false };
 }
@@ -63,6 +67,32 @@ export function planClaudeEvents(input: EventWiringInput): EventWiring {
     return {
       args: ['--settings', file],
       files: [{ path: file, content: `${JSON.stringify(buildClaudeSettings(input.task, input.self, statusLine, input.attempt, input.agent), null, 2)}\n` }],
-      note: `events: ${label} hooks SessionStart, UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}`,
+      note: `events: ${label} hooks SessionStart, UserPromptSubmit, Notification, Stop and StopFailure${statusLine ? ', statusLine (usage-tap)' : ''} in ${file}${unsupportedText(unsupportedSessionStartHooks(claudeSettingsFiles(input.worktree, input.env.CLAUDE_CONFIG_DIR ?? agentHomes(input.config, { ...process.env, ...input.env }).claude), input.readConfig))}`,
     };
 }
+
+/** The settings files Claude Code merges for a window in this worktree (local, project, user). */
+export function claudeSettingsFiles(worktree: string | undefined, claudeHome: string): string[] {
+  return [...(worktree ? [path.join(worktree, '.claude', 'settings.local.json'), path.join(worktree, '.claude', 'settings.json')] : []), path.join(claudeHome, 'settings.json')];
+}
+
+/**
+ * SessionStart hooks of another type than `command` in the owner's or the project's Claude settings. Claude Code 2.1.332 refuses them at
+ * startup ("prompt-type hooks are not supported for SessionStart events"); agentctl cannot change those files, so the start says where they are.
+ */
+export function unsupportedSessionStartHooks(files: string[], read: (file: string) => string | undefined = file => { try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; } }): string[] {
+  const found: string[] = [];
+  for (const file of files) {
+    let data: unknown;
+    try { const text = read(file); if (text === undefined) continue; data = JSON.parse(text); } catch { continue; }
+    const groups = isObject(data) && isObject(data.hooks) ? data.hooks.SessionStart : undefined;
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) for (const hook of isObject(group) && Array.isArray(group.hooks) ? group.hooks : []) {
+      const type = isObject(hook) ? hook.type : undefined;
+      if (type !== 'command') found.push(`${file} (${typeof type === 'string' ? type : 'no type'})`);
+    }
+  }
+  return [...new Set(found)];
+}
+
+const unsupportedText = (found: string[]) => found.length ? `; WARNING: SessionStart hooks that are not command-type (Claude Code 2.1.332 rejects them at startup; the prompt is still delivered by screen readiness and the transcript): ${found.join(', ')}` : '';
