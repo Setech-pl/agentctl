@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-P19-STDIO-FIXTURE | The stdio setup fixture could finish before its clients exercised read latency and disconnect during setup. | `tests/p19-stdio.test.ts` (`setup survives the death`) | 0.27.2 | not proven: Fixture race. The held-setup scenario also passes on the preceding implementation. |
 | REL0272-GC-INVENTORY | A narrow GC preview repeatedly scanned every task and reloaded the same repository link configuration. | `tests/review0256.test.ts` (`^REL0272-GC-INVENTORY:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |
 | REL0272-CANCEL-SNAPSHOT | The seeded watch inventory could miss a just-applied queue cancellation until a filesystem callback. | `tests/review0256.test.ts` (`^REL0272-CANCEL-SNAPSHOT:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |
 | REL0272-DOCTOR-IO | The cached doctor synchronously opened every task header and timed out under filesystem contention. | `tests/review0256.test.ts` (`^REL0272-DOCTOR-IO:`) | 0.27.2 | fails on 560b422462e02f28812e9251981ddddef4893d24 (1 failing of 1) |

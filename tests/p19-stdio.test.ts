@@ -7,11 +7,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import YAML from 'yaml';
 import { Harness, defaultCacheRoot } from '../scripts/live-harness.ts';
+import { shellQuote } from '../src/core/util.ts';
 import { REPO_ROOT } from './helpers.ts';
 
 /*
  * P19 over the real thing: the MCP server as the app starts it (stdio, a real Client), a real watcher process, a real tmux server of its own, the
- * fake agent of the live harness. Setup is `sleep 3` in two repositories (the live script uses 20 s).
+ * fake agent of the live harness. The first setup stays active until both clients
+ * have read its progress and the original MCP connection has shut down.
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -26,13 +28,15 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
     try { h.start(); } finally { process.env.PATH = isolatedPath; }
     const clients: Client[] = [];
     try {
+      const finishSetup = path.join(h.root, 'allow-setup-to-finish');
       const git = (cwd: string, args: string[]) => { const r = spawnSync('git', ['-C', cwd, ...args], { env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
       const repos = ['alpha', 'beta'].map((n) => {
         const dir = path.join(h.root, n);
         fs.mkdirSync(dir);
         git(dir, ['init', '-b', 'main']);
         fs.writeFileSync(path.join(dir, 'file.txt'), 'x\n');
-        fs.writeFileSync(path.join(dir, '.agentctl.yaml'), YAML.stringify({ setup: [`sleep 3; echo installed-${n}`] }));
+        const wait = n === 'alpha' ? 'while [ ! -f ' + shellQuote(finishSetup) + ' ]; do sleep 0.05; done; ' : '';
+        fs.writeFileSync(path.join(dir, '.agentctl.yaml'), YAML.stringify({ setup: [wait + 'echo installed-' + n] }));
         git(dir, ['add', '.']);
         git(dir, ['commit', '-m', 'fixture']);
         return dir;
@@ -82,8 +86,10 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
         if (sawSetup && !again) {
           // a repeated confirm during the setup, and the death of the first server in the middle of it
           again = (await call(b.client, 'new', { spec, confirm: true })).text;
+          assert.match(again, /SLOW-1: already being started/);
           await a.client.close();
           firstServer = b.client;
+          fs.writeFileSync(finishSetup, 'MCP client closed\n');
         }
         await sleep(300);
       }

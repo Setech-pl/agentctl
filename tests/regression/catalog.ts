@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-P19-STDIO-FIXTURE', fixedIn: '0.27.2', symptom: 'The stdio setup fixture could finish before its clients exercised read latency and disconnect during setup.', scenarios: [s('p19-stdio.test.ts', 'setup survives the death')], noProof: 'Fixture race. The held-setup scenario also passes on the preceding implementation.' },
   { id: 'REL0272-GC-INVENTORY', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'A narrow GC preview repeatedly scanned every task and reloaded the same repository link configuration.', scenarios: [s('review0256.test.ts', '^REL0272-GC-INVENTORY:')] },
   { id: 'REL0272-CANCEL-SNAPSHOT', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'The seeded watch inventory could miss a just-applied queue cancellation until a filesystem callback.', scenarios: [s('review0256.test.ts', '^REL0272-CANCEL-SNAPSHOT:')] },
   { id: 'REL0272-DOCTOR-IO', fixedIn: '0.27.2', proofAgainst: '560b422462e02f28812e9251981ddddef4893d24', symptom: 'The cached doctor synchronously opened every task header and timed out under filesystem contention.', scenarios: [s('review0256.test.ts', '^REL0272-DOCTOR-IO:')] },
