@@ -379,7 +379,13 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
           }
         : {}),
     });
-    const ready = await waitOnce();
+    let ready = await waitOnce();
+    // 0.26.3: a readiness timeout of a queued start is transient (a slow TUI, a loaded host): wait once more in the same window;
+    // only a second timeout is a failed start (needs-attention with the saved screen).
+    if (opts.trackStart && !runner.dryRun && !ready.ready && !ready.trust && !ready.dialog && !ready.aborted && readTaskRecord(config, spec.window)?.promptDelivery !== 'sent') {
+      ctx.info(`${spec.task}: ${spec.agent} did not show its input prompt within ${readyTimeoutS}s; waiting once more in the same window`);
+      ready = await waitOnce();
+    }
     const fresh = readTaskRecord(config, spec.window);
     if (fresh && ready.exitCode !== undefined) {
       const cause = await storeLaunchExit(ctx, fresh, ready.exitCode, ready.screen, 'okno zakończyło pracę przed gotowością agenta', true);
@@ -434,9 +440,9 @@ async function startTasks(ctx: Context, requested: ResolvedSpec[], opts: NewOpti
       const seen = capture ? `; last screen: ${capture}` : '';
       await setHeaderFields(runner, taskFile(config, spec.window), { prompt_delivery: 'needs-attention', prompt_error: `${spec.agent} did not become ready; original prompt remains in TASK.md${seen}` });
       throw new AgentctlError(
-        `${spec.task}: ${spec.agent} did not show its input prompt within ${readyTimeoutS}s (pattern /${settings.readyPattern}/)${seen}`,
+        `${spec.task}: ${spec.agent} did not show its input prompt within ${readyTimeoutS}s${opts.trackStart ? ' (twice)' : ''} (pattern /${settings.readyPattern}/)${seen}`,
         `The window is still open: "${hint}". Once the agent is ready, send the prompt with "agentctl send"; ` +
-          `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern / ready_timeout in ${config.path}.`,
+          `a recognized structural composer is required before any paste; if the prompt looks normal, adjust agents.${spec.agent}.ready_pattern or providers_config.${spec.agent}.ready_timeout_s in ${config.path}. Recovery: with agentctl watch running, the original prompt is delivered by itself once the window shows a recognized empty composer; otherwise agentctl queue retry ${spec.task} starts a fresh window.`,
       );
     }
     if (runner.dryRun) await taskTmux.submitPrompt(spec.window, promptWithHeader({ ...spec, report: spec.remoteReport ?? spec.report }, record.attemptId, wallContext));
