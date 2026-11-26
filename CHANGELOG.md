@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Watch batches hold events and keeps diagnostic heartbeat writes off stage boundaries. / Watch zapisuje zdarzenia wstrzymania grupowo i ogranicza zapisy diagnostyczne między etapami.
 - Integration GC removes a worktree under its own Git timeout. Prompt delivery keeps the pending prompt queued when the admission deadline is close. / GC po integracji usuwa worktree z limitem Git. Dostarczanie odkłada wiadomość, gdy zbliża się koniec czasu operacji.
 - Admission locks retain the legacy PID format during upgrades and downgrades. / Blokady startu zachowują format PID podczas aktualizacji i powrotu do starszej wersji.
 - Accepted starts run slow validation outside the admission lock, and lock waiters can wait for the full short holder budget. / Przyjęte starty wykonują wolne sprawdzenia poza blokadą, a operacje mogą przeczekać pełny limit krótkiego uchwytu.

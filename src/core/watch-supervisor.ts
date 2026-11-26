@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import type { Context } from './context.ts';
 import { appendStartLog, startLogPath } from './boardstart.ts';
 import { recordJournal } from './journal.ts';
-import { WATCH_STALL_MS } from './watch-steps.ts';
+import { WATCH_IO_THREADS, WATCH_STALL_MS } from './watch-steps.ts';
 import { OWNER_IDENTITY, postMessage } from './wall.ts';
 
 const MAX_RESTARTS = 5;
@@ -47,7 +47,7 @@ export function runWatchWorker(argv: string[], signal?: AbortSignal): Promise<st
   if (!executable) throw new Error('Watch worker command is missing');
   return new Promise(resolve => {
     const child = spawn(executable, [...args, 'watch'], {
-      env: { ...process.env, AGENTCTL_WATCH_WORKER: '1' },
+      env: { UV_THREADPOOL_SIZE: WATCH_IO_THREADS, ...process.env, AGENTCTL_WATCH_WORKER: '1' },
       stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
     });
     const groups = new Set<number>();

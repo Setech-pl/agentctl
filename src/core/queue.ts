@@ -30,7 +30,7 @@ import { chatOwner, chatQuotaWait, DEFAULT_OWNER, globalQuotaWait, nextQuotaTask
 import { overProviderLimit } from './checks.ts';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
-import { recordJournal } from './journal.ts';
+import { recordJournal, recordJournalChanges } from './journal.ts';
 import { cancelledTasks, checkAfter, DEFAULT_AFTER_VERDICTS, findBlocked, blockedText, hasReport, unmetAfter, verdictPending, waitingText } from './depends.ts';
 import type { VerdictClock } from './depends.ts';
 import type { Blockers } from './depends.ts';
@@ -52,7 +52,7 @@ import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
 import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
 import { queueHolds, refreshExpiredStartPlan, usageSummaryLines } from './usage-limits.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, windowName } from './util.ts';
 import { clearSetupProgress, readSetupProgress, startProgressText } from './setup-progress.ts';
 
 /*
@@ -170,18 +170,32 @@ export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
   } catch {
     return [];
   }
+  const holds = readHoldNotices(config);
   const entries: QueueEntry[] = [];
   for (const name of names.sort()) {
     if (!name.endsWith('.json')) continue;
     try {
       const entry = parseEntry(fs.readFileSync(path.join(queueDir(config), name), 'utf8'));
-      if (entry) entries.push(entry);
+      if (entry) {
+        const hold = holds[holdNoticeKey(entry)];
+        entries.push(!entry.holdNotified && hold ? {...entry, holdNotified: true, holdReason: hold} : entry);
+      }
     } catch {
       // removed between the listing and the read
     }
   }
   const rank = (e: QueueEntry): number => (e.status === 'queued' || e.status === 'accepted' ? 0 : e.status === 'starting' ? 1 : 2);
   return entries.sort((a, b) => rank(a) - rank(b) || (a.status === 'queued' && b.status === 'queued' ? Number(b.priority === 'high') - Number(a.priority === 'high') : 0) || a.order - b.order || a.seq - b.seq);
+}
+
+const holdNoticeFile = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'queue-hold-notices.json');
+const holdNoticeKey = (entry: QueueEntry): string => JSON.stringify([entry.seq, entry.task, entry.queuedAt, entry.attempts?.length ?? 0, entry.unvalidated === true]);
+function readHoldNotices(config: Pick<GlobalConfig, 'path'>): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(holdNoticeFile(config), 'utf8'));
+    return isObject(value) ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {};
+  }
+  catch { return {}; }
 }
 
 /** The entries that wait for their turn, in turn order. */
@@ -1104,12 +1118,18 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
 async function recordHeldOrders(ctx: Context, reasons: ReadonlyMap<number, string>): Promise<void> {
   if (!reasons.size) return;
   await withStartLock(ctx, async () => {
-    for (const fresh of readQueue(ctx.config)) {
+    const entries = readQueue(ctx.config);
+    const holds = Object.fromEntries(entries.flatMap(entry => entry.holdReason && (entry.status === 'queued' || entry.status === 'accepted') ? [[holdNoticeKey(entry), entry.holdReason]] : []));
+    const events: Parameters<typeof recordJournalChanges>[1] = [];
+    for (const fresh of entries) {
       const reason = reasons.get(fresh.seq);
       if (!reason || fresh.holdNotified || (fresh.status !== 'queued' && fresh.status !== 'accepted')) continue;
-      await recordJournal(ctx, { kind: 'queue-held', task: fresh.task, owner: fresh.owner, cohort: fresh.cohort, text: `WSTRZYMANE: ${reason}` });
-      await writeEntry(ctx, { ...fresh, holdNotified: true, holdReason: reason });
+      const identity = holdNoticeKey(fresh);
+      events.push({kind: 'queue-held', task: fresh.task, owner: fresh.owner, cohort: fresh.cohort, changeId: identity, text: `WSTRZYMANE: ${reason}`});
+      holds[identity] = reason;
     }
+    if (!events.length) return;
+    if (await recordJournalChanges(ctx, events)) await ctx.runner.writeFile(holdNoticeFile(ctx.config), `${JSON.stringify(holds)}\n`);
   });
 }
 

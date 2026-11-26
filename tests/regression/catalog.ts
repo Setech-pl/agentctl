@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-HOLD-WRITES', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'A load hold could block the entire watch tick by rewriting the journal and queue entry for each held order.', scenarios: [s('review0256.test.ts', '^REL0272-HOLD-WRITES:')] },
   { id: 'REL0272-TICK-PANES', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Watch verified each missing window with a separate tmux IPC call after the main inventory.', scenarios: [s('review0256.test.ts', '^REL0272-TICK-PANES:')] },
   { id: 'REL0272-LEGACY-JOURNAL', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Watch read and rewrote the journal once per interrupted legacy launch.', scenarios: [s('review0256.test.ts', '^REL0272-LEGACY-JOURNAL:')] },
   { id: 'REVIEW0263-F2', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'The admission deadline interrupted integration GC and could interrupt a prompt between paste and Enter.', scenarios: [s('review0263.test.ts', '^REVIEW0263-F2:'), s('disk0248.test.ts', '^FLOW-GC: watch proposes')] },

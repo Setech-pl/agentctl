@@ -464,6 +464,7 @@ const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
 
 /** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
 const SCAN_CHUNK = 25;
+const ASYNC_SCAN_CHUNK = 96;
 
 async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[]> {
   let files = recordScanCache.get(dir);
@@ -506,8 +507,9 @@ async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[
       }
     }
   };
-  for (let i = 0; i < names.length; i += SCAN_CHUNK) {
-    const namesInBatch = names.slice(i, i + SCAN_CHUNK);
+  const batchSize = asyncIO ? ASYNC_SCAN_CHUNK : SCAN_CHUNK;
+  for (let i = 0; i < names.length; i += batchSize) {
+    const namesInBatch = names.slice(i, i + batchSize);
     if (asyncIO) {
       const batch = await Promise.all(namesInBatch.map(scan));
       records.push(...batch.filter((record): record is TaskRecord => record !== undefined));
@@ -566,8 +568,8 @@ export class TaskRecordIndex {
     }
     const changes = [...this.changed];
     this.changed.clear();
-    for (let i = 0; i < changes.length; i += SCAN_CHUNK) {
-      await Promise.all(changes.slice(i, i + SCAN_CHUNK).map(async window => {
+    for (let i = 0; i < changes.length; i += ASYNC_SCAN_CHUNK) {
+      await Promise.all(changes.slice(i, i + ASYNC_SCAN_CHUNK).map(async window => {
         const record = await readRecordFileAsync(path.join(root, window, 'TASK.md'));
         if (this.generation !== generation) return;
         if (record) this.records.set(window, record);

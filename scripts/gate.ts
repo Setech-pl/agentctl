@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { WATCH_IO_THREADS } from '../src/core/watch-steps.ts';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { liveCacheRoot } from './live-cache.ts';
@@ -216,6 +217,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     const result = await run('prodshape', node, ['--experimental-strip-types', '--no-warnings', 'scripts/prodshape.ts'], {
       AGENTCTL_PRODSHAPE_WORK: work,
       AGENTCTL_PRODSHAPE_EVIDENCE: evidence,
+      UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE ?? WATCH_IO_THREADS,
     }, false);
     return result.code;
   };

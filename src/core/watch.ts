@@ -288,7 +288,16 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       memory.closedConfig = ctx.config;
       memory.closedRows = new WeakMap();
     }
-    return collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await inventory(), watchClosedRows: memory.closedRows});
+    return collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await statusInventory(), watchClosedRows: memory.closedRows});
+  };
+  // Start both stores together. The recovery stage joins the same in-flight current-store scan.
+  const inventoryReady = inventory();
+  void inventoryReady.catch(() => undefined);
+  let initialInventory = true;
+  const statusInventory = async () => {
+    if (!initialInventory) return inventory();
+    initialInventory = false;
+    return inventoryReady;
   };
   let diskSample: ReturnType<typeof collectDisk> | undefined;
   const disk = async () => (diskSample ??= (async () => collectDisk(ctx, undefined, {records: (await inventory()).all}))());
@@ -467,6 +476,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   const priority = memory.steps.priority(stages);
   if (priority) await execute(priority);
   for (const name of stages.keys()) await execute(name);
+  memory.steps.flush(ctx);
   return events;
 }
 

@@ -73,8 +73,8 @@ export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'
   }
   return appendJournal(ctx, entry);
 }
-async function prepareJournalEntry(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<JournalEntry> {
-  const record = entry.task ? readTaskRecord(ctx.config, windowName(entry.task)) : undefined;
+async function prepareJournalEntry(ctx: Context, entry: Omit<JournalEntry, 'at'>, useTaskHeader = true): Promise<JournalEntry> {
+  const record = useTaskHeader && entry.task ? readTaskRecord(ctx.config, windowName(entry.task)) : undefined;
   const cohort = entry.cohort ?? record?.cohort;
   const owner = entry.owner ?? record?.owner ?? (entry.task && ctx.config.quotas ? 'default' : undefined);
   const full: JournalEntry = secretRedactor([ctx.config, process.env, entry])({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}), ...(owner ? { owner } : {}) });
@@ -168,20 +168,22 @@ export function journalChangeIds(config: Pick<GlobalConfig, 'path'>): Promise<Se
 
 export const indexedJournalChange = (ids: ReadonlySet<string>, kind: JournalKind, id: string): boolean => ids.has(changeKey(kind, id));
 
-/** One durable append and one deduplication pass for a batch of independent legacy launch events. */
-export async function recordLegacyLaunches(ctx: Context, entries: (Omit<JournalEntry, 'at' | 'kind' | 'changeId'> & {changeId: string})[]): Promise<void> {
-  if (!entries.length) return;
+/** One durable append and one deduplication pass for entries whose caller supplies task ownership. */
+export async function recordJournalChanges(ctx: Context, entries: (Omit<JournalEntry, 'at' | 'changeId'> & {changeId: string})[]): Promise<boolean> {
+  if (!entries.length) return true;
   const file = journalPath(ctx.config);
-  await withFileLock(`${file}.launch-legacy.lock`, async () => {
+  return withFileLock(`${file}.changes.lock`, async () => {
     const ids = await journalChangeIds(ctx.config);
     const added = new Set<string>();
     const lines: string[] = [];
     for (const entry of entries) {
-      if (added.has(entry.changeId) || indexedJournalChange(ids, 'launch-legacy', entry.changeId)) continue;
-      added.add(entry.changeId);
-      lines.push(JSON.stringify(await prepareJournalEntry(ctx, {...entry, kind: 'launch-legacy'})));
+      const key = changeKey(entry.kind, entry.changeId);
+      if (added.has(key) || ids.has(key)) continue;
+      added.add(key);
+      lines.push(JSON.stringify(await prepareJournalEntry(ctx, entry, false)));
     }
-    if (lines.length) await ctx.runner.appendFile(file, `${lines.join('\n')}\n`).catch(() => undefined);
+    if (!lines.length) return true;
+    return ctx.runner.appendFile(file, `${lines.join('\n')}\n`).then(() => true, () => false);
   });
 }
 

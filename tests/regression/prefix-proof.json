@@ -1530,6 +1530,16 @@
       "D1: cached MCP preview checks every repo including untracked files in the second"
     ]
   },
+  "REL0272-HOLD-WRITES": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons",
+      "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons"
+    ]
+  },
   "REL0272-LEGACY-JOURNAL": {
     "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
     "outcome": "FAILS",

@@ -9,6 +9,7 @@ import { appendStartLog, startLogPath } from './boardstart.ts';
 
 export const WATCH_STEP_TIMEOUT_MS = 20_000;
 export const WATCH_STALL_MS = 600_000;
+export const WATCH_IO_THREADS = '32';
 export class WatchStalled extends Error {}
 export type WatchStepObserver = <T>(name: string, work: () => Promise<T>) => Promise<T>;
 const clock: BudgetClock = {
@@ -26,6 +27,19 @@ export class WatchSteps {
   private readonly running = new Map<string, number>();
   private readonly skipped = new Map<string, {since: number; count: number; promoted: number}>();
   private promotion = 0;
+  private last?: {step: string; state: string; since: number; reason?: string};
+
+  flush(ctx: Context): void {
+    if (ctx.runner.dryRun || !this.last) return;
+    try {
+      fs.mkdirSync(ctx.config.stateDir, {recursive: true});
+      fs.writeFileSync(watchHeartbeatPath(ctx.config), JSON.stringify({
+        pid: process.pid, ...this.last, at: ctx.runner.now(), running: Object.fromEntries(this.running),
+        skipped: Object.fromEntries([...this.skipped].map(([name, item]) => [name, item.since])),
+        consecutive: Object.fromEntries([...this.skipped].map(([name, item]) => [name, item.count])),
+      }), {mode: 0o600});
+    } catch (error) { ctx.out(`watch heartbeat: ${errorMessage(error)}`); }
+  }
 
   priority(stages: ReadonlyMap<string, unknown>): string | undefined {
     let pick: string | undefined;
@@ -80,17 +94,8 @@ export class WatchSteps {
         else this.skipped.set(name, {since, count: 1, promoted: 0});
       }
       if (state === 'done') this.skipped.delete(name);
-      if (!ctx.runner.dryRun) {
-        try {
-          fs.mkdirSync(ctx.config.stateDir, { recursive: true });
-          // Diagnostic telemetry does not need a durable flush at every step boundary.
-          fs.writeFileSync(watchHeartbeatPath(ctx.config), JSON.stringify({
-            pid: process.pid, step: name, state, at: ctx.runner.now(), since, reason, running: Object.fromEntries(this.running),
-            skipped: Object.fromEntries([...this.skipped].map(([name, state]) => [name, state.since])),
-            consecutive: Object.fromEntries([...this.skipped].map(([name, state]) => [name, state.count])),
-          }), { mode: 0o600 });
-        } catch (error) { ctx.out(`watch heartbeat: ${errorMessage(error)}`); }
-      }
+      this.last = {step: name, state, since, ...(reason ? {reason} : {})};
+      if (state === 'skipped' && reason) this.flush(ctx);
       if (reason) {
         const line = `${new Date(ctx.runner.now()).toISOString()}  watch ${name}: ${reason}`;
         ctx.out(line);
