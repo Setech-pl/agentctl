@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REVIEW0263-F4', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'The new start lock wrote an owner format an older worker could never reclaim.', scenarios: [s('queue.test.ts', '^HOTFIX0263-LOCK:')] },
   { id: 'REVIEW0263-F1', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Accepted start validation ran lengthy repository and tmux probes while holding the admission lock.', scenarios: [s('review0263.test.ts', '^REVIEW0263-F1:')] },
   { id: 'REL0272-TICK-ROWS', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'A status collection timeout replaced the last complete MCP snapshot with a rowless snapshot dated as fresh.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-TICK-ROWS:')] },
   { id: 'REL0272-P19-RETRY', fixedIn: '0.27.2', proofAgainst: '795247ab32fc91b345ada1f9ce1ede77cdfcfb72', symptom: 'Retrying setup over kept worktrees ran a separate unbounded series of cwd probes for each checkout.', scenarios: [s('worktree-start.test.ts', '^REL0272-P19-RETRY:')] },

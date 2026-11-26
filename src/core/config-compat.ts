@@ -29,8 +29,8 @@ export async function fenceLegacyLimits(ctx: Context): Promise<boolean> {
 }
 
 export async function downgradeCheck(ctx: Context, target: string): Promise<{incompatible: string[]; pruned: string[]; reservations: string[]}> {
-  const version = /^v?0\.26\.(x|0|1)$/.exec(target);
-  if (!version) throw new AgentctlError('Use --to 0.26.x, 0.26.0 or 0.26.1.');
+  const version = /^v?0\.26\.(x|0|1|2)$/.exec(target);
+  if (!version) throw new AgentctlError('Use --to 0.26.x, 0.26.0, 0.26.1 or 0.26.2.');
   const file = ctx.config.path;
   return withFileLock(limitEditLock(file), async () => {
     const doc = configDocument(file), now = ctx.runner.now();
@@ -48,7 +48,7 @@ export async function downgradeCheck(ctx: Context, target: string): Promise<{inc
     }
     const keys = ['launch', 'limits.change_policy', 'limits.profiles', 'limits.schedule', 'limits.active_profile',
       'limits.timed_overrides', 'queue.hold_on_load', 'disk.min_free_state_gb'];
-    if (version[1] !== '1') keys.push('start_lock_stale_s', 'setup.timeout_s', 'gc.delete_mode');
+    if (version[1] === 'x' || version[1] === '0') keys.push('start_lock_stale_s', 'setup.timeout_s', 'gc.delete_mode');
     const incompatible = keys.filter(key => doc.hasIn(key.split('.')));
     const quotas = isObject(raw) ? raw.quotas : undefined;
     if (isObject(quotas)) {

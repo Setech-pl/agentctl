@@ -6,6 +6,19 @@ import { commandStageRemaining } from './command-stage.ts';
 
 interface LockOwner { pid: number; task: string; at: string }
 interface LockRecovery { task: string; staleMs: number; recovered: (owner: Partial<LockOwner>) => void }
+const ownerFile = (file: string): string => `${file}.owner.json`;
+
+function ownerDetails(file: string, pid: number, inode: fs.Stats): Partial<LockOwner> {
+  try {
+    const details = JSON.parse(fs.readFileSync(ownerFile(file), 'utf8'));
+    if (details.pid === pid && details.ino === inode.ino && details.dev === inode.dev) return details;
+  } catch { /* older writers store only the PID */ }
+  return {pid, at: new Date(inode.mtimeMs).toISOString()};
+}
+
+function clearOwnerDetails(file: string): void {
+  try { fs.unlinkSync(ownerFile(file)); } catch { /* best-effort diagnostic metadata */ }
+}
 
 function recoverDeadOwner(file: string, recovery?: LockRecovery): void {
   try {
@@ -13,12 +26,13 @@ function recoverDeadOwner(file: string, recovery?: LockRecovery): void {
     if (!original.isFile()) return;
     const age = Date.now() - original.mtimeMs;
     const raw = fs.readFileSync(file, 'utf8').trim();
-    const owner: Partial<LockOwner> = raw.startsWith('{') ? JSON.parse(raw) : { pid: Number(raw) };
+    const owner: Partial<LockOwner> = raw.startsWith('{') ? JSON.parse(raw) : recovery ? ownerDetails(file, Number(raw), original) : {pid: Number(raw)};
     let dead = (!raw || owner.pid === 0) && age > (recovery?.staleMs ?? 5000);
     if (owner.pid && Number.isSafeInteger(owner.pid) && owner.pid > 0) {
       try { process.kill(owner.pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
     }
     if (dead && sameLock(file, original)) {
+      if (recovery) clearOwnerDetails(file);
       fs.unlinkSync(file);
       recovery?.recovered(owner);
     }
@@ -38,11 +52,21 @@ export function tryFileLock(file: string, recovery?: LockRecovery): (() => void)
       const fd = fs.openSync(file, 'wx', 0o600);
       const identity = fs.fstatSync(fd);
       const release = () => {
-        try { if (sameLock(file, identity)) fs.unlinkSync(file); }
+        try {
+          if (!sameLock(file, identity)) return;
+          if (recovery) clearOwnerDetails(file);
+          fs.unlinkSync(file);
+        }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       };
       try {
-        fs.writeFileSync(fd, recovery ? JSON.stringify({ pid: process.pid, task: recovery.task, at: new Date().toISOString() }) : String(process.pid));
+        fs.writeFileSync(fd, String(process.pid));
+        if (recovery) {
+          clearOwnerDetails(file);
+          try {
+            fs.writeFileSync(ownerFile(file), JSON.stringify({pid: process.pid, task: recovery.task, at: new Date().toISOString(), ino: identity.ino, dev: identity.dev}), {mode: 0o600, flag: 'wx'});
+          } catch { /* a writer from 0.26.0 can still recover the PID lock */ }
+        }
       } catch (error) { release(); throw error; } finally { fs.closeSync(fd); }
       return release;
     } catch (e) {

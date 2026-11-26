@@ -797,10 +797,11 @@ it('HOTFIX0263-LOCK: an old dead owner is named when its admission lock is recla
   t.mock.method(Date, 'now', () => now + 61_000 * clockReads++);
   try {
     await withStartLock(s.ctx, async () => {
-      const lock = JSON.parse(fs.readFileSync(file, 'utf8'));
-      assert.equal(lock.pid, process.pid);
-      assert.equal(lock.task, 'RECOVERED');
-      assert.ok(lock.at);
+      assert.equal(Number(fs.readFileSync(file, 'utf8')), process.pid);
+      const metadata = JSON.parse(fs.readFileSync(`${file}.owner.json`, 'utf8'));
+      assert.equal(metadata.pid, process.pid);
+      assert.equal(metadata.task, 'RECOVERED');
+      assert.ok(metadata.at);
     }, 'RECOVERED');
     assert.equal(fs.existsSync(file), false);
     assert.match(s.out.join(' '), /start.lock.*99999999.*INT67/);

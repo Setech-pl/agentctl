@@ -37,4 +37,4 @@ In `set_limits` chat quotas, `{chat: nc, codex: 0}` blocks new Codex starts for 
 
 ## Manual rollback to 0.26
 
-Run `agentctl config downgrade-check --to 0.26.x` before switching versions. The command lists keys rejected by 0.26.0 and removes expired timed limit overrides. Use `--to 0.26.1` to check for that specific patch. Release any reported timed reservations before switching because 0.26 does not expire them. After an upgrade, quit the Claude app with ⌘Q and reopen it so each chat loads the new MCP server. Watch blocks direct limit writes by pre-0.27 servers.
+Run `agentctl config downgrade-check --to 0.26.x` before switching versions. The command lists keys rejected by 0.26.0 and removes expired timed limit overrides. Use `--to 0.26.1` or `--to 0.26.2` to check that patch's configuration keys. Release any reported timed reservations before switching because 0.26 does not expire them. Start locks use a numeric PID readable by earlier versions, with owner details in a sidecar. After an upgrade, quit the Claude app with ⌘Q and reopen it so each chat loads the new MCP server with the active GC and limits policies.

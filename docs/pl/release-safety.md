@@ -37,4 +37,4 @@ W kwocie czatu `set_limits` wartość `{chat: nc, codex: 0}` blokuje starty Code
 
 ## Ręczny powrót do 0.26
 
-Przed zmianą wersji uruchom `agentctl config downgrade-check --to 0.26.x`. Polecenie wskazuje klucze odrzucane przez 0.26.0 i usuwa wygasłe limity czasowe. Użyj `--to 0.26.1`, aby sprawdzić tę konkretną wersję. Zwolnij wskazane rezerwacje czasowe przed zmianą wersji, bo 0.26 ich nie wygasza. Po aktualizacji zamknij Claude przez ⌘Q i otwórz aplikację ponownie, aby każdy czat uruchomił nowy serwer MCP. Watch blokuje bezpośrednią zmianę limitów z serwerów sprzed 0.27.
+Przed zmianą wersji uruchom `agentctl config downgrade-check --to 0.26.x`. Polecenie wskazuje klucze odrzucane przez 0.26.0 i usuwa wygasłe limity czasowe. Użyj `--to 0.26.1` albo `--to 0.26.2`, aby sprawdzić klucze danej wersji. Zwolnij wskazane rezerwacje czasowe przed zmianą wersji, bo 0.26 ich nie wygasza. Blokada startu zapisuje PID w formacie odczytywanym także przez wcześniejsze wersje, a dane właściciela w osobnym pliku. Po aktualizacji zamknij Claude przez ⌘Q i otwórz aplikację ponownie, aby każdy czat uruchomił nowy serwer MCP z aktualnymi zasadami GC i limitów.

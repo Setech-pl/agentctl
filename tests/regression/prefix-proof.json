@@ -1651,6 +1651,16 @@
       "REVIEW0263-F1: accepted start probes do not hold the shared admission lock"
     ]
   },
+  "REVIEW0263-F4": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed",
+      "HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed"
+    ]
+  },
   "ROWSEL0252": {
     "rev": "v0.25.1",
     "outcome": "FAILS",
