@@ -97,3 +97,12 @@ Interrupted starts return to the queue and reuse a complete, verified worktree. 
 ## Recover disk space from old Trash entries
 
 `agentctl gc --purge-trash` lists candidates and their original paths. Review them, then run `agentctl gc --purge-trash --apply` and confirm. MCP uses `purge_trash: true` with a preview and confirmation token. GC reports the net gain in available filesystem blocks. Concurrent disk use can affect the reported number.
+
+
+## Codex start fails with "did not show its input prompt"
+
+Before 0.26.3, Codex 0.167+ starts could fail with `codex did not show its input prompt within 60s` even though `start-failure-screen.txt` showed a ready Codex. The footer contains a service tier, such as `GPT-6.2-Sol medium Fast · <dir>`, which older releases could not parse. 0.26.3 reads this footer and ignores ANSI codes and CRLF in a capture. It takes one more capture after the deadline. The ready timeout grows with load: the base is `providers_config.<p>.ready_timeout_s` or `agents.<p>.ready_timeout`, default 60 s, scaled by load1/cores up to 180 s. A queued start waits a second time in the same window. It reports `needs-attention` with the saved screen only after that second wait also times out.
+
+Recovering tasks left in `needs-attention` with "did not become ready": upgrade, then keep `agentctl watch --tmux` running. If the window shows an empty Codex composer, watch delivers the original prompt from TASK.md once. Nothing is pasted twice. If the window is gone or still not ready, run `agentctl queue retry TASK`. It closes the kept window and starts a fresh one on the same worktree.
+
+A follow-up sent while the agent was busy is processed when the current turn ends. It now stays `queued – unconfirmed` (`w kolejce agenta – niepotwierdzone`) after `delivery_confirm_s` instead of becoming `needs-attention`. A hook or a transcript entry confirms it later. On the first watch pass after the upgrade, older "Prompt delivery not confirmed" records for such deliveries return to the queued state.

@@ -97,3 +97,12 @@ Przerwany start wraca do kolejki i wykorzystuje kompletne, zweryfikowane worktre
 ## Odzyskiwanie miejsca ze starych wpisów w koszu
 
 `agentctl gc --purge-trash` pokazuje kandydatów i pierwotne ścieżki. Przejrzyj listę, wykonaj `agentctl gc --purge-trash --apply` i potwierdź. W MCP ustaw `purge_trash: true` i użyj podglądu oraz tokena potwierdzenia. GC pokazuje przyrost dostępnych bloków systemu plików. Równoległe zapisy mogą zmienić wynik pomiaru.
+
+
+## Start Codexa kończy się błędem „did not show its input prompt”
+
+Przed 0.26.3 start Codexa 0.167+ mógł kończyć się błędem `codex did not show its input prompt within 60s`, mimo że `start-failure-screen.txt` pokazywał gotowego Codexa. Stopka zawiera poziom usługi, np. `GPT-6.2-Sol medium Fast · <katalog>`, którego starsze wersje nie rozpoznawały. 0.26.3 czyta tę stopkę i pomija kody ANSI oraz CRLF w zrzucie. Po upływie limitu wykonuje jeszcze jeden zrzut. Limit gotowości rośnie z obciążeniem: wartość bazowa to `providers_config.<p>.ready_timeout_s` albo `agents.<p>.ready_timeout`, domyślnie 60 s, mnożona przez load1/rdzenie do 180 s. Start z kolejki czeka drugi raz w tym samym oknie. Stan `needs-attention` z zapisanym ekranem pojawia się dopiero po drugim przekroczeniu limitu.
+
+Odzyskanie zadań, które zostały w `needs-attention` z komunikatem „did not become ready”: zaktualizuj agentctl i pozostaw uruchomiony `agentctl watch --tmux`. Jeśli okno pokazuje puste pole Codexa, watch raz dostarczy oryginalny prompt z TASK.md. Nic nie zostanie wklejone dwukrotnie. Jeśli okna już nie ma albo agent dalej nie jest gotowy, uruchom `agentctl queue retry ZADANIE`. Polecenie zamknie zachowane okno i uruchomi nowe na tym samym worktree.
+
+Wiadomość wysłana do zajętego agenta zostanie przetworzona po zakończeniu bieżącej tury. Po `delivery_confirm_s` ma teraz stan `w kolejce agenta – niepotwierdzone` zamiast `needs-attention`. Hook albo wpis w transkrypcie potwierdzi ją później. Przy pierwszym przebiegu watch po aktualizacji starsze wpisy „Prompt delivery not confirmed” dla takich dostaw wracają do stanu kolejki.

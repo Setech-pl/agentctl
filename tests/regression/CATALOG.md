@@ -10,6 +10,10 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| READY0263-COMPOSER | Codex 0.167+ queue starts failed with "did not show its input prompt within 60s" although the saved screen showed a ready Codex: the footer "GPT-6.2-Sol medium Fast · <dir>" made the composer unreadable. | `tests/ready0263-composer.test.ts` (`^READY0263-COMPOSER:`) | 0.26.3 | fails on v0.26.2 (6 failing of 6) |
+| READY0263-RECAPTURE | A start failed when the input prompt appeared in the last poll interval or the TUI needed longer than a fixed 60 s on a loaded host. | `tests/ready0263-recapture.test.ts` (`^READY0263-RECAPTURE:`) | 0.26.3 | fails on v0.26.2 (2 failing of 2) |
+| READY0263-RETRY | A single readiness timeout of a queued start set needs-attention; a recovered window did not receive its prompt. | `tests/ready0263-retry.test.ts` (`^READY0263-RETRY:`) | 0.26.3 | fails on v0.26.2 (3 failing of 3) |
+| READY0263-QUEUED | A follow-up sent to a busy agent and processed later was raised as "Prompt delivery not confirmed" (needs-attention). | `tests/ready0263-queued.test.ts` (`^READY0263-QUEUED:`)<br>`tests/p64-codex-queued.test.ts` (`busy-queued message stays queued`) | 0.26.3 | fails on v0.26.2 (3 failing of 3) |
 | HOTFIX0264-F6 | Reused PIDs could pin start.lock indefinitely and empty owners took three minutes to clear. | `tests/queue.test.ts` (`^HOTFIX0264-F6:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |
 | HOTFIX0264-F5 | Git refused dirty worktree removal even after the owner authorized the named task. | `tests/fix0227-gc.test.ts` (`^HOTFIX0264-F5:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |
 | HOTFIX0264-F4 | A config with 0.27.x keys prevented 0.26.x from loading during rollback. | `tests/disk0248.test.ts` (`^HOTFIX0264-F4:`) | 0.26.2 | fails on v0.26.1 (1 failing of 1) |

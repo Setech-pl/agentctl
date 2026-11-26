@@ -83,7 +83,7 @@ it('P64 a visible Codex-queued message stays pending past delivery_confirm_s; th
   assert.equal(done.pendingPrompt, undefined);
 });
 
-it('P64 once the queued echo is gone without hook or transcript, the timeout still applies', async () => {
+it('P64 once the queued echo is gone without hook or transcript, a busy-queued message stays queued – unconfirmed (0.26.3, READY0263-QUEUED)', async () => {
   const root = scratch.sub('gone');
   const config = makeConfig(root, 'capacity: {snapshot: false, codex_refresh: false}\n');
   let screen = queued;
@@ -105,5 +105,7 @@ it('P64 once the queued echo is gone without hook or transcript, the timeout sti
   assert.equal(await deliverPendingPrompt(ctx, 't1'), 'confirming', 'still visible: pending');
   screen = busy;
   await runner.sleep(61_000);
-  assert.equal(await deliverPendingPrompt(ctx, 't1'), 'needs-attention', 'gone without proof after the deadline: a human looks');
+  // Until 0.26.2 this escalated to needs-attention; a busy agent takes the message when its turn ends (ACTL-0261, HEMS-2-INT-38).
+  assert.equal(await deliverPendingPrompt(ctx, 't1'), 'confirming', 'gone without proof after the deadline: still queued – unconfirmed');
+  assert.equal(readTaskRecord(config, 't1')!.deliveryResult, 'queued-in-agent');
 });
