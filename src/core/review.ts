@@ -7,7 +7,7 @@ import type { Order } from './equivalents.ts';
 import { translate } from './equivalents.ts';
 import { inspectReport } from './report-state.ts';
 import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
-import type { TaskRecord } from './taskstore.ts';
+import type { RecordScan, TaskRecord } from './taskstore.ts';
 import { commitQueueAdd, readQueue } from './queue.ts';
 import { resolveSpec } from './spec.ts';
 import type { RawSpec } from './spec.ts';
@@ -38,14 +38,14 @@ export async function reviewOrder(ctx: Context, author: TaskRecord, review: Revi
 
 interface ReviewRun { hash: string; task: string; heads: Record<string, string> }
 /** The queue entry is durable before the ledger: an interrupted tick recovers by deterministic review ID. */
-export async function reviewTick(ctx: Context): Promise<string[]> {
+export async function reviewTick(ctx: Context, inventory?: RecordScan): Promise<string[]> {
   if (ctx.runner.dryRun) return [];
   const file = path.join(path.dirname(ctx.config.path), 'auto-reviews.json');
   return withFileLock(`${file}.lock`, async () => {
     let state: Record<string, ReviewRun[]> = {};
     try { state = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first tick */ }
     const added: string[] = [];
-    for (const author of listTaskRecords(ctx.config).filter(r => r.review && !r.reviewOf && !r.cancelled && !r.supersededBy)) {
+    for (const author of (inventory?.current ?? listTaskRecords(ctx.config)).filter(r => r.review && !r.reviewOf && !r.cancelled && !r.supersededBy)) {
       const report = inspectReport(ctx.config, author, ctx.runner.now(), !author.attemptId);
       if (!report.ready || !report.sentinel || !report.signature) continue;
       const runs = state[author.task] ??= [];
@@ -69,7 +69,7 @@ export async function reviewTick(ctx: Context): Promise<string[]> {
           bases[repo.path] = await git(base);
         }
         const { raw, delta } = buildReviewRaw(ctx, author, task, { task, ...order, review_of: author.task, review: false, after: [author.task], ...(author.cohort ? { cohort: author.cohort } : {}), ...(author.owner ? { owner: author.owner } : {}) }, heads, bases);
-        const known = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config), ...readQueue(ctx.config)].find(r => r.task === task);
+        const known = [...(inventory?.all ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]), ...readQueue(ctx.config)].find(r => r.task === task);
         if (known && (known.autoReview?.author !== author.task || known.autoReview.hash !== report.signature)) throw new AgentctlError(`${task} already exists and is not this automatic review; choose another task ID for the existing task`);
         if (!known) {
           const spec = (await planBatch(ctx, [resolveSpec(raw, { config: ctx.config })], { ignoreLimits: true, skipAfter: true }))[0]!;

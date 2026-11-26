@@ -88,27 +88,43 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     try { const spec = resolveSpec(splitSpecs(entry.spec, 'disk queue inventory')[0]!, { config: ctx.config }); return spec.host ? [] : spec.repos; }
     catch { return []; }
   });
+  const repoPaths = new Set<string>();
   for (const repo of [...records.flatMap((r) => r.repos), ...queuedRepos]) {
     targets.set(repo.worktree, repo.worktreeMount ?? inferredWorktreeMount(repo.worktree));
+    repoPaths.add(repo.path);
+  }
+  for (const repoPath of repoPaths) {
     try {
-      const project = loadProjectConfig(repo.path);
+      const project = loadProjectConfig(repoPath);
       if (project?.worktreeRoot) {
         const root = resolvePath(project.worktreeRoot);
         targets.set(root, project.worktreeMount ? resolvePath(project.worktreeMount) : inferredWorktreeMount(root));
       }
     } catch { /* invalid project config does not hide other volumes */ }
   }
+  const mounted = new Map<string, boolean>();
+  const onVolume = (mount: string): boolean => {
+    if (!mounted.has(mount)) mounted.set(mount, volumeMounted(mount));
+    return mounted.get(mount)!;
+  };
   const volumes = new Map<string, DiskVolume>();
   for (const [target, mount] of targets) {
-    if (mount && !volumeMounted(mount)) {
+    if (mount && !onVolume(mount)) {
       const key = `missing:${mount}`;
       if (volumes.has(key)) volumes.get(key)!.paths.push(target);
       else volumes.set(key, { mount, samplePath: target, paths: [target], device: null, availableBytes: null, totalBytes: null, level: 'unknown', error: 'volume missing' });
       continue;
     }
-    const ancestor = existingAncestor(target);
+    let ancestor = target;
     let device: string | null = null;
-    try { device = String(fs.statSync(ancestor).dev); } catch { /* n/d */ }
+    try {
+      const stat = fs.statSync(target, {throwIfNoEntry: false});
+      if (stat) device = String(stat.dev);
+      else {
+        ancestor = existingAncestor(path.dirname(target));
+        device = String(fs.statSync(ancestor).dev);
+      }
+    } catch { /* n/d */ }
     const key = device ?? target;
     if (volumes.has(key)) { const volume = volumes.get(key)!; volume.paths.push(target); if (mount) volume.mount ??= mount; continue; }
     volumes.set(key, { samplePath: ancestor, ...(mount ? { mount } : {}), device, paths: [target], availableBytes: null, totalBytes: null, level: 'unknown' });
@@ -201,8 +217,8 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   await recordJournal(ctx, { kind: 'gc-freed', text });
   return text;
 }
-async function persistDiskMeasurements(ctx: Context): Promise<void> {
-  const repos = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos);
+async function persistDiskMeasurements(ctx: Context, records?: TaskRecord[]): Promise<void> {
+  const repos = (records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host).flatMap(r => r.repos);
   const worktrees = [...new Set(repos.map(r => r.worktree))];
   const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [{...m, repo: repos.find(r => r.worktree === wt)?.path}] : []; });
   await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
@@ -210,34 +226,34 @@ async function persistDiskMeasurements(ctx: Context): Promise<void> {
 const refreshing = new Set<string>();
 const refreshed = new Map<string, number>();
 /** Incremental watch inventory: one stale worktree per tick, at most once per 5 seconds; workers run at nice 10. */
-export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
+export async function refreshDiskMeasurements(ctx: Context, records?: TaskRecord[]): Promise<void> {
   const key = ctx.config.path, now = ctx.runner.now();
   if (ctx.runner.dryRun || refreshing.has(key) || now - (refreshed.get(key) ?? -Infinity) < 5000) return;
   refreshed.set(key, now);
   restoreDiskMeasurements(ctx);
-  const targets = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
+  const targets = [...new Set((records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
   const target = targets.sort((a, b) => (lastMeasurement(a)?.at ?? 0) - (lastMeasurement(b)?.at ?? 0)).find(wt => !cachedMeasurement(wt) || now - lastMeasurement(wt)!.at >= DISK_INTERVAL_MS);
   if (!target) return;
   configureMeasurements(ctx.config.disk);
   refreshing.add(key);
   try {
     const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now() });
-    try { await lease.promise; await persistDiskMeasurements(ctx); }
+    try { await lease.promise; await persistDiskMeasurements(ctx, records); }
     finally { lease.release(); }
   } finally { refreshing.delete(key); }
 }
 const sampled = new Map<string, number>();
-export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>): Promise<void> {
+export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>, records?: TaskRecord[], collect = () => collectDisk(ctx, undefined, {records})): Promise<void> {
   const background = (label: string, work: Promise<void>) => {
     void work.catch(error => log?.(`${label}: ${error instanceof Error ? error.message : String(error)}`)).catch(() => undefined);
   };
   background('host health', refreshHostHealth(ctx));
-  background('worktree measurement', refreshDiskMeasurements(ctx));
+  background('worktree measurement', refreshDiskMeasurements(ctx, records));
   const file = path.join(path.dirname(ctx.config.path), 'disk-state.json');
   if (ctx.runner.dryRun || ctx.runner.now() - (sampled.get(file) ?? -Infinity) < DISK_INTERVAL_MS) return;
   sampled.set(file, ctx.runner.now());
   await withFileLock(`${file}.lock`, async () => {
-    const report = await collectDisk(ctx);
+    const report = await collect();
     let previous: Record<string, DiskLevel> = {};
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
     const next = { ...previous };

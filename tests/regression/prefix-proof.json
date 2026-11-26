@@ -1561,6 +1561,16 @@
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
     ]
   },
+  "REL0272-TICK-ROWS": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age",
+      "REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age"
+    ]
+  },
   "REVIEW0256-DOWNGRADE": {
     "rev": "v0.27.1",
     "outcome": "FAILS",

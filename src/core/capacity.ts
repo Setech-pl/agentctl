@@ -59,7 +59,7 @@ export function capacityTrend(samples: UsageSample[], provider: AgentName, windo
 
 export { refreshCodexCapacity } from './providers/codex-usage.ts';
 
-export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number; cachedOnly?: boolean; save?: boolean; rows?: StatusRow[]; live?: Awaited<ReturnType<typeof liveWindows>> } = {}) {
+export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: number; cachedOnly?: boolean; save?: boolean; rows?: StatusRow[]; live?: Awaited<ReturnType<typeof liveWindows>>; disk?: Awaited<ReturnType<typeof collectDisk>> | undefined } = {}) {
   const refreshNotes = perProvider(activeProviders(ctx.config), () => null as string | null);
   if (!opts.cachedOnly) for (const id of activeProviders(ctx.config)) refreshNotes[id] = await adapter(id).usage.refreshPlan?.(ctx) ?? null;
   const now = ctx.runner.now();
@@ -77,7 +77,7 @@ export async function collectCapacity(ctx: Context, opts: { diskBudgetMs?: numbe
   return {
     at: new Date(now).toISOString(),
     machine: collectMachine(ctx.config),
-    disk: await collectDisk(ctx, undefined, opts.diskBudgetMs === undefined ? {} : { budgetMs: opts.diskBudgetMs }),
+    disk: opts.disk ?? await collectDisk(ctx, undefined, opts.diskBudgetMs === undefined ? {} : { budgetMs: opts.diskBudgetMs }),
     hosts: loads.hosts ?? [],
     note: 'n/d = null. Plan percentages include use outside agentctl. Estimates are not provider token quotas.',
     providers: activeProviders(ctx.config).map((provider) => {

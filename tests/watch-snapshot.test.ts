@@ -4,7 +4,7 @@ import path from 'node:path';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import { runDoctor } from '../src/core/doctor.ts';
-import { MCP_TOOLS, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
+import { MCP_TOOLS, publishDegradedMcpSnapshot, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
@@ -17,6 +17,27 @@ function deferred<T>() {
 
 const diskStats = (free: number) => ({ bavail: free, blocks: 1000, bsize: 1024 ** 3 });
 const snapshotFile = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
+
+it('REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age', async () => {
+  const config = makeConfig(scratch.sub('degraded-rows'));
+  seedTask(config, 'LAST-GOOD', {closed: true});
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  await publishMcpSnapshot(ctx);
+  const good = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  await runner.sleep(13_000);
+  publishDegradedMcpSnapshot(ctx, good.capacity.disk, 'status collection');
+  const degraded = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  assert.deepEqual(degraded.rows, good.rows);
+  assert.equal(degraded.at, good.at);
+  assert.equal(degraded.degraded, 'status collection');
+  const deps = {context: () => ctx, notify: async () => {}};
+  const response = await MCP_TOOLS.find(tool => tool.name === 'status')!.run(deps, {format: 'json', all: true});
+  const status = JSON.parse(response.text);
+  assert.equal(status.tasks[0]?.task, 'LAST-GOOD');
+  assert.equal(status.snapshot_age_s, 13);
+  assert.match(status.snapshot_note, /status collection/);
+});
 
 it('SNAP0247: a hung disk notification times out while watch publishes and continues ticking', async t => {
   const config = makeConfig(scratch.sub('disk-watch'), 'watch: {interval: 2}\n');

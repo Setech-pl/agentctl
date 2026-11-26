@@ -52,7 +52,7 @@ import { CollisionMemory, collisionTick } from './collisions.ts';
 import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
-import { findRecordAnywhere, readTaskRecord, setHeaderField, snapshotRecords, taskFile } from './taskstore.ts';
+import { archiveDir, findRecordAnywhere, readTaskRecord, setHeaderField, TaskRecordIndex, taskFile, type RecordScan, type TaskRecord } from './taskstore.ts';
 import { syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
 import { errorMessage, formatDuration } from './util.ts';
@@ -93,6 +93,10 @@ export class WatchMemory {
   /** Queued tasks this watcher is in the middle of starting. */
   readonly queue = new QueueMemory();
   readonly launchHealth = new LaunchHealthMemory();
+  readonly archive = new TaskRecordIndex();
+  rows?: StatusRow[];
+  closedRows: WeakMap<TaskRecord, { version: string; row: StatusRow }> = new WeakMap();
+  closedConfig: GlobalConfig | undefined;
   /** The pairs of colliding tasks already announced, and when git was last asked. */
   readonly collisions = new CollisionMemory();
   readonly recoveredWrites = new Set<string>();
@@ -227,15 +231,17 @@ export async function restoreWindowNames(ctx: Context, memory: WatchMemory): Pro
 }
 
 /** Discover configured candidates for open tasks without overriding their screen/event state. */
-async function syncWaitingReports(ctx: Context, rows: StatusRow[]): Promise<boolean> {
+async function syncWaitingReports(ctx: Context, rows: StatusRow[], records: ReadonlyMap<string, TaskRecord>): Promise<boolean> {
   let copied = false;
   for (const row of rows) {
     if (row.report === 'yes' || row.closed || row.cancelled || row.archived) continue;
-    const record = readTaskRecord(ctx.config, row.windowName);
+    const record = records.get(row.windowName);
     if (!record || record.host) continue;
+    if (!record.reportCandidate && !row.reportCandidate) continue;
     const candidateBefore = record.reportCandidate;
-    const r = await syncReport(ctx, record).catch(() => undefined);
-    if (r && (r.action === 'copied' || r.action === 'updated' || record.reportCandidate !== candidateBefore)) copied = true;
+    const copy = { ...record };
+    const r = await syncReport(ctx, copy).catch(() => undefined);
+    if (r && (r.action === 'copied' || r.action === 'updated' || copy.reportCandidate !== candidateBefore)) copied = true;
   }
   return copied;
 }
@@ -269,7 +275,23 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   let observed: StatusRow[] | undefined, processed: StatusRow[] | undefined;
   const allRows = () => processed ?? observed;
   const activeRows = () => allRows()?.filter(r => !r.closed && !r.cancelled);
-  const collect = async () => collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await snapshotRecords(ctx.config, true)});
+  const inventory = async (): Promise<RecordScan> => {
+    const {config, runner} = ctx;
+    const [current, archived] = await Promise.all([
+      memory.launchHealth.records.current(config, runner.now()),
+      memory.archive.current(config, runner.now(), archiveDir(config)),
+    ]);
+    return {current, archived, all: [...current, ...archived]};
+  };
+  const collect = async () => {
+    if (memory.closedConfig !== ctx.config) {
+      memory.closedConfig = ctx.config;
+      memory.closedRows = new WeakMap();
+    }
+    return collectStatus(ctx, {progress: false, archived: true, verifyWatchLoss: true, records: await inventory(), watchClosedRows: memory.closedRows});
+  };
+  let diskSample: ReturnType<typeof collectDisk> | undefined;
+  const disk = async () => (diskSample ??= (async () => collectDisk(ctx, undefined, {records: (await inventory()).all}))());
   const startLog = async (text: string): Promise<void> => {
     await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${text}\n`);
     ctx.out(text);
@@ -301,6 +323,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     const config = ctx.config;
     if (memory.statusSweep?.config === config) {
       observed = memory.statusSweep.rows;
+      memory.rows = observed;
       memory.statusSweep = undefined;
       return;
     }
@@ -309,7 +332,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     const rows = await collect();
     if (ctx.config !== config || options.signal?.aborted) throw new Error('watch configuration or run changed during status collection');
     if (signal.aborted) memory.statusSweep = { config, rows };
-    else observed = rows;
+    else memory.rows = observed = rows;
   });
   stage('task delivery and reports', async signal => {
     if (!observed) throw Error('status collection incomplete');
@@ -354,10 +377,10 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       }
     }
     // A waiting agent may have written its report somewhere else than the spec says: record a candidate without changing the execution state.
-    if (!signal.aborted && await syncWaitingReports(ctx, allRows)) allRows = await collect();
+    if (!signal.aborted && await syncWaitingReports(ctx, allRows, records)) allRows = await collect();
     const ready = new Set(allRows.filter(row => row.state === 'report-ready').map(row => row.task));
     for (const record of current) if (!signal.aborted && (ready.has(record.task) || record.closed || record.cancelled)) await journalOutputs(ctx, record);
-    if (!signal.aborted) processed = allRows;
+    if (!signal.aborted) memory.rows = processed = allRows;
   }, 'status collection');
   for (const [name, run] of [
     ['limited recovery', (rows: StatusRow[]) => limitedTick(ctx, rows, notifier)],
@@ -368,13 +391,13 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     const awayChange = await awayTick(ctx);
     if (awayChange) await startLog(`away ${awayChange} (away.auto_idle)`);
   });
-  stage('reviews', () => reviewTick(ctx));
+  stage('reviews', async () => reviewTick(ctx, await inventory()));
   stage('consultations', () => consultTick(ctx));
   stage('blocked queue', () => processed ? announceBlocked(ctx, notifier, processed, {self: options.self, log: startLog}) : Promise.resolve(), 'task delivery and reports');
   stage('cohorts', () => processed ? cohortTick(ctx, notifier, processed, startLog) : Promise.resolve(), 'task delivery and reports');
   stage('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
   stage('machine load', () => recordMachineLoad(ctx));
-  stage('disk alerts', () => diskTick(ctx, notifier, startLog));
+  stage('disk alerts', async () => diskTick(ctx, notifier, startLog, (await inventory()).all, disk));
   stage('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
   stage('usage', () => usageTick(ctx, notifier, startLog));
   stage('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });
@@ -425,13 +448,13 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     stage('snapshot preparation', async signal => {
       const rows = allRows();
       if (!rows) throw Error('status collection incomplete');
-      await publishMcpSnapshot(ctx, rows, undefined, signal);
+      await publishMcpSnapshot(ctx, rows, undefined, signal, await disk());
       published = !signal.aborted;
     }, 'task delivery and reports');
     stage('degraded snapshot', async signal => {
       if (published || stateWriteFailure(snapshot)) return;
-      const disk = await collectDisk(ctx);
-      if (!signal.aborted) publishDegradedMcpSnapshot(ctx, disk, allRows() ? 'snapshot preparation' : 'status collection');
+      // Recovery can publish without redoing a slow disk inventory. A prior complete snapshot retains its age and rows.
+      if (!signal.aborted) publishDegradedMcpSnapshot(ctx, undefined, allRows() ? 'snapshot preparation' : 'status collection');
     }, 'snapshot preparation');
     stage('state write recovery event', async () => {
       if (published && snapshotFailed) memory.recoveredWrites.add('snapshot watch');
@@ -440,7 +463,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       memory.recoveredWrites.clear();
     }, 'snapshot preparation');
   }
-  stage('integration GC proposals', () => watchIntegrationGc(ctx, options.signal));
+  stage('integration GC proposals', async () => watchIntegrationGc(ctx, options.signal, await inventory()));
   const priority = memory.steps.priority(stages);
   if (priority) await execute(priority);
   for (const name of stages.keys()) await execute(name);
@@ -500,8 +523,8 @@ export async function reloadConfig(ctx: Context, store: ConfigStore, by = 'watch
 }
 
 /** One notification "N zadań do wznowienia" when the watcher starts and tasks can be resumed (`agentctl resume`). Returns how many. */
-export async function announceResumable(ctx: Context, notifier: Notifier): Promise<number> {
-  const n = (await findResumable(ctx)).filter(candidate => !candidate.explicitOnly).length;
+export async function announceResumable(ctx: Context, notifier: Notifier, rows?: StatusRow[]): Promise<number> {
+  const n = (await findResumable(ctx, {rows})).filter(candidate => !candidate.explicitOnly).length;
   if (n === 0) return 0;
   const text = resumeText(n);
   await ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  resume: ${text}\n`);
@@ -545,8 +568,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
   };
   let stalled = false;
   try {
-    // Inventory may be slow. Accept writes and recover interrupted starts from the first tick.
-    void memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', () => announceResumable(ctx, current));
+    let startupAnnounced = false;
     for (let tick = 0; !opts.signal?.aborted && (opts.maxTicks === undefined || tick < opts.maxTicks); tick++) {
       if (tick > 0) await ctx.runner.sleep(ctx.config.watch.interval * 1000, opts.signal);
       if (opts.signal?.aborted) break;
@@ -554,6 +576,11 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
       await reload();
       await watchTick(ctx, memory, current, { self: opts.self, signal: opts.signal,
         backgroundStarts: !ctx.runner.dryRun && opts.maxTicks === undefined && !opts.onTick });
+      if (!startupAnnounced && memory.rows) {
+        startupAnnounced = true;
+        const rows = memory.rows;
+        void memory.steps.run(ctx, watchLogPath(ctx), 'startup inventory', () => announceResumable(ctx, current, rows));
+      }
       if (!ctx.runner.dryRun && !opts.signal?.aborted) {
         try {
           atomicWriteFile(watchProgressPath(ctx.config), JSON.stringify({version, pid: process.pid, tick: tick + 1, startedAt, at: ctx.runner.now()}));
@@ -569,6 +596,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
         if (opts.onStall) opts.onStall();
         await memory.queue.idle();
         memory.launchHealth.close();
+        memory.archive.close();
         await memory.launchHealth.idle();
         memory = new WatchMemory(opts.observeStep);
       }
@@ -579,6 +607,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
   } finally {
     fileWatcher?.close();
     memory.launchHealth.close();
+    memory.archive.close();
     // A start in progress is not abandoned half way: the window and the prompt are its result.
     if (!stalled && !(memory.steps.stalled(ctx.runner.now()).length && opts.onStall)) {
       await memory.queue.idle();

@@ -530,24 +530,37 @@ export class TaskRecordIndex {
   private root?: string;
   private watcher?: fs.FSWatcher;
   private reconcileAt = 0;
+  private pending: Promise<TaskRecord[]> | undefined;
+  private generation = 0;
 
-  async current(config: GlobalConfig, now: number): Promise<TaskRecord[]> {
-    const root = config.stateDir;
-    if (this.root !== root || !this.watcher) {
+  current(config: GlobalConfig, now: number, root = config.stateDir): Promise<TaskRecord[]> {
+    if (this.root !== root) {
       this.close();
       this.root = root;
+    }
+    if (this.pending) return this.pending;
+    if (!this.watcher) {
       try {
         this.watcher = fs.watch(root, {recursive: true, persistent: false}, (_event, file) => {
           if (!file) { this.reconcileAt = 0; return; }
           const [window, leaf] = file.split(path.sep);
           if (window && (!leaf || leaf === 'TASK.md')) this.changed.add(window);
         });
+        this.reconcileAt = 0;
         this.watcher.on('error', () => this.close());
       } catch { /* a missing state directory will be retried */ }
     }
+    const generation = this.generation;
+    const pending = this.refresh(root, now, generation).finally(() => { if (this.pending === pending) this.pending = undefined; });
+    this.pending = pending;
+    return pending;
+  }
+
+  private async refresh(root: string, now: number, generation: number): Promise<TaskRecord[]> {
     if (now >= this.reconcileAt) {
       this.reconcileAt = now + 60_000;
       const all = await scanRecordsIn(root, true);
+      if (this.generation !== generation) return [];
       this.records.clear();
       for (const record of all) this.records.set(record.window, record);
     }
@@ -555,7 +568,8 @@ export class TaskRecordIndex {
     this.changed.clear();
     for (let i = 0; i < changes.length; i += SCAN_CHUNK) {
       await Promise.all(changes.slice(i, i + SCAN_CHUNK).map(async window => {
-        const record = await readRecordFileAsync(taskFile(config, window));
+        const record = await readRecordFileAsync(path.join(root, window, 'TASK.md'));
+        if (this.generation !== generation) return;
         if (record) this.records.set(window, record);
         else this.records.delete(window);
       }));
@@ -567,6 +581,8 @@ export class TaskRecordIndex {
     this.watcher?.close();
     this.watcher = undefined;
     this.root = undefined;
+    this.pending = undefined;
+    this.generation++;
     this.reconcileAt = 0;
     this.records.clear();
     this.changed.clear();

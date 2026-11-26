@@ -335,6 +335,8 @@ export async function exerciseCanary(world: CanaryWorld, opts: {
     assert.ok(gap < 60_000, `watch publication gap: ${gap} ms`);
     previousSnapshot = snap.at;
     metrics.maxSnapshotAgeMs = Math.max(metrics.maxSnapshotAgeMs, age, gap);
+    opts.sample?.(metrics);
+    if (opts.scale) assert.ok(elapsedMs <= 15_000, `WATCH_LATENCY tick ${tick}: ${elapsedMs.toFixed(1)} ms (limit 15000 ms)`);
     assert.ok(age < 60_000 && !snap.degraded, `snapshot age ${age} ms, degraded=${snap.degraded ?? 'no'}`);
     assert.ok(Array.isArray(snap.rows), 'watch snapshot has no task rows');
     metrics.states = [...new Set([...metrics.states, ...snap.rows.map(row => row.state)])].sort();

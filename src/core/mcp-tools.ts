@@ -2486,13 +2486,13 @@ function durableStatus(ctx: Context, scopedChat?: string): string {
     'Active tasks from journal/events (last known; no live window probe):',
     ...[...latest.values()].filter(e => !inactive.has(e.task!) && !['dead', 'launch-failed', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
-export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal): Promise<void> {
+export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal, disk?: DiskReport): Promise<void> {
   if (ctx.runner.dryRun) return;
   const deps: McpDeps = { context: () => ctx, notify: async () => {} };
   const observed = rows ?? await collectStatus(ctx, {archived: true});
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
-  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live});
+  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live, disk});
   const limits = collectLimits(ctx.config, live, ctx.runner.now(), true, observed);
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
@@ -2524,14 +2524,13 @@ function writeWatchSnapshot(ctx: Context, snapshot: object): void {
   atomicWriteFile(watchSnapshotPath(ctx.config), JSON.stringify(snapshot));
 }
 
-export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport, step: string): void {
-  let capacity: Capacity | undefined;
+export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport | undefined, step: string): void {
+  let previous: Record<string, unknown> | undefined;
   try {
-    const previous = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
-    capacity = previous.capacity;
-  } catch { /* no previous capacity */ }
-  writeWatchSnapshot(ctx, { version: 1, at: ctx.runner.now(), degraded: step, disk,
-    ...(capacity ? {capacity: {...capacity, disk}} : {}) });
+    previous = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
+  } catch { /* no previous snapshot */ }
+  const now = ctx.runner.now();
+  writeWatchSnapshot(ctx, { ...previous, version: 1, at: previous?.at ?? now, degraded: step, degraded_at: now, ...(disk ? {disk} : {}) });
 }
 
 async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
@@ -2551,7 +2550,8 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     const warning = watchSnapshotWarning(snap.at, now);
     const explicit = args.capacity === true || args.detail === true;
     const disk = snap.disk ?? snap.capacity?.disk;
-    if ((warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
+    const retainedRows = name === 'status' && !!snap.degraded && Array.isArray(snap.rows) && !!snap.capacity && Array.isArray(snap.queue);
+    if (!retainedRows && (warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
       const stepWarning = watchStepWarning(ctx.config) ?? (snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`);
       const note = [`${ageLine(snap.at, now)}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, stepWarning].filter(Boolean).join(' ');
       if (name === 'doctor') return ok(JSON.stringify([...snap.doctor ?? [], {name: 'watch snapshot', status: 'warn', detail: note, snapshot_age_s: age / 1000}], null, 2));
@@ -2569,11 +2569,11 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     // A healthy, complete scheduling snapshot still describes the last tick when its
     // nominal interval was missed. Config, reservations and holds are checked separately.
     const readAgeLimit = ['limits', 'queue_list'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
-    if (snap.degraded || (age >= readAgeLimit && !(name === 'capacity' || name === 'status' && explicit))
+    if (!retainedRows && (snap.degraded || (age >= readAgeLimit && !(name === 'capacity' || name === 'status' && explicit))
       || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
       || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now))
-      || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
-    const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
+      || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'))) return undefined;
+    const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.${retainedRows ? ` Watch: pominięty etap – ${snap.degraded}.` : ''}`;
     if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
@@ -2584,7 +2584,7 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
       const rows = shownRows(allRows, Boolean(args.all));
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
-      const statusData = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
+      const statusData = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(retainedRows ? {snapshot_note: note} : {}), ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
       const overlaps = shown.filter(r => r.collide.length > 0).length;
       text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...reservationLines(ctx.config, now), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
       const capacity: Capacity = snap.capacity;

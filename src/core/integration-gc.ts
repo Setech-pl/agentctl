@@ -168,7 +168,7 @@ export async function applyIntegrationGc(ctx: Context, plan: GcPlan, space = new
 }
 
 /** The first sighting is a baseline. Only a forward movement of a known local ref can propose deletion. */
-export async function watchIntegrationGc(ctx: Context, signal?: AbortSignal): Promise<void> {
+export async function watchIntegrationGc(ctx: Context, signal?: AbortSignal, inventory?: import('./taskstore.ts').RecordScan): Promise<void> {
   if (ctx.runner.dryRun || signal?.aborted) return;
   const config = ctx.config;
   const state = path.join(config.stateDir, 'integration-gc.json');
@@ -176,8 +176,9 @@ export async function watchIntegrationGc(ctx: Context, signal?: AbortSignal): Pr
     if (fs.existsSync(state)) fs.unlinkSync(state);
     return;
   }
-  const all = records(ctx);
-  const repositories = new Set(all.flatMap(record => record.repos.map(repo => location(repo.path))));
+  const all = inventory ? inventory.all.filter(record => !record.host) : records(ctx);
+  const candidates = new Set(all.flatMap(record => record.repos.map(repo => repo.path)));
+  const repositories = new Set([...candidates].map(location));
   if (!repositories.size) return;
   let seen: Record<string, string> = {};
   try { seen = JSON.parse(fs.readFileSync(state, 'utf8')); } catch { /* first observation */ }
