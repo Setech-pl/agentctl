@@ -162,6 +162,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`, `set_limits`, `reserve`, `resume` (full list below); `wall` allows the three WALL writes (`wall_post`, `wall_reply`, `wall_set_status`). Read again on every call. |
+| `mcp.gc_scope` | enum | `all` | g | `owner` reserves GC writes for the owner CLI. `own-cohort` limits each chat to the cohorts it exclusively owns. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` and `cancel` from the chat may also remove the git worktree (never forced). |
 
 ### `wall`

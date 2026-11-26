@@ -293,8 +293,8 @@ describe('mcp: writing is off by default', () => {
     assert.deepEqual(merge.allow, ['send']);
     assert.match(merge.warnings.join('\n'), /config\.mcp\.allow: "merge" is not a write tool of this version, ignored \(allowed: send, answer, new, interrupt, close, move, queue, queue_rm, cancel, mark, set_limits, reserve, resume, away,.*gc, wall_post, wall_reply, wall_set_status, consult, pin, unpin; groups: queue:\*, cohort, manager:\*, wall\)/);
     assert.match(makeConfig(scratch.sub('w3b'), 'mcp: {allow: [shell]}\n').mcp.warnings.join(), /"shell" is not a write tool/);
-    assert.deepEqual(makeConfig(scratch.sub('w3c')).mcp, { maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] });
-    assert.deepEqual(makeConfig(scratch.sub('w3d'), 'mcp: {allow: [send, send, close], allow_rm_worktree: true}\n').mcp, { maxResponseKb: 8, allow: ['send', 'close'], allowRmWorktree: true, warnings: [] });
+    assert.deepEqual(makeConfig(scratch.sub('w3c')).mcp, { gcScope: 'all', maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] });
+    assert.deepEqual(makeConfig(scratch.sub('w3d'), 'mcp: {allow: [send, send, close], allow_rm_worktree: true}\n').mcp, { gcScope: 'all', maxResponseKb: 8, allow: ['send', 'close'], allowRmWorktree: true, warnings: [] });
     for (const t of MCP_TOOLS) assert.ok(!/shell|merge|push/.test(t.name), t.name);
   });
 

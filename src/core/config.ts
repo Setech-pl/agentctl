@@ -1140,7 +1140,8 @@ function stripForwardConfig(raw: Record<string, unknown>): string[] {
   strip(raw, '', ['launch', 'placement', 'perf']);
   if (isObject(raw.limits)) strip(raw.limits, 'limits.', ['change_policy', 'profiles', 'schedule', 'active_profile', 'timed_overrides']);
   if (isObject(raw.hosts)) {
-    strip(raw.hosts, 'hosts.', ['local']);
+    // Older configs could use `local` as the name of an ordinary SSH host.
+    if (!isObject(raw.hosts.local) || !Object.hasOwn(raw.hosts.local, 'ssh')) strip(raw.hosts, 'hosts.', ['local']);
     for (const [name, host] of Object.entries(raw.hosts)) {
       if (isObject(host)) strip(host, `hosts.${name}.`, ['max_total', 'load_threshold', 'availability', 'sync', 'mac_ssh', 'fetch_remote', 'trust_work_dir']);
     }

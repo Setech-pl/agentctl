@@ -682,6 +682,9 @@ hosts:
   assert.equal(config.warnings?.length, 1);
   assert.match(config.warnings![0]!, /0\.27\.x.*limits\.profiles.*hosts\.local.*hosts\.pc\.availability/);
   assert.throws(() => makeConfig(scratch.sub('forward-typo'), 'placemet: {}'), /unknown key/);
+  const legacy = makeConfig(scratch.sub('legacy-ssh-local'), 'hosts: {local: {ssh: owner@old, work_dir: ~/work, repos: {app: ~/app}, providers: [claude]}}');
+  assert.equal(legacy.hosts.local?.ssh, 'owner@old');
+  assert.equal(legacy.warnings, undefined);
 });
 
 it('MCP purge_trash previews and confirms receipts via watch with measured free blocks', async t => {
