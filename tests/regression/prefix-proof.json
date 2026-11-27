@@ -636,6 +636,16 @@
       "FIELD0256-STALE: a cached snapshot drops a reading as its reset passes"
     ]
   },
+  "FIELD0268-BOARD": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-BOARD: Down reaches pulled groups and End or G selects the final header",
+      "FIELD0268-BOARD: Down reaches pulled groups and End or G selects the final header"
+    ]
+  },
   "FIX-331D4A3": {
     "rev": "bf115b61891277afd3c99824fb596367b723f434",
     "outcome": "FAILS",

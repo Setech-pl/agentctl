@@ -512,3 +512,19 @@ it('HELP-HEIGHT: help fits the terminal and scrolls to every key without header 
     assert.equal(state.mode.kind, 'list');
   }
 });
+
+it('FIELD0268-BOARD: Down reaches pulled groups and End or G selects the final header', () => {
+  const pulled = { state: 'report-ready', finished: true, report: 'yes', pulled: '2026-11-01T08:00:00Z' } as const;
+  const state = { ...boardOf([
+    row('RUNNING'), row('ALPHA', { ...pulled, cohort: 'alpha' }), row('BETA', { ...pulled, cohort: 'beta' }),
+  ]), now: Date.parse('2026-11-02T08:00:00Z'), pulledCollapseAfter: 1 };
+  const alpha = press(state, '', { downArrow: true }).state;
+  assert.equal(alpha.selected, '@pulled:alpha');
+  const expanded = press(alpha, '', { return: true }).state;
+  assert.equal(press(expanded, '', { downArrow: true }).state.selected, 'ALPHA');
+  for (const last of [press(state, 'G').state, press(state, '', { end: true } as KeyPress).state]) {
+    assert.equal(last.selected, '@pulled:beta');
+    assert.equal(press(last, '', { downArrow: true }).state.selected, last.selected);
+  }
+  assert.deepEqual(press(state, 'D').effects, [{ type: 'view', what: 'gc' }]);
+});

@@ -166,7 +166,7 @@ export type BoardMode =
   | { kind: 'help'; offset?: number }
   /** `l`: the history of the tasks (`agentctl log`), scrolled with the arrows. */
   | { kind: 'log'; lines: string[]; offset: number }
-  /** `L` (limits), `G` (gc preview), `H` (hosts): a page of lines from the core, scrolled with the arrows. */
+  /** `L` (limits), `D` (gc preview), `H` (hosts): a page of lines from the core, scrolled with the arrows. */
   | { kind: 'view'; what: ViewKind; lines: string[]; offset: number; limits?: LimitsPanel }
   /** `W`: the WALL (board-wall.ts): channels, the messages of one (status/kind filters), one message with its thread. */
   | { kind: 'wall'; archive?: boolean; level: 'channels' | 'messages' | 'message'; channel: number; message: number; id: string | null; status: WallStatus | null; wallKind: WallKind | null; lines: string[]; offset: number };
@@ -294,6 +294,7 @@ export interface KeyPress {
   rightArrow?: boolean;
   pageUp?: boolean;
   pageDown?: boolean;
+  end?: boolean;
   return?: boolean;
   escape?: boolean;
   backspace?: boolean;
@@ -454,10 +455,11 @@ function listKey(state: BoardState, input: string, key: KeyPress, previewRoom: n
 
   // k is the cohort filter now; the arrow up moves up (j still moves down).
   const move = key.upArrow ? -1 : key.downArrow || input === 'j' ? 1 : 0;
-  if (move !== 0) {
+  const jumpToEnd = key.end || (input === 'G' && !key.ctrl && !key.meta);
+  if (move !== 0 || jumpToEnd) {
     const listed = navTasks(state);
     if (listed.length === 0) return stay();
-    const next = Math.min(listed.length - 1, Math.max(0, Math.max(state.selected === null ? -1 : listed.indexOf(state.selected), 0) + move));
+    const next = jumpToEnd ? listed.length - 1 : Math.min(listed.length - 1, Math.max(0, listed.indexOf(state.selected ?? '') + move));
     const task = listed[next] as string;
     if (task === state.selected) return stay();
     return stay({ ...state, selected: task, notice: null }, [{ type: 'refresh' }]);
@@ -478,7 +480,7 @@ function listKey(state: BoardState, input: string, key: KeyPress, previewRoom: n
   }
   if (input === '?') return stay({ ...state, mode: { kind: 'help' } });
   if (input === 'l') return stay({ ...state, notice: null, mode: { kind: 'log', lines: ['Loading…'], offset: 0 } }, [{ type: 'log' }]);
-  const view: ViewKind | null = input === 'C' ? 'capacity' : input === 'L' ? 'limits' : input === 'G' ? 'gc' : input === 'H' ? 'hosts' : null;
+  const view: ViewKind | null = input === 'C' ? 'capacity' : input === 'L' ? 'limits' : input === 'D' ? 'gc' : input === 'H' ? 'hosts' : null;
   if (view) return stay({ ...state, notice: null, mode: { kind: 'view', what: view, lines: ['Loading…'], offset: 0 } }, [{ type: 'view', what: view }]);
   // o / p / f: how a finished task turned out. `p` is also the queue's pause: it marks only while a finished task is selected.
   const result = input === 'o' ? 'ok' : input === 'p' ? 'partial' : input === 'f' ? 'fail' : null;
@@ -531,7 +533,7 @@ function listKey(state: BoardState, input: string, key: KeyPress, previewRoom: n
     const group = groupOf(cohort);
     const folded = state.folded.includes(group) ? state.folded.filter((g) => g !== group) : [...state.folded, group];
     const next = keepSelection({ ...state, notice: null, folded });
-    return stay(withNotice(next, 'info', folded.includes(group) ? `${cohort ?? 'bez kohorty'}: folded (G opens all groups).` : `${cohort ?? 'bez kohorty'}: open.`), next.selected !== state.selected ? [{ type: 'refresh' }] : []);
+    return stay(withNotice(next, 'info', folded.includes(group) ? `${cohort ?? 'bez kohorty'}: folded (E opens all groups).` : `${cohort ?? 'bez kohorty'}: open.`), next.selected !== state.selected ? [{ type: 'refresh' }] : []);
   }
   if (input === 'X') {
     const target = queued ?? selectedRow(state);
@@ -1437,7 +1439,8 @@ export const HELP_LINES: string[] = [
   '  g / E       fold the cohort group of the selected task / open all groups',
   '  L           limity, profile i decyzje o zmianach (+/−, Enter, a/r)',
   '  C           current capacity (plans, pace, slots, stats, estimates)',
-  '  G           preview of the clean-up (agentctl gc): what would be freed',
+  '  End / G     jump to the last selectable row',
+  '  D           preview of the clean-up (agentctl gc): what would be freed',
   '  R           resume the tasks under "Do wznowienia" (asks first)',
   '  w           away on or off (asks first): notifications to the phone',
   '  h           hide the task (or show a hidden one); nothing is closed or removed',

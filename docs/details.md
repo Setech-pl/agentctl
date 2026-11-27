@@ -549,7 +549,8 @@ shows the last 30 lines of the selected window (as `peek`, without the footer); 
 | `k` | pick the cohort to show: `wszystkie` (all), a cohort, or `bez kohorty` (the tasks in no cohort); `↑↓` and `Enter`, or its number. The header says `cohort: <name>`; the lists, the queue and the sections follow the filter |
 | `g` / `E` | fold the cohort group of the selected task / open every group |
 | `L` | the limits (`agentctl limits`) |
-| `G` | preview of the clean-up (`agentctl gc`; nothing is deleted from the board) |
+| `End` / `G` | jump to the last selectable row |
+| `D` | preview of the clean-up (`agentctl gc`; nothing is deleted from the board) |
 | `R` | resume the tasks under "Do wznowienia" (after y/N) |
 | `h` | hide the selected task (or show a hidden one); nothing is closed or removed |
 | `u` | on a task of the **Queue (N)** section: move it to the front of the queue |

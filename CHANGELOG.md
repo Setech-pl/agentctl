@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Board Down reaches the pulled-report groups, End or G jumps to the final selectable row, and D opens the GC preview. / Na tablicy strzałka w dół dochodzi do grup odebranych raportów, End lub G skacze do ostatniego wiersza, a D otwiera podgląd GC.
+
 - Watch preserves the last complete snapshot when its task inventory cannot be read. / Watch zachowuje ostatni pełny snapshot, gdy odczyt katalogu zadań kończy się błędem.
 - Watch checks unchanged queue entries by file version and continues reading task headers while one file is delayed. Writing watch progress no longer rechecks every active task. / Watch sprawdza niezmienione wpisy kolejki po wersji pliku i czyta kolejne nagłówki podczas opóźnionego odczytu. Zapis postępu nie powoduje ponownego sprawdzania aktywnych zadań.
 - Watch publishes complete rows before launching maintenance and shares its task inventory with usage sampling. The first tick still includes loading the initial inventory. / Watch publikuje pełne wiersze przed pracami pomocniczymi i używa wspólnego indeksu do odczytu zużycia. Pierwszy przebieg obejmuje początkowy odczyt indeksu.

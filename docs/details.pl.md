@@ -549,7 +549,8 @@ pokazuje ostatnie 30 linii wybranego okna (jak `peek`, bez stopki); poniżej lis
 | `k` | wybierz kohortę do pokazania: `wszystkie`, kohorta albo `bez kohorty` (zadania bez żadnej kohorty); `↑↓` i `Enter`, albo jej numer. Nagłówek mówi `cohort: <nazwa>`; listy, kolejka i sekcje podążają za filtrem |
 | `g` / `E` | zwiń grupę kohorty wybranego zadania / rozwiń wszystkie grupy |
 | `L` | limity (`agentctl limits`) |
-| `G` | podgląd sprzątania (`agentctl gc`; board niczego nie usuwa) |
+| `End` / `G` | skok do ostatniego wybieralnego wiersza |
+| `D` | podgląd sprzątania (`agentctl gc`; board niczego nie usuwa) |
 | `R` | wznów zadania z sekcji „Do wznowienia” (po y/N) |
 | `h` | ukryj wybrane zadanie (albo pokaż ukryte); nic nie jest zamykane ani usuwane |
 | `u` | na zadaniu z sekcji **Queue (N)**: przesuń je na początek kolejki |
