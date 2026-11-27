@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A paused automatic GC plan survives a temporarily unavailable free-space reading. / Wstrzymany plan automatycznego GC pozostaje dostępny, gdy odczyt wolnego miejsca chwilowo nie działa.
+
 - Board, limits and doctor show when the config was rejected and which version remains loaded. MCP tool responses flag an older server than watch. / Tablica, limity i doctor pokazują czas odrzucenia konfiguracji i wersję używaną dalej. Odpowiedzi MCP sygnalizują serwer starszy od watch.
 - Events list the unpulled report names within the response budget. Watch refreshes sizes in bounded batches and replays observed transitions after a skipped journal stage or restart. / Zdarzenia podają nazwy nieodebranych raportów w granicach limitu odpowiedzi. Watch odświeża pomiary partiami i odtwarza wykryte zmiany po pominięciu etapu dziennika lub restarcie.
 

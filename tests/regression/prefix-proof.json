@@ -680,6 +680,16 @@
       "FIELD0268-DISK: one bounded tick refreshes multiple 31-hour-old worktree samples"
     ]
   },
+  "FIELD0268-GC-RESUME-IO": {
+    "rev": "f63261cecbf52e7285e400d3c1a1c41434c3e835",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-GC-RESUME-IO: an unavailable pressure sample preserves the paused inventory across mount aliases",
+      "FIELD0268-GC-RESUME-IO: an unavailable pressure sample preserves the paused inventory across mount aliases"
+    ]
+  },
   "FIELD0268-JOURNAL": {
     "rev": "v0.26.4",
     "outcome": "FAILS",

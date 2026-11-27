@@ -203,7 +203,7 @@ class DiscardPreview extends Error {}
 
 const previews = new Map<string, AutoGcPreview>();
 const previewKey = (ctx: Context, volumes: AutoGcVolume[]) => JSON.stringify([
-  ctx.config.cache, ctx.config.disk.minFreeStartGb, ctx.config.disk.autoGc, volumes,
+  ctx.config.cache, ctx.config.disk.minFreeStartGb, ctx.config.disk.autoGc, [...new Set(volumes.map(volume => volume.device))],
 ]);
 
 /** One invocation at a time. A deadline slice releases the lock, and the next preview resumes without rescanning. */
@@ -227,9 +227,11 @@ export async function runAutoGc(ctx: Context, volumes: AutoGcVolume[], held = fa
       const pressure = await Promise.all(volumes.map(async volume => {
         if (deviceAt(volume.path) !== volume.device) return false;
         const free = await GcSpace.available(volume.path);
-        return free !== undefined && free < threshold && free < policy.targetFreeGb * GiB;
+        return free === undefined ? undefined : free < threshold && free < policy.targetFreeGb * GiB;
       }));
-      if (!pressure.some(Boolean)) {
+      if (!pressure.includes(true)) {
+        // Missing pressure readings leave a suspended preview intact for the next tick.
+        if (pressure.includes(undefined)) return;
         preview.discard();
         previews.delete(key);
         preview = undefined;
@@ -300,7 +302,7 @@ async function executeAutoGc(ctx: Context, volumes: AutoGcVolume[], held: boolea
   for (const volume of volumes) {
     const before = active.get(volume.device);
     if (before === undefined) continue;
-    const started = ctx.runner.now();
+    const started = run.activeTime();
     let current = before;
     let planned = 0, estimatedBytes = 0, removed = 0;
     const targets: AutoGcSummary['targets'] = [];
@@ -353,7 +355,7 @@ async function executeAutoGc(ctx: Context, volumes: AutoGcVolume[], held: boolea
     await measureSkips(skipped);
     const blockers = blockersFor(skipped);
     const summary: AutoGcSummary = { volume, planned, targets, estimatedBytes, removed, freedBytes: after === undefined ? null : Math.max(0, after - before),
-      freeBytes: after ?? before, remaining, blockers, dryRun: policy.dryRun, durationMs: Math.max(0, ctx.runner.now() - started), prechecks: run.stats.prechecks };
+      freeBytes: after ?? before, remaining, blockers, dryRun: policy.dryRun, durationMs: Math.max(0, run.activeTime() - started), prechecks: run.stats.prechecks };
     const stableBlocks = skipped.map(item => JSON.stringify([item.kind, item.task, item.target, item.reason])).sort();
     const signature = createHash('sha256').update(JSON.stringify({ policy, items: ordered, blockers: stableBlocks, remaining: stopped ? 'stopped' : remaining })).digest('hex');
     const last = previous[volume.device];
@@ -367,7 +369,10 @@ async function executeAutoGc(ctx: Context, volumes: AutoGcVolume[], held: boolea
     summaries.push(summary);
     if (stopped) break;
   }
-  if (!summaries.length) return;
+  if (!summaries.length) {
+    if (Object.keys(next).length !== Object.keys(previous).length) await ctx.runner.writeFile(stateFile, JSON.stringify(next));
+    return;
+  }
   const gib = (bytes: number) => `${(bytes / GiB).toFixed(2)} GiB`;
   const overview = summaries.map(summary => {
     const action = summary.dryRun ? `plan: ${summary.planned} pozycji (${gib(summary.estimatedBytes)})`
@@ -383,7 +388,11 @@ async function executeAutoGc(ctx: Context, volumes: AutoGcVolume[], held: boolea
   const body = samples.length ? `${overview}\n\n${samples.join('\n')}` : overview;
   const subject = policy.dryRun ? 'Automatyczne GC — plan' : 'Automatyczne GC — wynik';
   await recordJournal(ctx, { kind: 'disk-auto-gc', text: `${subject}\n${body}`, diskGc: summaries });
-  const origin = createHash('sha256').update(JSON.stringify(summaries.map(({volume}) => [volume.device, previous[volume.device] ?? null, next[volume.device] ?? null]))).digest('hex');
+  const origins = summaries.map(({volume}) => {
+    const receipt = next[volume.device];
+    return [volume.device, previous[volume.device] ?? null, typeof receipt === 'object' ? receipt.signature : null];
+  });
+  const origin = createHash('sha256').update(JSON.stringify(origins)).digest('hex');
   await postMessage(ctx, OWNER_IDENTITY, { channel: WALL_TOOL_CHANNEL, kind: 'info', subject, body: body.slice(0, 4000), ...(policy.dryRun ? { origin: `auto-gc:${origin}` } : {}) });
   await ctx.runner.writeFile(stateFile, JSON.stringify(next));
 }

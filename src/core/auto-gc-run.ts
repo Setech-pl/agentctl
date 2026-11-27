@@ -36,6 +36,7 @@ export class AutoGcRun {
   private deadline: number;
   readonly key: string;
   private ops = 0;
+  private pausedMs = 0;
   private scan?: Promise<RecordScan>;
   private liveSet?: Promise<Set<string>>;
   private refs?: Promise<{ source: string; any: boolean; real: string }[]>;
@@ -70,8 +71,14 @@ export class AutoGcRun {
     this.deadline = this.ctx.runner.now() + this.policy.maxRunS * 1000;
   }
 
+  activeTime(): number { return this.ctx.runner.now() - this.pausedMs; }
+
   async checkpoint(): Promise<void> {
-    if (this.suspend && !this.signal?.aborted && this.ctx.runner.now() >= this.deadline) await this.suspend();
+    if (this.suspend && !this.signal?.aborted && this.ctx.runner.now() >= this.deadline) {
+      const pausedAt = this.ctx.runner.now();
+      await this.suspend();
+      this.pausedMs += Math.max(0, this.ctx.runner.now() - pausedAt);
+    }
     this.check();
   }
 

@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0268-GC-RESUME-IO | A missing free-space sample or a different mount alias discarded a paused GC plan. | `tests/autogc0266.test.ts` (`^FIELD0268-GC-RESUME-IO:`) | 0.27.2 | fails on f63261cecbf52e7285e400d3c1a1c41434c3e835 (1 failing of 1) |
 | FIELD0268-AUTOGC | Automatic GC announced incomplete previews, discarded deadline progress and showed pinned worktrees as zero bytes. | `tests/autogc0266.test.ts` (`^FIELD0268-AUTOGC:`) | 0.27.2 | fails on v0.26.4 (2 failing of 2) |
 | FIELD0268-CONFIG | Invalid configuration lacked version timestamps and older MCP sessions did not identify the newer watcher. | `tests/config-reload.test.ts` (`^FIELD0268-CONFIG:`)<br>`tests/mcp-server.test.ts` (`^FIELD0268-CONFIG:`) | 0.27.2 | fails on v0.26.4 (2 failing of 2) |
 | FIELD0268-REPORTS | The events summary listed only five of the unpulled reports shown on the board. | `tests/ux0228-status.test.ts` (`^FIELD0268-REPORTS:`) | 0.27.2 | fails on v0.26.4 (1 failing of 1) |

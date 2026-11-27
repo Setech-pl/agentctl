@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0268-GC-RESUME-IO', fixedIn: '0.27.2', proofAgainst: 'f63261cecbf52e7285e400d3c1a1c41434c3e835', symptom: 'A missing free-space sample or a different mount alias discarded a paused GC plan.', scenarios: [s('autogc0266.test.ts', '^FIELD0268-GC-RESUME-IO:')] },
   { id: 'FIELD0268-AUTOGC', fixedIn: '0.27.2', proofAgainst: 'v0.26.4', symptom: 'Automatic GC announced incomplete previews, discarded deadline progress and showed pinned worktrees as zero bytes.', scenarios: [s('autogc0266.test.ts', '^FIELD0268-AUTOGC:')] },
   { id: 'FIELD0268-CONFIG', fixedIn: '0.27.2', proofAgainst: 'v0.26.4', symptom: 'Invalid configuration lacked version timestamps and older MCP sessions did not identify the newer watcher.', scenarios: [s('config-reload.test.ts', '^FIELD0268-CONFIG:'), s('mcp-server.test.ts', '^FIELD0268-CONFIG:')] },
   { id: 'FIELD0268-REPORTS', fixedIn: '0.27.2', proofAgainst: 'v0.26.4', symptom: 'The events summary listed only five of the unpulled reports shown on the board.', scenarios: [s('ux0228-status.test.ts', '^FIELD0268-REPORTS:')] },
