@@ -10,6 +10,9 @@ const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const SERVER = `const http=require('node:http'),fs=require('node:fs'); let failures=Number(process.argv[3]); http.createServer((req,res)=>{let body='';req.on('data',c=>body+=c);req.on('end',()=>{const status=failures-->0?503:200;fs.appendFileSync(process.argv[2],JSON.stringify({at:Date.now(),body,status})+'\\n');res.writeHead(status);res.end('{}')})}).listen(Number(process.argv[1]),'127.0.0.1')`;
 async function freePort(): Promise<number> { return new Promise((resolve) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const port = (s.address() as net.AddressInfo).port; s.close(() => resolve(port)); }); }); }
 const results: unknown[] = [];
+// The desktop notifier of this platform (src/core/notify.ts): terminal-notifier with an osascript fallback on macOS,
+// notify-send alone on Linux (no fallback chain exists there, so a failing notify-send has no second channel).
+const LOCAL = process.platform === 'darwin' ? { primary: 'terminal-notifier', fallback: 'osascript' as string | undefined } : { primary: 'notify-send', fallback: undefined };
 async function trial(id: number, parallel: boolean, retry = false, fallback = false): Promise<void> {
   const port = await freePort();
   await withHarness({ name: `dispatcher-race-${id}`, cacheRoot: CACHE, config: `watch:\n  interval: 1\nnotify:\n  backend: auto\n  ntfy:\n    server: http://127.0.0.1:${port}\n    topic: race-local-only\n` }, async (h) => {
@@ -27,7 +30,7 @@ async function trial(id: number, parallel: boolean, retry = false, fallback = fa
       assert.equal(h.agentctl(['away', 'on']).code, 0);
       h.spawnAgentctl(['watch'], path.join(h.root, 'watch.log'));
       await pause(2000);
-      const notifier = path.join(h.fakeBin, 'terminal-notifier');
+      const notifier = path.join(h.fakeBin, LOCAL.primary);
       fs.writeFileSync(notifier, fs.readFileSync(notifier, 'utf8').replace('exit 0', `sleep 3\n${fallback ? 'exit 1' : 'exit 0'}`));
       const report = path.join(h.root, 'cache', task.toLowerCase(), `${task}.md`);
       fs.mkdirSync(path.dirname(report), { recursive: true }); fs.writeFileSync(report, 'Werdykt: PASS\n<!-- agentctl:report-end -->');
@@ -40,8 +43,8 @@ async function trial(id: number, parallel: boolean, retry = false, fallback = fa
       const reports = posts.filter((p) => p.body.includes(task) && p.body.includes('raport gotowy'));
       const accepted = reports.filter((p) => p.status === 200);
       const local = fs.readFileSync(h.notifyLog, 'utf8').split('\n').filter((l) => l.includes(task) && l.includes('raport gotowy'));
-      const counts = { eventCode, requests: reports.length, accepted: accepted.length, terminal: local.filter((l) => l.startsWith('terminal-notifier')).length, fallback: local.filter((l) => l.startsWith('osascript')).length };
-      const ok = eventCode === 0 && accepted.length === 1 && reports.length === (retry ? 2 : 1) && counts.terminal === 1 && counts.fallback === (fallback ? 1 : 0);
+      const counts = { eventCode, requests: reports.length, accepted: accepted.length, primary: LOCAL.primary, terminal: local.filter((l) => l.startsWith(LOCAL.primary)).length, fallback: LOCAL.fallback ? local.filter((l) => l.startsWith(LOCAL.fallback!)).length : 0 };
+      const ok = eventCode === 0 && accepted.length === 1 && reports.length === (retry ? 2 : 1) && counts.terminal === 1 && counts.fallback === (fallback && LOCAL.fallback ? 1 : 0);
       results.push({ id, parallel, retry, fallback, ok, counts, snapshot, posts, ledger: fs.readFileSync(path.join(h.root, 'state', task.toLowerCase(), 'notified.json'), 'utf8'), journal: fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8') });
       console.log(`${ok ? 'PASS' : 'FAIL'} race ${id}: ${JSON.stringify(counts)}`);
     } finally { mock.kill('SIGTERM'); await new Promise((resolve) => mock.once('close', resolve)); }
