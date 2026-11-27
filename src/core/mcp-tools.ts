@@ -2646,7 +2646,9 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     }
     // A healthy, complete scheduling snapshot still describes the last tick when its
     // nominal interval was missed. Config, reservations and holds are checked separately.
-    const readAgeLimit = ['limits', 'queue_list'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
+    // A loaded watch cycle (tick plus interval) exceeds two intervals while the watch is healthy; status, like limits and
+    // queue_list, serves the last complete snapshot with its age instead of an 8 s fallback (REL0272-STATUS-AGE).
+    const readAgeLimit = ['limits', 'queue_list', 'status'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
     // Holds and reservations change between ticks (an automatic hold is set by maintenance after the tick published). With the
     // snapshot's own rows and live windows, the parts that depend on them are derived again instead of discarding a fresh snapshot.
     const holdsMoved = JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)

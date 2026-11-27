@@ -126,4 +126,4 @@ send_enter: dodatkowe uprawnienie send enter_only; nie przyznaje zwykłego send.
 
 ## Snapshot ticka
 
-`status`, `queue_list`, `capacity`, `limits`, `config_show` i `doctor` czytają atomowy snapshot ticka, gdy jest młodszy niż dwa interwały watch i pasuje konfiguracja. Tekst podaje wiek, JSON pole `snapshot_age_s`. Brak/stary snapshot uruchamia oznaczony odczyt ograniczony budżetem. Doctor ze snapshotu pomija sondowanie wersji/dostawców; do tej diagnostyki służy CLI doctor.
+`status`, `queue_list`, `capacity`, `limits`, `config_show` i `doctor` czytają atomowy snapshot ticka, gdy pasuje konfiguracja i jest młodszy niż 60 s (`status`, `queue_list`, `limits`; obciążony cykl watch może przekroczyć dwa interwały) lub dwa interwały watch (`config_show`, `doctor`). Blokada dostawcy lub rezerwacja ustawiona po ticku jest uwzględniana w limitach i kolejce ze snapshotu. Tekst podaje wiek, JSON pole `snapshot_age_s`. Brak/stary snapshot uruchamia oznaczony odczyt ograniczony budżetem. Doctor ze snapshotu pomija sondowanie wersji/dostawców; do tej diagnostyki służy CLI doctor.

@@ -295,6 +295,17 @@ it('REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and 
   assert.match(JSON.parse(queue).find((q: {task: string}) => q.task === 'HOLD-WAIT').startCondition, /claude: wstrzymane/);
 });
 
+it('REL0272-STATUS-AGE: status serves a healthy 25 s old snapshot (loaded tick plus interval) instead of the fallback', async () => {
+  const config = makeConfig(scratch.sub('status-age'), 'watch: {interval: 5}\n');
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  await publishMcpSnapshot(ctx);
+  await runner.sleep(25_000);
+  const text = (await MCP_TOOLS.find(tool => tool.name === 'status')!.run({context: () => ctx, notify: async () => {}}, {format: 'json'})).text;
+  assert.doesNotMatch(text, /fallback|budget exhausted/i);
+  assert.ok(Array.isArray(JSON.parse(text).tasks));
+});
+
 it('W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval', async () => {
   const config = makeConfig(scratch.sub('recent-admission-snapshot'), 'watch: {interval: 2}\n');
   const tmux = new FakeTmux();
@@ -303,7 +314,7 @@ it('W110-MCP-AGE: a recent complete snapshot still serves full queue and limits 
   await publishMcpSnapshot(ctx);
   await runner.sleep(20_000);
   const deps = {context: () => ctx, notify: async () => {}};
-  for (const name of ['queue_list', 'limits']) {
+  for (const name of ['queue_list', 'limits', 'status']) {
     const result = await MCP_TOOLS.find(tool => tool.name === name)!.run(deps, {});
     assert.match(result.text, /Watch snapshot age: 20.0 s/, name);
     assert.doesNotMatch(result.text, /fallback/i, name);

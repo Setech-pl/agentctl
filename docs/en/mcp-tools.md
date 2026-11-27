@@ -24,7 +24,7 @@ WALL `as` distinguishes Projects sharing a client name. Configured chat/task ide
 
 ## Bounded responses and reports
 
-`status`, `queue_list`, `capacity`, `limits`, `config_show` and `doctor` read the atomically published tick snapshot when its age is less than two watch intervals and config matches. Text reports snapshot age; JSON exposes `snapshot_age_s`. Missing/stale snapshots use a labeled bounded fallback. Snapshot doctor deliberately defers provider/version probes; use CLI doctor for those diagnostics.
+`status`, `queue_list`, `capacity`, `limits`, `config_show` and `doctor` read the atomically published tick snapshot when config matches and it is younger than 60 s (`status`, `queue_list`, `limits`; a loaded watch cycle can exceed two intervals) or two watch intervals (`config_show`, `doctor`). A provider hold or reservation set after the tick is applied to the snapshot's limits and queue. Text reports snapshot age; JSON exposes `snapshot_age_s`. Missing/stale snapshots use a labeled bounded fallback. Snapshot doctor deliberately defers provider/version probes; use CLI doctor for those diagnostics.
 
 Default `mcp.max_response_kb` is 8 KiB with an 8 s response budget. Truncated results are JSON envelopes with response_id, fragment, next_response_offset and has_more. Call `response_page` with only the response_id and response_offset=next_response_offset, concatenate fragments, and do not repeat the original write/event read. Cached continuations belong to their server session and may expire.
 

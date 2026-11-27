@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-STATUS-AGE | MCP status fell back to the 8 s budget path whenever a healthy but loaded watch cycle exceeded two intervals. | `tests/watch-snapshot.test.ts` (`^REL0272-STATUS-AGE:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
 | REL0272-SNAPSHOT-HOLD | A provider hold set by watch maintenance after the tick published sent limits, queue_list and status to the 8 s fallback until the next tick. | `tests/watch-snapshot.test.ts` (`^REL0272-SNAPSHOT-HOLD:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
 | REL0272-HOST-PERSIST | Every window inventory rewrote and fsynced the unchanged state file of an unreachable host (146 writes in one canary run). | `tests/rel0272-io.test.ts` (`^REL0272-HOST-PERSIST:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
 | REL0272-ASYNC-FSYNC | Every runner state write and watch log line fsynced on the event loop, so one admission round stalled all watch stages for 14 s on a loaded Linux host. | `tests/rel0272-io.test.ts` (`^REL0272-ASYNC-FSYNC:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
