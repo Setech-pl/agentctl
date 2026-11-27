@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { liveCacheRoot } from './live-cache.ts';
 import { cleanLiveCache, humanSize } from './gate-clean.ts';
-import { checkRuntime, homebrewNode26, node22Path, runtimesDir } from './runtime.ts';
+import { checkRuntime, node22Path, node26Label, node26Runtime, runtimesDir } from './runtime.ts';
 
 import { acquireLock } from './gate-lock.ts';
 export { acquireLock } from './gate-lock.ts';
@@ -237,7 +237,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   };
   try {
     assertClean(opts, dirty);
-    if (opts.dryRun) { result.status = 'PASS'; console.log(JSON.stringify({ ...result, runtimes: [node22Path(), 'Homebrew Node 26'], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
+    if (opts.dryRun) { result.status = 'PASS'; console.log(JSON.stringify({ ...result, runtimes: [node22Path(), node26Label()], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
     fs.mkdirSync(env.TMPDIR, { recursive: true }); fs.mkdirSync(env.AGENTCTL_TEST_TMP, { recursive: true });
     if (opts.tier !== 'quick') release = await acquireLock(path.join(runtimesDir(), '.gate.lock'), undefined, async () => {
       if (interrupted) throw new Error('Gate interrupted while waiting for lock');
@@ -259,7 +259,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       if (failed.length) throw new Error(`Prodshape checks failed: ${failed.join(', ')}`);
     } else {
       if (!opts.node26Only) await run('runtime-node22', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/runtime.ts', work]);
-      const node22 = node22Path(), node26 = homebrewNode26();
+      const node22 = node22Path(), node26 = node26Runtime();
       result.nodeVersions = { ...(!opts.node26Only ? { node22: checkRuntime(node22, '22.14.0') } : {}), node26: checkRuntime(node26, '26.') };
       if (opts.tier === 'full') { if (!opts.node26Only) await testSuite(node22, 'node22', tests); await testSuite(node26, 'node26', tests); await run('regression', node26, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']); }
       else {

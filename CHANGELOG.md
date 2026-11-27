@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- `npm run gate` full/release run on Linux: Node 22.14.0 is provisioned for the host platform (verified against SHASUMS256) and Node 26 is the gate's own Node outside macOS, where Homebrew is not required. / `npm run gate` full/release działa na Linuksie: Node 22.14.0 jest pobierany dla platformy hosta (z weryfikacją SHASUMS256), a poza macOS Node 26 to Node uruchamiający bramkę, bez Homebrew.
 - `npm run gate` falls back to the newest reachable release tag, with a warning, when the default base tag `agentctl-0181-rc1` is missing in the clone. / `npm run gate` przy braku domyślnego tagu bazowego `agentctl-0181-rc1` używa najnowszego osiągalnego tagu wydania i wypisuje ostrzeżenie.
 - Live test harness runs on Linux hosts whose /usr/bin holds a real claude or codex: the sandbox PATH uses a masked copy of the system directories instead of refusing. / Środowisko testów live działa na Linuksie z prawdziwym claude lub codex w /usr/bin: PATH piaskownicy używa kopii katalogów systemowych bez agentów zamiast odmowy.
 - Cached file reads no longer trust a file changed within the last 100 ms. On Linux a same-size rewrite in one clock tick could reuse the inode, so a queue entry kept its old status. / Odczyty z pamięci podręcznej nie ufają plikom zmienionym w ostatnich 100 ms. Na Linuksie zapis tej samej długości w jednym takcie zegara mógł dostać ten sam i-węzeł, przez co wpis kolejki zachowywał stary status.

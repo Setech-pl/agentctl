@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson, defaultBase, DEFAULT_BASE_TAG } from '../scripts/gate.ts';
-import { checkRuntime, verifyArchive, node22Path, ensureNode22 } from '../scripts/runtime.ts';
+import { checkRuntime, verifyArchive, node22Path, ensureNode22, node26Runtime } from '../scripts/runtime.ts';
 import { useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures', async () => {
@@ -304,7 +304,21 @@ it('checks cached runtime version and archive checksum with fakes and no network
   assert.doesNotThrow(() => verifyArchive(data, `${hash}  node.tar.gz\n`, 'node.tar.gz'));
   assert.throws(() => verifyArchive(data, `${'0'.repeat(64)}  node.tar.gz`, 'node.tar.gz'));
   assert.throws(() => verifyArchive(data, '', 'node.tar.gz'));
-  assert.equal(node22Path('/runtime'), '/runtime/node-v22.14.0-darwin-arm64/bin/node');
+  assert.equal(node22Path('/runtime', 'darwin', 'arm64'), '/runtime/node-v22.14.0-darwin-arm64/bin/node');
+  assert.equal(node22Path('/runtime', 'linux', 'x64'), '/runtime/node-v22.14.0-linux-x64/bin/node');
+});
+it('GATE-LINUX-RUNTIMES: Linux provisions the linux Node 22 archive and uses the Node 26 that runs the gate', async () => {
+  const dir = scratch.sub('linux-runtime'), work = scratch.sub('linux-download');
+  const data = Buffer.from('linux archive'), hash = createHash('sha256').update(data).digest('hex');
+  const downloads: string[] = [];
+  const node = await ensureNode22(work, { dir, platform: 'linux', arch: 'x64', version: () => 'v22.14.0',
+    download: async (file: string) => { downloads.push(file); return file === 'SHASUMS256.txt' ? Buffer.from(`${hash}  node-v22.14.0-linux-x64.tar.gz`) : data; },
+    extract: () => { fs.mkdirSync(path.dirname(node22Path(dir, 'linux', 'x64')), { recursive: true }); fs.writeFileSync(node22Path(dir, 'linux', 'x64'), ''); } });
+  assert.equal(node, node22Path(dir, 'linux', 'x64'));
+  assert.deepEqual(downloads, ['node-v22.14.0-linux-x64.tar.gz', 'SHASUMS256.txt']);
+  await assert.rejects(ensureNode22(work, { dir: scratch.sub('win-runtime'), platform: 'win32', arch: 'x64' }), /requires one of/);
+  assert.equal(node26Runtime('linux', process.execPath, () => 'v26.13.1'), fs.realpathSync(process.execPath));
+  assert.throws(() => node26Runtime('linux', process.execPath, () => 'v24.1.0'), /expected Node 26/);
 });
 it('wraps every heavy command without shell interpolation or load waiting', () => {
   assert.deepEqual(heavyCommand('node', ['x.ts'], 'darwin'), ['nice', ['-n', '10', 'taskpolicy', '-b', 'node', 'x.ts']]);
@@ -318,12 +332,12 @@ it('provisions a missing runtime once, verifies before extraction and never dele
   const downloads: string[] = [];
   const io = { dir, platform: 'darwin', arch: 'arm64', version: () => 'v22.14.0',
     download: async (file: string) => { downloads.push(file); return file === 'SHASUMS256.txt' ? Buffer.from(`${hash}  node-v22.14.0-darwin-arm64.tar.gz`) : data; },
-    extract: (archive: string) => { assert.deepEqual(fs.readFileSync(archive), data); fs.mkdirSync(path.dirname(node22Path(dir)), { recursive: true }); fs.writeFileSync(node22Path(dir), 'cached'); },
+    extract: (archive: string) => { assert.deepEqual(fs.readFileSync(archive), data); fs.mkdirSync(path.dirname(node22Path(dir, 'darwin', 'arm64')), { recursive: true }); fs.writeFileSync(node22Path(dir, 'darwin', 'arm64'), 'cached'); },
   };
-  assert.equal(await ensureNode22(work, io), node22Path(dir));
+  assert.equal(await ensureNode22(work, io), node22Path(dir, 'darwin', 'arm64'));
   assert.equal(downloads.length, 2);
   await ensureNode22(work, { ...io, download: async () => { throw new Error('must not download cached runtime'); } });
-  assert.equal(fs.readFileSync(node22Path(dir), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
+  assert.equal(fs.readFileSync(node22Path(dir, 'darwin', 'arm64'), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
   await assert.rejects(ensureNode22(work, { ...io, dir: scratch.sub('bad-runtime'), download: async () => data, extract: () => assert.fail('unverified extraction') }), /SHA256/);
 });
 
