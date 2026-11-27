@@ -45,7 +45,14 @@ export function readReportText(config: Pick<GlobalConfig, 'cache'>, owner: Repor
       if (!opened.isFile() || current.ino !== opened.ino || current.dev !== opened.dev || current.size !== opened.size || current.mtimeNs !== opened.mtimeNs || current.ctimeNs !== opened.ctimeNs) throw new AgentctlError(`Report path changed while reading: ${file}`);
     };
     verify();
-    const text = fs.readFileSync(fd, 'utf8');
+    // Bound allocation and work even for a malformed or continuously growing report.
+    const max = 4 * 1024 * 1024;
+    if (opened.size > BigInt(max)) throw new AgentctlError(`Report exceeds 4 MiB read limit: ${file}`);
+    const buffer = Buffer.alloc(Number(opened.size) + 1);
+    let used = 0, count = 0;
+    while (used < buffer.length && (count = fs.readSync(fd, buffer, used, buffer.length - used, null)) > 0) used += count;
+    if (used > Number(opened.size)) throw new AgentctlError(`Report grew while reading: ${file}`);
+    const text = buffer.subarray(0, used).toString('utf8');
     verify();
     return text;
   } finally { fs.closeSync(fd); }

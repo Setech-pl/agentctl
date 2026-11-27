@@ -1,3 +1,5 @@
+import { directReportRows } from './direct-reports.ts';
+import { deliverReportFields, deferReportPage } from './report-delivery.ts';
 import { gcLocation, pathsOverlap } from './start-paths.ts';
 import { trashOwners } from './trash.ts';
 import { chatOwner, quotaWarnings } from './chat-quotas.ts';
@@ -29,10 +31,9 @@ import { findBlocked } from './depends.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { planMark, markTasks } from './mark.ts';
 import type { MarkSelection } from './mark.ts';
-import { readOutputs, aggregateOutputs, journalOutputs, reviewVerdict } from './outputs.ts';
+import { parseOutputs, aggregateOutputs, reviewVerdict } from './outputs.ts';
 import type { OutputData } from './outputs.ts';
 import { developmentEnvironment } from './installation.ts';
-import { withFileLock as withReportLock } from './file-lock.ts';
 import { redactQueue } from './mcp-redact.ts';
 import { reportFingerprint } from './report-state.ts';
 import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
@@ -264,10 +265,10 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const record = findRecord(ctx, row.task);
     const text = readReportText(ctx.config, record, row.reportPath);
     const sha = /`([0-9a-f]{7,40})`/i.exec(text)?.[1] ?? /\b(?:SHA|commit)\s*[:=]?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1] ?? 'n/d';
-    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, await readOutputs(ctx, record), record.reviewOf != null)}`); taken.push(row);
+    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, parseOutputs(text, { review: record.reviewOf != null }), record.reviewOf != null)}`); taken.push(row);
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512 && taken.length > 1) { parts.pop(); taken.pop(); break; }
   }
-  for (const row of taken) await setHeaderField(ctx.runner, taskFile(ctx.config, row.windowName), 'summary_delivered', new Date(ctx.runner.now()).toISOString());
+  for (const row of taken) await deliverReportFields(ctx, findRecord(ctx, row.task), row.reportSignature!, { summary_delivered: new Date(ctx.runner.now()).toISOString() });
   if (ack) await markPulled(ctx, taken);
   return { ...ok(response()), delivered: taken.length };
 }
@@ -769,7 +770,7 @@ async function runPeek(deps: McpDeps, args: { task: string; lines?: number | und
 async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const all = Boolean(args.all);
-  const shown = shownRows(await collectStatus(ctx, { progress: false, archived: all }), all).filter((r) => r.report === 'yes');
+  const shown = shownRows(directReportRows(ctx, all), all).filter((r) => r.report === 'yes');
   if (shown.length === 0) return ok('No reports.');
   const list = shown.map((r) => {
     let bytes = 0;
@@ -823,24 +824,22 @@ export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'> & Par
 async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number; detail?: boolean; mode?: string; mark_pulled?: boolean }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const record = findRecord(ctx, args.task);
-  const row = (await collectStatus(ctx, { progress: false, archived: true })).find(r => r.task === record.task);
+  const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   const warning = reportMessageWarning(ctx, record.window, record);
-  if (row?.report !== 'yes' && !warning) {
-    const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
-    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
+  if (!state.ready && !warning) {
+    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet at ${record.report}: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
   }
   async function markRead(signature: string): Promise<void> {
     const current = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
     if (current.ready && createHash('sha256').update(readReportText(ctx.config, record, record.report)).digest('hex') === signature)
-      await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'pulled', new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString());
+      await deliverReportFields(ctx, record, signature, { pulled: new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString() });
   }
-  // The report is read: its outputs event (and its wall_posts) is recorded now if no watcher did it yet; once per attempt, never a failed read.
-  await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined);
+  // The watcher journals outputs; delivery must never wait for Git or journal locks.
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
     const full = readReportText(ctx.config, record, record.report);
-    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
+    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, parseOutputs(full, { review: record.reviewOf != null }), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
-  const validated = await readOutputs(ctx, record);
+  const validated = parseOutputs(readReportText(ctx.config, record, record.report), { review: record.reviewOf != null });
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? validated : validated.outputs_errors.length || validated.outputs_warnings?.length ? {outputs_errors: validated.outputs_errors, outputs_warnings: validated.outputs_warnings ?? []} : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
@@ -857,28 +856,14 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     if (args.mark_pulled === false) return;
     if (acknowledge) { await markRead(r.signature); return; }
     if (args.section) return;
-    const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');
-    await withReportLock(`${file}.lock`, async () => {
-      let reads: Record<string, [number, number][]> = {};
-      try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); for (const [key, value] of Object.entries(parsed)) {
-        if (typeof value === 'number' && Number.isFinite(value)) reads[key] = [[0, value]];
-        else if (Array.isArray(value)) reads[key] = value.filter(v => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) as [number, number][];
-      } } catch { /* first read */ }
-      const key = `${deps.clientId ?? 'direct'}:${record.task}:${record.attemptId ?? record.started}:${r.signature}`;
-      const ranges = [...(reads[key] ?? []), [r.start_byte, r.end_byte] as [number, number]].sort((a, b) => a[0] - b[0]);
-      const merged: [number, number][] = [];
-      for (const range of ranges) { const last = merged.at(-1); if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]); else merged.push([...range]); }
-      reads[key] = merged;
-      if (merged[0]?.[0] === 0 && merged[0][1] >= r.bytes) await markRead(r.signature);
-      await ctx.runner.writeFile(file, JSON.stringify(Object.fromEntries(Object.entries(reads).slice(-256))));
-    });
+    await deferReportPage(ctx, record, r.signature, deps.clientId ?? 'direct', r.start_byte, r.end_byte, r.bytes);
   };
   return { ...render(r, acknowledge), onDelivered: delivered };
 }
 
 async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined; mode?: string; detail?: boolean; offset?: number; limit?: number; ack?: boolean; cursor?: string } = {}): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const everyRow = await collectStatus(ctx);
+  const everyRow = directReportRows(ctx);
   const rows = args.cohort === undefined ? everyRow : cohortRows(everyRow, findCohort(ctx.config, args.cohort).name);
   const scope = `${args.cohort ?? ''}:${Boolean(args.all)}:${args.detail ? 'full' : args.mode ?? 'summary'}`;
   let snapshots = reportSelections.get(deps); if (!snapshots) { snapshots = new Map(); reportSelections.set(deps, snapshots); }
@@ -890,8 +875,7 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   const chosen = selection.rows.slice(offset, offset + (args.limit ?? 100));
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
-  const records = listTaskRecords(ctx.config);
-  for (const row of chosen) { const record = records.find(r => r.task === row.task); if (record) await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined); }
+
   if (!args.detail && args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   const { text, pulled } = joinReports(chosen, ctx);
@@ -2678,6 +2662,8 @@ const lastReads = new WeakMap<McpDeps, Map<string, {at: number; result: ToolResu
 for (const tool of MCP_TOOLS) {
   const run = tool.run;
   tool.run = async (deps, args) => {
+    if (['get_report', 'pull_ready', 'list_reports', 'response_page'].includes(tool.name)) return guarded(() => run(deps, args));
+    const budgetS = deps.context(() => {}).config.mcp.responseBudgetS ?? 8;
     const key = `${tool.name}:${JSON.stringify(args)}`;
     const saved = lastReads.get(deps) ?? new Map<string, {at: number; result: ToolResult}>(); lastReads.set(deps, saved);
     return withResponseBudget(async () => {
@@ -2703,12 +2689,13 @@ for (const tool of MCP_TOOLS) {
       }
       const watchAt = snapshotTools.has(tool.name) ? watchSnapshotTime(ctx.config) : undefined;
       const watchAge = watchAt === undefined ? '' : [`Watch snapshot age: ${Math.max(0, (ctx.runner.now() - watchAt) / 1000).toFixed(1)} s.`, watchSnapshotWarning(watchAt, ctx.runner.now())].filter(Boolean).join(' ') + '\n';
-      const prefix = `${watchAge}${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: 8 s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const reports = tool.name === 'events_since' ? `Reports to pull: ${directReportRows(ctx).filter(r => !r.hidden && !r.pulled && r.state === 'report-ready').map(r => r.task).join(', ') || 'none'}\n` : '';
+      const prefix = `${reports}${watchAge}${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: ${budgetS} s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
       let text = prefix + (stale || !cached ? durableStatus(ctx) : [queue, cached.result.text].join('\n'));
       while (responseWireBytes(ok(text)) > wireBudget && text.length > 1) text = text.slice(0, Math.max(1, Math.floor(text.length * 0.8)));
       return { text };
-    }, deps.budgetClock);
+    }, deps.budgetClock, budgetS * 1000);
   };
 }
 

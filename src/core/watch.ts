@@ -1,3 +1,4 @@
+import { applyReportDeliveries } from './report-delivery.ts';
 import { attentionTick } from './attention.ts';
 import { maintainWall } from './wall.ts';
 import { watchIntegrationGc } from './integration-gc.ts';
@@ -338,6 +339,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   await step('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
   await step('machine load', () => recordMachineLoad(ctx));
   await step('disk alerts', () => diskTick(ctx, notifier, startLog, options.signal));
+  await step('report deliveries', () => applyReportDeliveries(ctx));
   await step('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
   await step('usage', () => usageTick(ctx, notifier, startLog));
   await step('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });

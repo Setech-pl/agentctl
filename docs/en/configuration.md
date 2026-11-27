@@ -285,6 +285,7 @@ The selection covers the full width of the list pane, including the gaps between
 | `gc.after_integration` | `propose` | `propose` prepares a request-ID GC plan on local `main`/`master` advances and routes a WALL message to each owning chat. `off` disables proposals. |
 | `mcp.client` | — | Optional stable suffix to clientInfo.name that intentionally shares a cursor between sessions. Tool parameter client overrides it. By default each session consumes independently from its initialization checkpoint; new sessions inherit the client high-water mark. |
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
+| `mcp.response_budget_s` | `8` | MCP deadline in seconds (>0–50); default 8. Use 25 on heavily loaded hosts. Direct report reads bypass this shared deadline. |
 
 ## Disk management
 

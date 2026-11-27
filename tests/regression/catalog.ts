@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'READFAST0269', fixedIn: '0.26.5', symptom: 'Report reads wait for status collection and exhaust the shared MCP deadline on loaded hosts; report counts trust snapshots.', scenarios: [s('readfast0269.test.ts')] },
   { id: 'AUTOGC0266-SCALE', fixedIn: '0.26.4', symptom: 'auto_gc rechecked every candidate before the first deletion, walking every worktree (node_modules included) and rereading all TASK.md files per item, with no deadline: at ~1500 tasks a run never finished and loaded the watch.', scenarios: [s('autogc0266.test.ts', '^AUTOGC0266-SCALE:')] },
   { id: 'AUTOGC0266-IGNORED', fixedIn: '0.26.4', symptom: 'auto_gc removed "clean" worktrees together with ignored files such as .env or .cache evidence, and ignored report references to worktree files.', scenarios: [s('autogc0266.test.ts', '^AUTOGC0266-IGNORED:')] },
   { id: 'AUTOGC0266-QUEUE', fixedIn: '0.26.4', symptom: 'auto_gc ignored the queue: a queued review, after/base task or a path named in a prompt could lose its worktree, also when it was queued between the check and the deletion.', scenarios: [s('autogc0266.test.ts', '^AUTOGC0266-QUEUE:')] },

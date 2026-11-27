@@ -1,3 +1,4 @@
+import { deliverReportFields } from './report-delivery.ts';
 import { readReportText } from './report-path.ts';
 import { journalOutputs } from './outputs.ts';
 import { reportFingerprint } from './report-state.ts';
@@ -139,7 +140,10 @@ export function joinReports(rows: StatusRow[], ctx?: Context): { text: string; p
 export async function markPulled(ctx: Context, rows: StatusRow[]): Promise<void> {
   for (const row of rows) if (row.reportSignature && reportFingerprint(row.reportPath) !== row.reportSignature) throw new AgentctlError(`${row.task}: report changed during delivery; it remains unread`);
   const when = new Date(ctx.runner.now()).toISOString();
-  for (const row of rows) await setHeaderField(ctx.runner, taskFile(ctx.config, row.task.toLowerCase()), 'pulled', when);
+  for (const row of rows) {
+    const record = readTaskRecord(ctx.config, row.windowName);
+    if (record) await deliverReportFields(ctx, record, row.reportSignature ?? reportFingerprint(row.reportPath), {pulled: new Date(Math.max(Date.parse(when), Math.ceil(fs.statSync(row.reportPath).mtimeMs))).toISOString()});
+  }
 }
 
 export function formatBytes(n: number): string {

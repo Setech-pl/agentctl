@@ -300,6 +300,7 @@ export interface CollisionSettings {
 export interface McpSettings {
   gcScope: 'owner' | 'own-cohort' | 'all';
   maxResponseKb: number;
+  responseBudgetS?: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
   allow: McpPermission[];
@@ -415,7 +416,7 @@ export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'inc
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'selection', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
-export const MCP_KEYS = ['gc_scope', 'allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
+export const MCP_KEYS = ['gc_scope', 'allow', 'allow_rm_worktree', 'client', 'max_response_kb', 'response_budget_s'];
 export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
@@ -963,6 +964,10 @@ function parseMcp(v: unknown): McpSettings {
   if (v.max_response_kb !== undefined) {
     if (typeof v.max_response_kb === 'number' && Number.isFinite(v.max_response_kb) && v.max_response_kb >= 1 && v.max_response_kb <= 1024) mcp.maxResponseKb = v.max_response_kb;
     else q.add('config.mcp.max_response_kb must be between 1 and 1024');
+  }
+  if (v.response_budget_s !== undefined) {
+    if (typeof v.response_budget_s === 'number' && Number.isFinite(v.response_budget_s) && v.response_budget_s > 0 && v.response_budget_s <= 50) mcp.responseBudgetS = v.response_budget_s;
+    else q.add('config.mcp.response_budget_s must be greater than 0 and at most 50');
   }
   const allow = parseStringList(v.allow, 'config.mcp.allow', q);
   for (const name of allow) {

@@ -1,3 +1,4 @@
+import { directReportRows } from './direct-reports.ts';
 import { channelMessages, wallAge } from './wall.ts';
 import { journalOutputs } from './outputs.ts';
 import { listTaskRecords } from './taskstore.ts';
@@ -151,7 +152,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
     needYou: open.filter((r) => r.state === 'limited' || r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting' || (r.reportCandidate && r.report !== 'yes')).map((r) => `${r.task} (${r.state})${r.state === 'limited' ? `: ${r.usage_hint ?? 'limit wyczerpany'}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`),
     queued: queue.length,
-    reportsToPull: selectReady(open, false).map((r) => r.task).slice(0, 10),
+    reportsToPull: selectReady(directReportRows(ctx).filter(r => !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort)))), false).map((r) => r.task).slice(0, 10),
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };

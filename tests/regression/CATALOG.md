@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| READFAST0269 | Report reads wait for status collection and exhaust the shared MCP deadline on loaded hosts; report counts trust snapshots. | `tests/readfast0269.test.ts` | 0.26.5 | fails on v0.26.4 (12 failing of 12) |
 | AUTOGC0266-SCALE | auto_gc rechecked every candidate before the first deletion, walking every worktree (node_modules included) and rereading all TASK.md files per item, with no deadline: at ~1500 tasks a run never finished and loaded the watch. | `tests/autogc0266.test.ts` (`^AUTOGC0266-SCALE:`) | 0.26.4 | fails on v0.26.3 (2 failing of 2) |
 | AUTOGC0266-IGNORED | auto_gc removed "clean" worktrees together with ignored files such as .env or .cache evidence, and ignored report references to worktree files. | `tests/autogc0266.test.ts` (`^AUTOGC0266-IGNORED:`) | 0.26.4 | fails on v0.26.3 (1 failing of 1) |
 | AUTOGC0266-QUEUE | auto_gc ignored the queue: a queued review, after/base task or a path named in a prompt could lose its worktree, also when it was queued between the check and the deletion. | `tests/autogc0266.test.ts` (`^AUTOGC0266-QUEUE:`) | 0.26.4 | fails on v0.26.3 (1 failing of 1) |

@@ -22,10 +22,10 @@ export function checkResponseBudget(): void {
   if (request && (request.expired || request.clock.now() >= request.deadline)) throw new ResponseBudgetError();
 }
 /** Expiry stops future effects as well as returning a bounded response. */
-export async function withResponseBudget<T>(body: () => Promise<T>, partial: () => T, timer: BudgetClock = clock): Promise<T> {
-  const request: Request = { deadline: timer.now() + RESPONSE_BUDGET_MS, clock: timer, expired: false };
+export async function withResponseBudget<T>(body: () => Promise<T>, partial: () => T, timer: BudgetClock = clock, budgetMs = RESPONSE_BUDGET_MS): Promise<T> {
+  const request: Request = { deadline: timer.now() + budgetMs, clock: timer, expired: false };
   let cancel = () => {};
-  const expired = new Promise<T>(resolve => { cancel = timer.schedule(() => { request.expired = true; resolve(partial()); }, RESPONSE_BUDGET_MS); });
+  const expired = new Promise<T>(resolve => { cancel = timer.schedule(() => { request.expired = true; resolve(partial()); }, budgetMs); });
   try { return await requests.run(request, () => Promise.race([Promise.resolve().then(body).then(result => {
       if (request.expired || timer.now() >= request.deadline) { request.expired = true; return partial(); }
       return result;

@@ -1425,6 +1425,19 @@
       "R1: camelCase credentials and passwd are masked in fields, text and URLs"
     ]
   },
+  "READFAST0269": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 12,
+    "passed": 0,
+    "failing": [
+      "READFAST0269: get_report {\"task\":\"FAST\"} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"mode\":\"full\"} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"section\":\"Summary\"} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"offset\":3,\"limit\":1} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"byte_offset\":16} bypasses blocked status and expired shared clock"
+    ]
+  },
   "READY0263-COMPOSER": {
     "rev": "v0.26.2",
     "outcome": "FAILS",

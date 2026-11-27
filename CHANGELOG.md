@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- READFAST0269 prepared for 0.26.5. / Poprawka READFAST0269 przygotowana do 0.26.5.
+
 - Watch proposes confirmation-bound GC after local integration, routing one WALL message to each affected task-owning chat. / Po lokalnej integracji watch proponuje GC wymagające potwierdzenia i wysyła jedną wiadomość WALL do każdego czatu, którego zadania obejmuje plan.
 - `merge_base_check` warns, waits for the author, or creates a local merge candidate against the current `main`/`master`. / `merge_base_check` ostrzega, czeka na aktualizację gałęzi autora lub tworzy lokalny merge do przeglądu względem aktualnej gałęzi `main` albo `master`.
 - `review: {mode: readonly-on-author}` shares a stopped author's local worktree with task-scoped Git hooks and a separate evidence directory. / Przegląd tylko do odczytu korzysta z lokalnego worktree zatrzymanego autora, z hookami Git zadania i osobnym katalogiem dowodów.
@@ -25,6 +27,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.26.5] - 2026-11-27
+
+- READFAST0269: MCP reads reports directly from task files, bypassing status collection and the shared deadline; contended acknowledgements wait for watch. / MCP czyta raporty bezpośrednio z plików zadań, omija status i wspólny budżet; zajęte potwierdzenia czekają na watch.
+- Configure `mcp.response_budget_s` (default 8, maximum 50; recommend 25 under load). / Konfiguracja budżetu MCP (domyślnie 8, maksymalnie 50; zalecane 25 pod obciążeniem).
 
 ## [0.26.4] - 2026-11-26
 
