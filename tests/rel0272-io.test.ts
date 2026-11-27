@@ -35,6 +35,9 @@ it('REL0272-HOST-PERSIST: an unchanged host state is not rewritten on every wind
   const write = runner.writeFile.bind(runner);
   runner.writeFile = async (file: string, content: string) => { if (file === hostFile) writes++; return write(file, content); };
   const hosts = new HostRuntime(runner, config);
+  assert.deepEqual(await hosts.windows(), []);
+  // Past the first retry backoff every inventory probes the host again and fails the same way.
+  await runner.sleep(10_000);
   for (let i = 0; i < 5; i++) assert.deepEqual(await hosts.windows(), []);
   assert.equal(writes, 1);
   assert.match(fs.readFileSync(hostFile, 'utf8'), /host removed from config/);
