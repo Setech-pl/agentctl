@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-CANDIDATE-WATCH', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'Watch never discovered a configured report candidate for a task without an earlier candidate, so needs-input tasks showed no report flag.', scenarios: [s('hotfix-0173.test.ts', '^REL0272-CANDIDATE-WATCH:')] },
   { id: 'REL0272-STATUS-AGE', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'MCP status fell back to the 8 s budget path whenever a healthy but loaded watch cycle exceeded two intervals.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-STATUS-AGE:')] },
   { id: 'REL0272-SNAPSHOT-HOLD', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'A provider hold set by watch maintenance after the tick published sent limits, queue_list and status to the 8 s fallback until the next tick.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-SNAPSHOT-HOLD:')] },
   { id: 'REL0272-HOST-PERSIST', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'Every window inventory rewrote and fsynced the unchanged state file of an unreachable host (146 writes in one canary run).', scenarios: [s('rel0272-io.test.ts', '^REL0272-HOST-PERSIST:')] },

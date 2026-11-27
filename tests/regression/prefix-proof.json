@@ -1604,6 +1604,16 @@
       "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks"
     ]
   },
+  "REL0272-CANDIDATE-WATCH": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task",
+      "REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task"
+    ]
+  },
   "REL0272-COLD-SNAPSHOT": {
     "rev": "2aff93d417d52478679a3e1a29bf2bade7c4012d",
     "outcome": "FAILS",

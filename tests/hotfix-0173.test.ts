@@ -11,6 +11,7 @@ import { sizeOf } from '../src/core/fs-measure.ts';
 import { collectDisk } from '../src/core/disk.ts';
 import { cohortTick, touchCohort } from '../src/core/cohort.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
+import { WatchMemory, watchTick } from '../src/core/watch.ts';
 import { commitQueueAdd, planQueueAdd, setPaused } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { stableSelfArgv } from '../src/core/mcp-install.ts';
@@ -71,6 +72,21 @@ it('0173-2/3: mentioned README is ignored; glob candidate is a flag beside needs
   assert.equal(fs.readFileSync(r.report, 'utf8'), 'Werdykt: PASS\n');
   assert.doesNotMatch((await f.call('status')).text, /raport pochodzi z kopii/);
   assert.doesNotMatch((await f.call('doctor')).text, /raport pochodzi z kopii/);
+});
+it('REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task', async t => {
+  const f = fixture('candidate-watch'), wt = scratch.sub('candidate-watch/wt');
+  const r = seedTask(f.config, 'T2', { repos: [{ path: wt, worktree: wt }], reportAlt: ['*.md'] });
+  f.tmux.add('t2', question);
+  fs.writeFileSync(path.join(wt, 'README.md'), 'Werdykt: PASS');
+  const memory = new WatchMemory();
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  await watchTick(f.ctx, memory, { notify: async () => {} });
+  assert.equal(readTaskRecord(f.config, r.window)?.reportCandidate, undefined, 'a file not named for the task is never a candidate');
+  fs.writeFileSync(path.join(wt, 'T2-final.md'), 'Werdykt: PASS\n');
+  await watchTick(f.ctx, memory, { notify: async () => {} });
+  assert.equal(readTaskRecord(f.config, r.window)?.reportCandidate, path.join(wt, 'T2-final.md'));
+  const row = (await collectStatus(f.ctx))[0]!;
+  assert.equal(row.state, 'needs-input'); assert.ok(row.reportCandidate); assert.ok(row.question);
 });
 it('0173-4: grace persists, resets on membership/state changes, cancels for new work and announces a later cohort again', async () => {
   const f = fixture('grace'); assert.equal(f.config.cohort.doneGraceS, 300);

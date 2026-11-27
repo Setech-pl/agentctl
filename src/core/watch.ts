@@ -53,7 +53,7 @@ import { cohortTick } from './cohort.ts';
 import { announceBlocked, QueueMemory, queueTick } from './queue.ts';
 import { usageTick } from './usage-limits.ts';
 import { archiveDir, findRecordAnywhere, readTaskRecord, setHeaderField, TaskRecordIndex, taskFile, type RecordScan, type TaskRecord } from './taskstore.ts';
-import { syncReport } from './report-detect.ts';
+import { hasConfiguredCandidate, syncReport } from './report-detect.ts';
 import { recordEvent } from './history.ts';
 import { errorMessage, formatDuration } from './util.ts';
 import { ensureWindow } from './windows.ts';
@@ -248,7 +248,8 @@ async function syncWaitingReports(ctx: Context, rows: StatusRow[], records: Read
     if (row.report === 'yes' || row.closed || row.cancelled || row.archived) continue;
     const record = records.get(row.windowName);
     if (!record || record.host) continue;
-    if (!record.reportCandidate && !row.reportCandidate) continue;
+    // Rows without a known candidate are synced only when a configured pattern already matches (no per-row discovery walk).
+    if (!record.reportCandidate && !row.reportCandidate && !hasConfiguredCandidate(record)) continue;
     const candidateBefore = record.reportCandidate;
     const copy = { ...record };
     const r = await syncReport(ctx, copy).catch(() => undefined);
