@@ -32,11 +32,23 @@ export function parseArgs(args: string[]): Options {
   return opts;
 }
 /** The JSON array of `npm pack --json`; trailing npm notices (update available, changelog) on the merged stream are ignored. */
+/** The entries of `npm pack --json`: an array up to npm 11, an object keyed by package name from npm 12; notices may follow. */
 export function packJson(text: string): { filename: string }[] {
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']');
-  if (start < 0 || end <= start) throw new Error('npm pack printed no JSON array');
-  return JSON.parse(text.slice(start, end + 1));
+  const start = text.search(/[[{]/);
+  if (start < 0) throw new Error('npm pack printed no JSON array');
+  let depth = 0, inString = false, end = -1;
+  for (let i = start; i < text.length && end < 0; i++) {
+    const c = text[i];
+    if (inString) { if (c === '\\') i++; else if (c === '"') inString = false; }
+    else if (c === '"') inString = true;
+    else if (c === '[' || c === '{') depth++;
+    else if ((c === ']' || c === '}') && --depth === 0) end = i;
+  }
+  if (end < 0) throw new Error('npm pack printed no complete JSON value');
+  const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+  const entries = (Array.isArray(parsed) ? parsed : Object.values(parsed as Record<string, unknown>)) as { filename: string }[];
+  if (!entries.length || entries.some(e => typeof e?.filename !== 'string')) throw new Error('npm pack printed no tarball filename');
+  return entries;
 }
 export function assertClean(opts: Options, dirty: boolean): void {
   if (opts.tier !== 'quick' && dirty && !opts.allowDirty) throw new Error(`${opts.tier} refuses a dirty tree; use --allow-dirty to record the exception`);

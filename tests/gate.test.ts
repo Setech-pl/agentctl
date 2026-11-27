@@ -353,6 +353,9 @@ it('packJson reads the npm pack array and ignores trailing notices', () => {
   const noticed = '[{"filename":"a.tgz"}]\nnpm notice\nnpm notice New major version of npm available! 11.20.0 -> 12.2.2\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2\nnpm notice\n';
   assert.deepEqual(packJson(noticed), [{ filename: 'a.tgz' }]);
   assert.throws(() => packJson('npm notice only, no json'), /no JSON array/);
+  // npm 12 keys the result by package name; its file list holds arrays and strings with brackets.
+  const npm12 = '{\n  "@setech-pl/agentctl": {\n    "id": "@setech-pl/agentctl@0.27.2",\n    "filename": "setech-pl-agentctl-0.27.2.tgz",\n    "files": [{"path": "docs/a]b{.md"}],\n    "bundled": []\n  }\n}\nnpm notice {done}\n';
+  assert.deepEqual(packJson(npm12).map(e => e.filename), ['setech-pl-agentctl-0.27.2.tgz']);
 });
 
 it('L1 prechecked contender: publication must not admit C while A is displaced', async () => {
