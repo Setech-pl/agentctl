@@ -1895,6 +1895,16 @@
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
     ]
   },
+  "REL0272-SNAPSHOT-HOLD": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot",
+      "REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot"
+    ]
+  },
   "REL0272-TICK-LEGACY": {
     "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
     "outcome": "FAILS",

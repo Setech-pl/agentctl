@@ -8,6 +8,8 @@ import { collectDisk } from '../src/core/disk.ts';
 import { MCP_TOOLS, publishDegradedMcpSnapshot, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
 import { snapshotRecords, TaskRecordIndex } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
+import { automaticProviderHold } from '../src/core/provider-hold.ts';
+import { saveEntry } from '../src/core/queue.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -268,6 +270,29 @@ it('SNAP0247: a stuck statfs falls back to df and keeps worktree sizes independe
     assert.equal(signal.worktreeBytes, null);
     assert.equal(signal.measuring, true);
   } finally { stat.resolve(diskStats(1)); await pending; }
+});
+
+it('REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot', async () => {
+  const config = makeConfig(scratch.sub('snapshot-hold'), 'limits: {claude: 2}\n');
+  const tmux = new FakeTmux();
+  const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  const repo = scratch.sub('snapshot-hold/app');
+  await saveEntry(ctx, {seq: 1, order: 1, task: 'HOLD-WAIT', status: 'queued', priority: 'normal', agent: 'claude', model: 'opus', effort: 'high', after: [],
+    queuedAt: new Date(runner.now()).toISOString(), spec: `---\ntask: HOLD-WAIT\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-hold}\n---\nPrompt.\n`});
+  await publishMcpSnapshot(ctx);
+  // Watch maintenance (limited recovery) detects a quota error after the snapshot was published.
+  await automaticProviderHold(ctx, 'claude', 'ROW-4:1', 'provider quota/rate-limit error');
+  const deps = {context: () => ctx, notify: async () => {}};
+  const read = async (name: string) => (await MCP_TOOLS.find(tool => tool.name === name)!.run(deps, {format: 'json'})).text;
+  const limits = await read('limits');
+  assert.doesNotMatch(limits, /fallback|budget exhausted/i);
+  const claude = JSON.parse(limits).providers.find((p: {agent: string}) => p.agent === 'claude');
+  assert.equal(claude.free, 0);
+  assert.equal(claude.providerHold?.source, 'automatic');
+  const queue = await read('queue_list');
+  assert.doesNotMatch(queue, /fallback|budget exhausted/i);
+  assert.match(JSON.parse(queue).find((q: {task: string}) => q.task === 'HOLD-WAIT').startCondition, /claude: wstrzymane/);
 });
 
 it('W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval', async () => {

@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- MCP limits and queue_list stay on the fresh watch snapshot when a provider hold or reservation changes after the tick; the parts that depend on them are derived again from the snapshot. / MCP limits i queue_list korzystają ze świeżego snapshotu watch także po zmianie blokady dostawcy lub rezerwacji po przebiegu; zależne od nich części są wyliczane ponownie ze snapshotu.
 - An unreachable remote host's state file is written only when its state changes, not on every window inventory. / Plik stanu nieosiągalnego hosta zdalnego jest zapisywany tylko przy zmianie stanu, a nie przy każdym odczycie okien.
 - Watch state writes and log appends fsync off the event loop, so a long admission round no longer stalls status and delivery under I/O pressure. / Zapisy stanu i dziennika watch wykonują fsync poza pętlą zdarzeń, więc długie przyjmowanie kolejki nie wstrzymuje już statusu i dostarczania przy obciążonym dysku.
 - The release gate reads `npm pack --json` from npm 12, which keys the result by package name. / Bramka wydania odczytuje `npm pack --json` z npm 12, który zwraca obiekt według nazwy pakietu.

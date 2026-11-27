@@ -2590,7 +2590,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
     providerHolds: readProviderHoldState(ctx.config).holds,
     reservations: readReservations(ctx.config, ctx.runner.now()),
-    rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
+    rows: observed, live, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
   if (signal?.aborted) return;
   writeWatchSnapshot(ctx, snapshot);
@@ -2647,10 +2647,25 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     // A healthy, complete scheduling snapshot still describes the last tick when its
     // nominal interval was missed. Config, reservations and holds are checked separately.
     const readAgeLimit = ['limits', 'queue_list'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
+    // Holds and reservations change between ticks (an automatic hold is set by maintenance after the tick published). With the
+    // snapshot's own rows and live windows, the parts that depend on them are derived again instead of discarding a fresh snapshot.
+    const holdsMoved = JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
+      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now));
+    const derivable = Array.isArray(snap.live) && Array.isArray(snap.rows);
     if (!retainedRows && (snap.degraded || (age >= readAgeLimit && !(name === 'capacity' || name === 'status' && explicit))
-      || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
-      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now))
+      || (holdsMoved && !derivable)
       || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'))) return undefined;
+    if (holdsMoved && derivable) {
+      const limits = collectLimits(ctx.config, snap.live, now, false, snap.rows);
+      // Plan readings are usage facts of the tick, not hold state: keep the published ones instead of reopening usage logs.
+      for (const provider of limits.providers) {
+        const plan = snap.limits?.providers?.find((entry: {agent: string}) => entry.agent === provider.agent)?.plan;
+        if (plan !== undefined) provider.plan = plan;
+      }
+      snap.limits = limits;
+      const queue = await runQueueList(deps, {}, {rows: snap.rows, live: snap.live});
+      snap.queue = JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2));
+    }
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.${retainedRows ? ` Watch: pominięty etap – ${snap.degraded}.` : ''}`;
     if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
     const json = args.format === 'json' || args.detail === true;
