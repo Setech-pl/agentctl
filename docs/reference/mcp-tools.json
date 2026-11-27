@@ -208,7 +208,7 @@
             }
           },
           "force_dirty": {
-            "description": "Owner-authorized tasks whose clean worktrees may be removed when they contain unpushed commits. Git still protects uncommitted files.",
+            "description": "Owner-authorized tasks whose dirty/unpushed worktrees may be removed.",
             "type": "array",
             "items": {
               "type": "string",
