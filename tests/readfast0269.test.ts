@@ -118,12 +118,12 @@ it('READFAST0269-COUNT: events count every ready task while listing only ten nam
 it('READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error', async t => {
   const f = fixture('slow-lock-syscall');
   f.release();
-  let now = Date.now();
   const open = fs.openSync;
-  t.mock.method(Date, 'now', () => now);
   t.mock.method(fs, 'openSync', ((file: fs.PathLike, ...args: unknown[]) => {
     const fd = (open as Function)(file, ...args);
-    if (String(file) === taskLock(taskFile(f.config, 'fast'))) now += 200;
+    // Deliberately block one filesystem syscall past the private 100 ms write deadline.
+    // Assert delivered content and the durable request, never elapsed wall time.
+    if (String(file) === taskLock(taskFile(f.config, 'fast'))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
     return fd;
   }) as typeof fs.openSync);
   const result = await f.call('get_report', {task: 'FAST'});
