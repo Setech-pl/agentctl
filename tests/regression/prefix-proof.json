@@ -636,6 +636,18 @@
       "FIELD0256-STALE: a cached snapshot drops a reading as its reset passes"
     ]
   },
+  "FIELD0268-AUTOGC": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-AUTOGC: unchanged plans repeat only after the report interval and pinned tasks have measured sizes",
+      "FIELD0268-AUTOGC: after a dry-run deadline the next slice resumes the same inventory and candidate",
+      "FIELD0268-AUTOGC: unchanged plans repeat only after the report interval and pinned tasks have measured sizes",
+      "FIELD0268-AUTOGC: after a dry-run deadline the next slice resumes the same inventory and candidate"
+    ]
+  },
   "FIELD0268-BOARD": {
     "rev": "v0.26.4",
     "outcome": "FAILS",

@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'FIELD0268-AUTOGC', fixedIn: '0.27.2', proofAgainst: 'v0.26.4', symptom: 'Automatic GC announced incomplete previews, discarded deadline progress and showed pinned worktrees as zero bytes.', scenarios: [s('autogc0266.test.ts', '^FIELD0268-AUTOGC:')] },
   { id: 'FIELD0268-BOARD', fixedIn: '0.27.2', proofAgainst: 'v0.26.4', symptom: 'The board had no end-of-list shortcut for the pulled-report groups.', scenarios: [s('board.test.ts', '^FIELD0268-BOARD:')] },
   { id: 'REL0272-INVENTORY-EIO', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'A transient inventory directory read failure was published as a new successful snapshot without task rows.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-INVENTORY-EIO:')] },
   { id: 'REL0272-PRESSURE-TEARDOWN', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'The injector kept burning CPU while the completed canary was deleting thousands of disposable directories.', scenarios: [s('canary-mirror.test.ts', '^REL0272-PRESSURE-TEARDOWN:')] },

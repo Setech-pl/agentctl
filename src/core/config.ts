@@ -44,6 +44,7 @@ export interface AutoGcSettings {
   cohortsExclude: string[];
   /** 0.26.4: wall-clock limit of one automatic run (seconds). */
   maxRunS: number;
+  reportEvery: string;
   /** 0.26.4: ignored-by-git paths a worktree may hold and still be removed (a bare name matches at any depth, a path with "/" from the worktree root). */
   ignoredOk: string[];
 }
@@ -1116,7 +1117,7 @@ function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: numbe
   const where = 'config.disk.auto_gc';
   const value = isObject(raw) ? raw : {};
   if (raw !== undefined && !isObject(raw)) p.add(`${where} must be a mapping`);
-  checkKeys(value, ['enabled', 'dry_run', 'trigger_free_gb', 'target_free_gb', 'older_than', 'categories', 'max_per_run_gb', 'cohorts_exclude', 'max_run_s', 'ignored_ok'], where, p);
+  checkKeys(value, ['enabled', 'dry_run', 'trigger_free_gb', 'target_free_gb', 'older_than', 'categories', 'max_per_run_gb', 'cohorts_exclude', 'max_run_s', 'report_every', 'ignored_ok'], where, p);
   const bool = (key: string) => {
     const v = value[key];
     if (v !== undefined && typeof v !== 'boolean') p.add(`${where}.${key} must be a boolean`);
@@ -1135,6 +1136,9 @@ function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: numbe
   const olderThan = value.older_than === undefined ? '2d' : typeof value.older_than === 'string' ? value.older_than : '';
   try { if (!Number.isFinite(parseAge(olderThan))) throw new Error(); }
   catch { p.add(`${where}.older_than must be a positive duration, for example 2d`); }
+  const reportEvery = value.report_every === undefined ? '12h' : typeof value.report_every === 'string' ? value.report_every : '';
+  try { if (!Number.isFinite(parseAge(reportEvery))) throw new Error(); }
+  catch { p.add(`${where}.report_every must be a positive duration, for example 12h`); }
   const categories = value.categories === undefined ? [...AUTO_GC_CATEGORIES] :
     parseStringList(value.categories, `${where}.categories`, p);
   if (categories.some(category => !(AUTO_GC_CATEGORIES as readonly string[]).includes(category))) p.add(`${where}.categories must contain only ${AUTO_GC_CATEGORIES.join(', ')}`);
@@ -1146,7 +1150,7 @@ function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: numbe
   }
   return { enabled: bool('enabled'), dryRun: bool('dry_run'), triggerFreeGb, targetFreeGb, olderThan,
     categories: categories as AutoGcCategory[], maxPerRunGb: number('max_per_run_gb', 50),
-    cohortsExclude: parseStringList(value.cohorts_exclude, `${where}.cohorts_exclude`, p), maxRunS: number('max_run_s', 300), ignoredOk: ignoredOk.map(entry => entry.replace(/\/+$/, '')) };
+    cohortsExclude: parseStringList(value.cohorts_exclude, `${where}.cohorts_exclude`, p), maxRunS: number('max_run_s', 300), reportEvery, ignoredOk: ignoredOk.map(entry => entry.replace(/\/+$/, '')) };
 }
 
 export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), text?: string): GlobalConfig {

@@ -33,7 +33,7 @@ export interface QueueGuard { tasks: Map<string, string>; paths: { path: string;
 
 export class AutoGcRun {
   readonly startedAt: number;
-  readonly deadline: number;
+  private deadline: number;
   readonly key: string;
   private ops = 0;
   private scan?: Promise<RecordScan>;
@@ -49,15 +49,30 @@ export class AutoGcRun {
 
   readonly ctx: Context;
   readonly policy: AutoGcSettings;
-  readonly signal: AbortSignal | undefined;
+  private signal: AbortSignal | undefined;
 
-  constructor(ctx: Context, policy: AutoGcSettings, signal?: AbortSignal) {
+  private readonly suspend: (() => Promise<void>) | undefined;
+  private readonly indexedInventory: (() => Promise<RecordScan>) | undefined;
+
+  constructor(ctx: Context, policy: AutoGcSettings, signal?: AbortSignal, suspend?: () => Promise<void>, indexedInventory?: () => Promise<RecordScan>) {
+    this.suspend = suspend;
+    this.indexedInventory = indexedInventory;
     this.ctx = ctx;
     this.policy = policy;
     this.signal = signal;
     this.startedAt = ctx.runner.now();
     this.deadline = this.startedAt + policy.maxRunS * 1000;
     this.key = autoGcPolicyKey(policy);
+  }
+
+  resume(signal?: AbortSignal): void {
+    this.signal = signal;
+    this.deadline = this.ctx.runner.now() + this.policy.maxRunS * 1000;
+  }
+
+  async checkpoint(): Promise<void> {
+    if (this.suspend && !this.signal?.aborted && this.ctx.runner.now() >= this.deadline) await this.suspend();
+    this.check();
   }
 
   stopReason(): string | undefined {
@@ -74,7 +89,7 @@ export class AutoGcRun {
 
   /** Called inside every walk: yields to the event loop regularly so the watch tick keeps running, and stops a run that must stop. */
   async pace(): Promise<void> {
-    if (++this.ops % PACE === 0) { await nextTurn(); this.check(); }
+    if (++this.ops % PACE === 0) { await nextTurn(); await this.checkpoint(); }
   }
 
   /** Realpath once per run; a missing path stays as written. */
@@ -86,14 +101,14 @@ export class AutoGcRun {
   }
 
   inventory(): Promise<RecordScan> {
-    if (!this.scan) { this.stats.inventories++; this.scan = snapshotRecords(this.ctx.config); }
+    if (!this.scan) { this.stats.inventories++; this.scan = this.indexedInventory?.() ?? snapshotRecords(this.ctx.config, true); }
     return this.scan;
   }
 
   /** Under the path claim: the same facts, re-read (unchanged TASK.md files come from the scan cache). Walk indexes stay. */
   refresh(): void {
     this.memos.clear();
-    this.scan = undefined;
+    this.scan = snapshotRecords(this.ctx.config, true);
     this.liveSet = undefined;
     this.roots = undefined;
   }
@@ -106,9 +121,11 @@ export class AutoGcRun {
   }
 
   async records(): Promise<TaskRecord[]> {
-    const { current, archived } = await this.inventory();
-    const windows = new Set(current.map(record => record.window));
-    return [...current, ...archived.filter(record => !windows.has(record.window))].filter(record => !record.host);
+    return this.memo('local records', async () => {
+      const { current, archived } = await this.inventory();
+      const windows = new Set(current.map(record => record.window));
+      return [...current, ...archived.filter(record => !windows.has(record.window))].filter(record => !record.host);
+    });
   }
 
   live(): Promise<Set<string>> {
@@ -296,7 +313,7 @@ export class AutoGcRun {
 
   /** The reason a queued task protects this candidate, or undefined. */
   async queueProtection(target: string, owners: TaskRecord[]): Promise<string | undefined> {
-    const guard = this.queueGuard();
+    const guard = this.policy.dryRun ? await this.memo('queue guard', async () => this.queueGuard()) : this.queueGuard();
     for (const owner of owners) {
       const by = guard.tasks.get(owner.task.toLowerCase());
       if (by) return `needed by queued task ${by}${by.toLowerCase() === owner.task.toLowerCase() ? '' : ` (uses ${owner.task})`}`;

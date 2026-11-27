@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Automatic GC resumes dry-run inventory after a deadline, repeats unchanged WALL plans after `report_every` (12h by default), and shows cached sizes for skipped categories and pinned tasks. / Automatyczne GC wznawia plan po limicie czasu, powtarza niezmienione plany po `report_every` (domyślnie 12h) oraz pokazuje pomiary pominiętych kategorii i przypiętych zadań.
+
 - Board Down reaches the pulled-report groups, End or G jumps to the final selectable row, and D opens the GC preview. / Na tablicy strzałka w dół dochodzi do grup odebranych raportów, End lub G skacze do ostatniego wiersza, a D otwiera podgląd GC.
 
 - Watch preserves the last complete snapshot when its task inventory cannot be read. / Watch zachowuje ostatni pełny snapshot, gdy odczyt katalogu zadań kończy się błędem.

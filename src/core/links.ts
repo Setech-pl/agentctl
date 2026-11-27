@@ -248,7 +248,11 @@ export function knownLinkReferences(config: GlobalConfig, inventory?: RecordScan
   const active = current.filter(r => !r.closed && !r.cancelled);
   const refs = active.flatMap(r => r.links.map(l => ({ target: l.to, source: `active task ${r.task}` })));
   const byRepo = new Map<string, TaskRecord[]>();
-  for (const record of records) for (const repo of new Set(record.repos.map(x => x.path))) byRepo.set(repo, [...byRepo.get(repo) ?? [], record]);
+  for (const record of records) for (const repo of new Set(record.repos.map(x => x.path))) {
+    const users = byRepo.get(repo);
+    if (users) users.push(record);
+    else byRepo.set(repo, [record]);
+  }
   for (const [repo, users] of byRepo) {
     try {
       const links = loadProjectConfig(repo)?.links ?? [];

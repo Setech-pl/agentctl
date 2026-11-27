@@ -608,7 +608,7 @@ async function watchLoop(ctx: Context, notifier: Notifier, opts: WatchOptions): 
     if (r.changed && JSON.stringify(before) !== JSON.stringify(ctx.config.notify) && opts.remakeNotifier) current = await opts.remakeNotifier();
   };
   let stalled = false;
-  const unhost = hostAutoGc({ ...(opts.signal ? { signal: opts.signal } : {}), log: line => ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${line}\n`) });
+  const unhost = hostAutoGc({ inventory: () => memory.inventory(ctx), ...(opts.signal ? { signal: opts.signal } : {}), log: line => ctx.runner.appendFile(watchLogPath(ctx), `${new Date(ctx.runner.now()).toISOString()}  ${line}\n`) });
   try {
     let startupAnnounced = false;
     const backgroundStarts = !ctx.runner.dryRun && (opts.backgroundStarts ?? (opts.maxTicks === undefined && !opts.onTick));

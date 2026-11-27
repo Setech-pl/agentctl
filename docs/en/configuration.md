@@ -311,6 +311,7 @@ disk:
     categories: [own_trash, stale_node_modules, closed_clean_worktrees, closed_task_cache]
     max_per_run_gb: 50
     max_run_s: 300
+    report_every: 12h
     ignored_ok: [node_modules, .cache/vite, dist, coverage, .turbo]
     cohorts_exclude: []
 ~~~
@@ -321,6 +322,7 @@ Automatic GC is off by default. Defaults:
 - The target defaults to the highest of the trigger, warning and start thresholds.
 - The budget is 50 GiB of estimated data per run.
 - `max_run_s` (default 300) is the wall-clock limit of one run.
+- `report_every` (default `12h`) repeats an unchanged WALL plan after this interval. Changes to the plan are reported when the preview completes. A preview that reaches its deadline resumes on the next watch run in the same process. Skipped categories show measured GiB, sample age and outstanding readings. Pinned rows count distinct tasks and show the owner actions.
 - `ignored_ok` lists git-ignored paths that a worktree may hold and still be removed. A bare name such as `node_modules` matches at any depth; a path with `/` such as `.cache/vite` is relative to the worktree root.
 
 Watch checks the internal and configured external volumes independently. It processes categories in order and checks each candidate only when it is the next one needed. It checks free blocks after each removal and stops at the target, the run budget, `max_run_s`, or when no candidates remain. One run shares one inventory of task records, one index of declared links and real symlinks, and one read of the reports. Inside `node_modules`, only the package level is read for symlinks. Every walk yields to the event loop, so the watch tick stays responsive.

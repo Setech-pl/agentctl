@@ -99,7 +99,7 @@ function queueEntry(w: World, seq: number, task: string, spec: string, extra: Re
   }));
 }
 
-it('AUTOGC0266-SCALE: 1500 records and 2000 worktrees with node_modules finish one run inside max_run_s with one inventory, one walk and a responsive event loop', { timeout: 240_000 }, async t => {
+it('AUTOGC0266-SCALE: 1800 records and 2300 worktrees with node_modules finish one run inside max_run_s with one inventory, one walk and a responsive event loop', { timeout: 240_000 }, async t => {
   const w = world('scale', `
     enabled: true
     dry_run: true
@@ -111,18 +111,18 @@ it('AUTOGC0266-SCALE: 1500 records and 2000 worktrees with node_modules finish o
   const second = path.join(w.root, 'repo2');
   const fixtureStart = performance.now();
   let closed = 0;
-  for (let i = 0; i < 1500; i++) {
+  for (let i = 0; i < 1800; i++) {
     const own = [addWorktree(w, `PS-${i}`)];
     if (i < 500) own.push(addWorktree(w, `PS-${i}`, { repo: second }));
     const done = i % 5 !== 0;
     if (done) closed += own.length;
     seed(w, `PS-${i}`, own, done);
   }
-  assert.equal(w.worktrees.size, 2000);
+  assert.equal(w.worktrees.size, 2300);
   await w.runner.sleep(3 * 86400_000);
   freeSpace(t, () => 20 * GiB);
   // Tripwire: the run may list each folder of the fixture a small number of times, never once per candidate.
-  const dirs = 2000 * 7 + 1500 + 10;
+  const dirs = 2300 * 7 + 1800 + 10;
   let reads = 0;
   const count = <T extends (...args: never[]) => unknown>(target: object, name: string) => {
     const original = (target as Record<string, T>)[name]!;
@@ -348,4 +348,60 @@ it('AUTOGC0266-RELOAD: a reload of other settings keeps a run going, the journal
   assert.match(event?.text ?? '', /usunięto 3; odzyskano 3\.00 GiB \(statfs\).*czas \d+\.\d s/);
   assert.equal(event?.diskGc?.[0]?.freedBytes, 3 * GiB);
   assert.equal(typeof event?.diskGc?.[0]?.durationMs, 'number');
+});
+
+it('FIELD0268-AUTOGC: unchanged plans repeat only after the report interval and pinned tasks have measured sizes', async t => {
+  const w = world('field-pinned', `
+    enabled: true
+    dry_run: true
+    trigger_free_gb: 30
+    target_free_gb: 40
+    categories: [closed_clean_worktrees]`);
+  const wt = addWorktree(w, 'PIN-ONE');
+  seed(w, 'PIN-ONE', [wt], true, {pin: true});
+  const data = path.join(wt, 'node_modules', 'payload');
+  fs.writeFileSync(data, '');
+  fs.truncateSync(data, 2 * GiB);
+  freeSpace(t, () => 20 * GiB);
+  const { runAutoGc } = await import('../src/core/auto-gc.ts');
+  const { readWall, OWNER_IDENTITY } = await import('../src/core/wall.ts');
+  const count = () => readWall(w.ctx, OWNER_IDENTITY, {channel: 'agentctl', archive: true}).messages
+    .filter(message => message.subject === 'Automatyczne GC — plan').length;
+  await runAutoGc(w.ctx, volume(w));
+  assert.match(autoGcText(w), /worktree · pinned: 1 zadań, 2\.00 GiB.*agentctl unpin \/ WT-PARK.*pomiar/);
+  assert.equal(count(), 1);
+  await w.runner.sleep(10 * 60_000);
+  await runAutoGc(w.ctx, volume(w));
+  assert.equal(count(), 1);
+  await w.runner.sleep(12 * 3600_000);
+  await runAutoGc(w.ctx, volume(w));
+  assert.equal(count(), 2);
+});
+
+it('FIELD0268-AUTOGC: after a dry-run deadline the next slice resumes the same inventory and candidate', async t => {
+  const w = world('field-resume', `
+    enabled: true
+    dry_run: true
+    trigger_free_gb: 30
+    target_free_gb: 40
+    categories: [closed_clean_worktrees]
+    max_run_s: 1`);
+  for (const task of ['SLOW-A', 'SLOW-B']) seed(w, task, [addWorktree(w, task)]);
+  await w.runner.sleep(3 * 86400_000);
+  freeSpace(t, () => 20 * GiB);
+  let first = true;
+  w.onGit(async (_cwd, args) => {
+    if (first && args[0] === 'status' && !args.includes('--ignored')) {
+      first = false;
+      await w.runner.sleep(2000);
+    }
+    return undefined;
+  });
+  const { runAutoGc } = await import('../src/core/auto-gc.ts');
+  await runAutoGc(w.ctx, volume(w));
+  assert.equal(autoGcText(w), '', 'partial plans must stay off WALL and out of the completed-plan journal');
+  await runAutoGc(w.ctx, volume(w));
+  assert.match(autoGcText(w), /plan: 2 pozycji/);
+  assert.equal(w.gitLog.filter(([, cmd, sub]) => cmd === 'worktree' && sub === 'list').length, 1);
+  assert.equal(w.gitLog.filter(([, cmd, ...args]) => cmd === 'status' && !args.includes('--ignored')).length, 2);
 });

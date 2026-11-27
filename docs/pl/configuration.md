@@ -311,6 +311,7 @@ disk:
     categories: [own_trash, stale_node_modules, closed_clean_worktrees, closed_task_cache]
     max_per_run_gb: 50
     max_run_s: 300
+    report_every: 12h
     ignored_ok: [node_modules, .cache/vite, dist, coverage, .turbo]
     cohorts_exclude: []
 ~~~
@@ -321,6 +322,7 @@ Automatyczne GC jest domyślnie wyłączone. Wartości domyślne:
 - cel to najwyższy z progów uruchomienia, ostrzeżenia i startu;
 - limit to 50 GiB szacowanych danych na przebieg;
 - `max_run_s` (domyślnie 300) to limit czasu jednego przebiegu;
+- `report_every` (domyślnie `12h`) określa, po jakim czasie WALL powtórzy niezmieniony plan. Zmiany są publikowane po ukończeniu planu. Plan wstrzymany przez limit czasu jest wznawiany przy kolejnym przebiegu w tym samym procesie watch. Pominięte kategorie pokazują zmierzone GiB, wiek pomiarów i liczbę brakujących odczytów. Wiersze `pinned` liczą osobne zadania i podają działania dla właściciela.
 - `ignored_ok` to lista ścieżek ignorowanych przez git, z którymi worktree nadal może zostać usunięte. Sama nazwa, np. `node_modules`, pasuje na każdej głębokości. Ścieżka z `/`, np. `.cache/vite`, liczy się od katalogu głównego worktree.
 
 Watch sprawdza osobno dysk wewnętrzny i skonfigurowane woluminy zewnętrzne. Przechodzi kategorie w podanej kolejności i sprawdza pozycję dopiero wtedy, gdy jest potrzebna jako następna. Po każdym usunięciu sprawdza wolne bloki. Kończy po osiągnięciu celu, limitu danych, `max_run_s` albo wyczerpaniu pozycji. Jeden przebieg korzysta z jednego spisu zadań, jednego indeksu linków i dowiązań symbolicznych oraz jednego odczytu raportów. W `node_modules` czyta dowiązania tylko na poziomie pakietów. Każde przeglądanie katalogów oddaje sterowanie pętli zdarzeń, więc tick watch nie jest blokowany.

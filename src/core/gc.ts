@@ -397,9 +397,9 @@ async function inspectAutomaticTree(target: string, device: string, run: AutoGcR
   if (String(stat.dev) !== device) throw new Error('different filesystem or nested mount; kept');
   let bytes = Math.max(stat.size, stat.blocks * 512), newest = stat.mtimeMs;
   if (stat.isDirectory()) {
-    for await (const entry of await fs.promises.opendir(target)) {
+    for (const entry of await fs.promises.readdir(target)) {
       await run.pace();
-      const child = await inspectAutomaticTree(path.join(target, entry.name), device, run);
+      const child = await inspectAutomaticTree(path.join(target, entry), device, run);
       bytes += child.bytes;
       newest = Math.max(newest, child.newest);
     }
@@ -420,7 +420,7 @@ async function ignoredEntries(ctx: Context, wt: string): Promise<string[]> {
  */
 export async function checkAutomaticGc(ctx: Context, item: GcItem, device: string, olderThanMs: number, run = new AutoGcRun(ctx, ctx.config.disk.autoGc)): Promise<number> {
   const { config, runner } = ctx;
-  run.check();
+  await run.checkpoint();
   run.stats.prechecks++;
   const stat = await fs.promises.lstat(item.target);
   if (stat.isSymbolicLink() || String(stat.dev) !== device || String((await fs.promises.stat(path.dirname(item.target))).dev) !== device ||
@@ -464,14 +464,14 @@ export async function checkAutomaticGc(ctx: Context, item: GcItem, device: strin
     }) : undefined;
     const found = registered?.get(real);
     if (!found || found.main || found.row.branch && PROTECTED.has(found.row.branch)) throw new Error('not a registered task worktree or protected branch');
-    run.check();
+    await run.checkpoint();
     const risk = await worktreeRisk(ctx, item.target, item.base);
     if (risk.dirtyFiles || risk.unpushedCommits) {
       Object.assign(item, { dirtyFiles: risk.dirtyFiles, unpushedCommits: risk.unpushedCommits });
       throw new Error(`uncommitted changes / unpushed work (${risk.dirtyFiles} dirty files, ${risk.unpushedCommits} unpushed commits vs ${risk.comparison})`);
     }
     // M2: `git worktree remove` also deletes ignored files. Only the throwaway list (auto_gc.ignored_ok) may go unattended.
-    run.check();
+    await run.checkpoint();
     const { valuable, throwaway } = await valuableIgnored(run, item.target, await ignoredEntries(ctx, item.target));
     if (valuable.length) throw new Error(`ignored files outside auto_gc.ignored_ok: ${valuable.slice(0, 5).join(', ')}${valuable.length > 5 ? ` (+${valuable.length - 5})` : ''}`);
     const kept = throwaway.map(rel => path.join(real, rel));
