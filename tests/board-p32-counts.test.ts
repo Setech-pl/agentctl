@@ -6,7 +6,7 @@ import { loadBoard, ProgressCache } from '../src/core/board.ts';
 import { archiveDir, renderTaskMd } from '../src/core/taskstore.ts';
 import type { TaskRecord } from '../src/core/taskstore.ts';
 import { countsLine, installFsCounter } from './fs-counter.ts';
-import { FakeTmux, makeConfig, makeContext, useScratch } from './helpers.ts';
+import { FakeTmux, makeConfig, makeContext, useScratch, pastRacyWindow } from './helpers.ts';
 
 /*
  * The deterministic P32 proof: per board tick, the number of TASK.md parses, report body reads and fs.stat calls on a
@@ -73,6 +73,7 @@ describe('p32: per-tick file counts on 230 archived tasks', () => {
   it('cold tick, unchanged tick, tick after one TASK.md changed', async () => {
     const root = scratch.sub('p32-counts-230');
     const config = buildFixture(root);
+    await pastRacyWindow();
     const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
     const cache = new ProgressCache();
     const counter = installFsCounter(root);

@@ -6,7 +6,7 @@ import { it } from 'node:test';
 import React from 'react';
 import { render } from 'ink';
 import { Board } from '../src/board/app.ts';
-import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
+import { FakeTmux, makeConfig, makeContext, seedTask, useScratch, pastRacyWindow } from './helpers.ts';
 
 const scratch = useScratch();
 class Terminal extends EventEmitter {
@@ -42,6 +42,7 @@ for (const phase of ['scan', 'status'] as const) it(`F8: real Ink/stdin arrows c
     reports.add(record.report);
     tasks.push(`${config.stateDir}/${record.window}/TASK.md`);
   }
+  await pastRacyWindow();
   const tmux = new FakeTmux();
   tmux.add('key-001', '● Working\n  esc to interrupt\n');
   tmux.add('key-002', '● Working\n  esc to interrupt\n');

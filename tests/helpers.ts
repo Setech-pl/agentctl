@@ -1,4 +1,5 @@
 import { composerFixture } from './composer-fixture.ts';
+import { RACY_WINDOW_NS } from '../src/core/file-version.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after } from 'node:test';
@@ -260,3 +261,9 @@ export async function runCli(config: GlobalConfig, runner: Runner, argv: string[
 export function completedRecordFromSpec(...args: Parameters<typeof recordFromSpec>): TaskRecord {
   return { ...recordFromSpec(...args), turnEndedAt: new Date(Math.max(Date.now(), args[2])).toISOString() };
 }
+
+/**
+ * Wait until every file written so far is older than the racy window of fileVersion (src/core/file-version.ts), so a cache may
+ * reuse it: tests that assert "an unchanged scan reads nothing" call this after building their fixtures.
+ */
+export const pastRacyWindow = (): Promise<void> => new Promise(resolve => setTimeout(resolve, Number(RACY_WINDOW_NS / 1_000_000n) + 50));
