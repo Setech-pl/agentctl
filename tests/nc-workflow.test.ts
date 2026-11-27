@@ -25,6 +25,7 @@ import { collectStatus as status } from '../src/core/status.ts';
 import type { PlanState } from '../src/core/usage.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { touchCohort, cohortTick } from '../src/core/cohort.ts';
+import { cohortKey } from '../src/core/util.ts';
 import { readHistory } from '../src/core/history.ts';
 import { sendPrompts } from '../src/core/send.ts';
 import { drainPromptQueue, promptQueueView } from '../src/core/prompt-queue.ts';
@@ -594,7 +595,8 @@ describe('P12: cohort archive (CLI and MCP), data and history stay', () => {
     const f = fixture('p12-age'); closedTask(f, 'A1', 'ANCIENT', '2026-09-01T10:00:00.000Z'); closedTask(f, 'N1', 'NEWISH', new Date().toISOString());
     for (const c of ['ANCIENT', 'NEWISH']) await touchCohort(f.ctx, c);
     // The cohort files carry the creation time: make ANCIENT old, NEWISH stays fresh.
-    const metaFile = (name: string) => path.join(path.dirname(f.config.path), 'cohorts', `${name}.json`);
+    // The file name is the case-folded cohort key (case-sensitive file systems would not find ANCIENT.json).
+    const metaFile = (name: string) => path.join(path.dirname(f.config.path), 'cohorts', `${cohortKey(name)}.json`);
     for (const [name, created] of [['ANCIENT', '2026-09-01T10:00:00.000Z'], ['NEWISH', new Date().toISOString()]] as const) { const meta = JSON.parse(fs.readFileSync(metaFile(name), 'utf8')); fs.writeFileSync(metaFile(name), JSON.stringify({ ...meta, created })); }
     const r = await runCli(f.config, f.runner, ['cohort', 'archive', '--older-than', '7d']); assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /archive ANCIENT \(1 task/); assert.ok(!r.stdout.includes('archive NEWISH'));
