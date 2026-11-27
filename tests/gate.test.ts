@@ -3,7 +3,7 @@ import { it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson } from '../scripts/gate.ts';
+import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson, defaultBase, DEFAULT_BASE_TAG } from '../scripts/gate.ts';
 import { checkRuntime, verifyArchive, node22Path, ensureNode22 } from '../scripts/runtime.ts';
 import { useScratch } from './helpers.ts';
 const scratch = useScratch();
@@ -397,4 +397,21 @@ it('release input seal rejects SHA changes and fixture edits restored to the ori
   assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'check C'), /fixtures.*changed/);
   git('commit', '--allow-empty', '-m', 'new SHA');
   assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'final result'), /SHA changed.*final result/);
+});
+
+it('GATE-BASE: a missing default base tag falls back to the newest reachable release tag with a warning', () => {
+  const calls: string[] = [], warnings: string[] = [];
+  const run = (tags: Record<string, string>) => (...args: string[]): string => {
+    calls.push(args.join(' '));
+    if (args[0] === 'merge-base') { if (tags[DEFAULT_BASE_TAG]) return 'mb-0181'; throw new Error('not a valid object name'); }
+    if (args[0] === 'tag') return tags.v ? `${tags.v}\nv0.26.2\n` : '';
+    if (args[0] === 'rev-parse') return `sha-of-${args[2]}`;
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  assert.equal(defaultBase(run({ [DEFAULT_BASE_TAG]: 'x', v: 'v0.27.1' }), m => warnings.push(m)), 'mb-0181');
+  assert.equal(warnings.length, 0);
+  assert.equal(defaultBase(run({ v: 'v0.27.1' }), m => warnings.push(m)), 'sha-of-v0.27.1^{commit}');
+  assert.match(warnings[0] ?? '', /agentctl-0181-rc1 is missing.*v0\.27\.1/);
+  assert.ok(calls.includes('tag --merged HEAD --list v[0-9]* --sort=-v:refname'));
+  assert.throws(() => defaultBase(run({}), () => {}), /pass --base/);
 });

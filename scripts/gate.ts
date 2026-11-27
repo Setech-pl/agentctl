@@ -95,6 +95,17 @@ export async function runReleaseChecks(live: string[], runCheck: (name: string) 
   return failures;
 }
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+
+/** The historical default base of the affected-test plan; clones that never fetched it fall back to the newest reachable release tag. */
+export const DEFAULT_BASE_TAG = 'agentctl-0181-rc1';
+export function defaultBase(run: (...args: string[]) => string, warn: (message: string) => void): string {
+  try { return run('merge-base', 'HEAD', DEFAULT_BASE_TAG); } catch { /* tag missing in this clone */ }
+  // Highest version among the tags merged into HEAD (`git describe` would pick the nearest by topology, often an older one).
+  const tag = run('tag', '--merged', 'HEAD', '--list', 'v[0-9]*', '--sort=-v:refname').split('\n')[0]?.trim();
+  if (!tag) throw new Error(`base tag ${DEFAULT_BASE_TAG} is missing and no release tag (v*) is reachable from HEAD; pass --base <ref>`);
+  warn(`gate: warning: base tag ${DEFAULT_BASE_TAG} is missing; using the newest reachable release tag ${tag}`);
+  return run('rev-parse', '--verify', `${tag}^{commit}`);
+}
 interface ReleaseInputs { sha: string; fixtureDigest: string }
 
 /** Seal the inputs, including mode and ctime so a fixture edited and restored during a step invalidates the result. */
@@ -138,7 +149,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const dirty = Boolean(git('status', '--porcelain'));
   const tests = filesUnder('tests').filter(f => f.endsWith('.test.ts')).sort();
   const live = filesUnder('scripts').filter(f => /\/live-.*\.ts$/.test(f)).sort();
-  const base = opts.base ? git('rev-parse', '--verify', opts.base) : git('merge-base', 'HEAD', 'agentctl-0181-rc1');
+  const base = opts.base ? git('rev-parse', '--verify', opts.base) : defaultBase((...a) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(), m => console.error(m));
   const changed = [...new Set([...git('diff', '--name-only', base, '--').split('\n'), ...git('ls-files', '--others', '--exclude-standard').split('\n')].filter(Boolean))];
   const sources = Object.fromEntries([...filesUnder('src'), ...filesUnder('tests')].filter(f => f.endsWith('.ts')).map(f => [f, fs.readFileSync(f, 'utf8')]));
   const affected = affectedTests(changed, sources, tests);
