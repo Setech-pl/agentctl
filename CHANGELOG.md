@@ -4,6 +4,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Watch state writes and log appends fsync off the event loop, so a long admission round no longer stalls status and delivery under I/O pressure. / Zapisy stanu i dziennika watch wykonują fsync poza pętlą zdarzeń, więc długie przyjmowanie kolejki nie wstrzymuje już statusu i dostarczania przy obciążonym dysku.
 - The release gate reads `npm pack --json` from npm 12, which keys the result by package name. / Bramka wydania odczytuje `npm pack --json` z npm 12, który zwraca obiekt według nazwy pakietu.
 - `npm run gate` full/release run on Linux: Node 22.14.0 is provisioned for the host platform (verified against SHASUMS256) and Node 26 is the gate's own Node outside macOS, where Homebrew is not required. / `npm run gate` full/release działa na Linuksie: Node 22.14.0 jest pobierany dla platformy hosta (z weryfikacją SHASUMS256), a poza macOS Node 26 to Node uruchamiający bramkę, bez Homebrew.
 - `npm run gate` falls back to the newest reachable release tag, with a warning, when the default base tag `agentctl-0181-rc1` is missing in the clone. / `npm run gate` przy braku domyślnego tagu bazowego `agentctl-0181-rc1` używa najnowszego osiągalnego tagu wydania i wypisuje ostrzeżenie.

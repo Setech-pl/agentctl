@@ -27,6 +27,25 @@ function replace(file: string, content: string | Buffer): void {
   }
 }
 
+/** `replace` on the libuv threadpool: fsync (a journal and device flush on Linux) must not stall the event loop of the watch. */
+async function replaceAsync(file: string, content: string | Buffer): Promise<void> {
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${randomUUID()}.tmp`);
+  let handle: fs.promises.FileHandle | undefined;
+  try {
+    let mode = 0o600;
+    try { mode = (await fs.promises.stat(file)).mode & 0o777; } catch { /* first write */ }
+    handle = await fs.promises.open(tmp, 'wx', mode);
+    await handle.writeFile(content);
+    await handle.sync();
+    await handle.close(); handle = undefined;
+    await fs.promises.rename(tmp, file);
+  } finally {
+    if (handle !== undefined) await handle.close().catch(() => undefined);
+    await fs.promises.unlink(tmp).catch(() => undefined);
+  }
+}
+
 export function stateWriteFailure(file: string): StateWriteFailure | undefined {
   const key = path.resolve(file);
   try {
@@ -85,11 +104,29 @@ export function atomicWriteFile(file: string, content: string | Buffer): void {
   }
 }
 
+/** atomicWriteFile without blocking the event loop: the same temporary file, fsync, rename and failure markers. */
+export async function atomicWriteFileAsync(file: string, content: string | Buffer): Promise<void> {
+  try { await replaceAsync(file, content); }
+  catch (error) { noteStateWriteFailure(file, error); throw error; }
+  failures.delete(path.resolve(file));
+  try { if (JSON.parse(fs.readFileSync(marker(file), 'utf8')).file === path.resolve(file)) fs.unlinkSync(marker(file)); } catch { /* no failure */ }
+  if (path.basename(file) === 'TASK.md' && !fs.existsSync(reserve(file))) {
+    try { await replaceAsync(reserve(file), Buffer.alloc(8192)); } catch { /* a successful state update is not undone by optional emergency space */ }
+  }
+}
+
 /** For callers holding their journal/state lock. */
 export function atomicAppendFile(file: string, content: string): void {
   let old = '';
   try { old = fs.readFileSync(file, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   atomicWriteFile(file, old + content);
+}
+
+/** atomicAppendFile without blocking the event loop (watch log lines are appended many times per tick). */
+export async function atomicAppendFileAsync(file: string, content: string): Promise<void> {
+  let old = '';
+  try { old = await fs.promises.readFile(file, 'utf8'); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  await atomicWriteFileAsync(file, old + content);
 }
 
 /** For the append-only JSONL journal, with its writer lock held. Existing complete lines survive a failed append. */

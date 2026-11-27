@@ -1584,6 +1584,16 @@
       "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status"
     ]
   },
+  "REL0272-ASYNC-FSYNC": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync on the event loop",
+      "REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync on the event loop"
+    ]
+  },
   "REL0272-CANCEL-SNAPSHOT": {
     "rev": "560b422462e02f28812e9251981ddddef4893d24",
     "outcome": "FAILS",
