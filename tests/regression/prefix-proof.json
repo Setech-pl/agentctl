@@ -1724,6 +1724,13 @@
       "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons"
     ]
   },
+  "REL0272-HOST-PERSIST": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "PASSES",
+    "failed": 0,
+    "passed": 1,
+    "failing": []
+  },
   "REL0272-INDEX-ROOT-WRITES": {
     "rev": "ce3f8972f18b810361bc43d7c99ce71999157970",
     "outcome": "FAILS",

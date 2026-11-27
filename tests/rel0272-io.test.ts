@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { it } from 'node:test';
+import { HostRuntime } from '../src/core/host-runtime.ts';
 import { RealRunner } from '../src/core/runner.ts';
-import { useScratch } from './helpers.ts';
+import { DiskRunner, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
 
@@ -22,4 +23,23 @@ it('REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync 
   assert.equal(fs.readFileSync(path.join(dir, 'agentctl-watch.log'), 'utf8'), 'line 1\nline 2\n');
   assert.equal(fs.readFileSync(path.join(dir, 'copy.json'), 'utf8'), '{"status":"failed"}\n');
   assert.deepEqual(fs.readdirSync(path.join(dir, 'queue')).filter(name => name.endsWith('.tmp')), []);
+});
+
+it('REL0272-HOST-PERSIST: an unchanged host state is not rewritten on every window inventory', async () => {
+  const config = makeConfig(scratch.sub('host-persist'));
+  seedTask(config, 'REMOTE-GONE', { host: 'offline-fixture' });
+  const runner = new DiskRunner({ dryRun: false });
+  const hostFile = path.join(config.stateDir, 'hosts', 'offline-fixture.json');
+  fs.mkdirSync(path.dirname(hostFile), { recursive: true }); // a tracked host directory, as after any remote start
+  let writes = 0;
+  const write = runner.writeFile.bind(runner);
+  runner.writeFile = async (file: string, content: string) => { if (file === hostFile) writes++; return write(file, content); };
+  const hosts = new HostRuntime(runner, config);
+  for (let i = 0; i < 5; i++) assert.deepEqual(await hosts.windows(), []);
+  assert.equal(writes, 1);
+  assert.match(fs.readFileSync(hostFile, 'utf8'), /host removed from config/);
+  // A new runtime (the next watch process) starts from the file and does not rewrite the same state either.
+  const next = new HostRuntime(runner, config);
+  await next.windows();
+  assert.equal(writes, 1);
 });

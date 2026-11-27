@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-HOST-PERSIST', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'Every window inventory rewrote and fsynced the unchanged state file of an unreachable host (146 writes in one canary run).', scenarios: [s('rel0272-io.test.ts', '^REL0272-HOST-PERSIST:')] },
   { id: 'REL0272-ASYNC-FSYNC', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'Every runner state write and watch log line fsynced on the event loop, so one admission round stalled all watch stages for 14 s on a loaded Linux host.', scenarios: [s('rel0272-io.test.ts', '^REL0272-ASYNC-FSYNC:')] },
   { id: 'REL0272-RACY-VERSION', fixedIn: '0.27.2', proofAgainst: '6e98ca541a83cbc0d1a7c8d4778d2b58e014f02a', symptom: 'On Linux a queue entry rewritten within one clock tick (same size, reused inode) was still read with its old status.', scenarios: [s('queue.test.ts', '^REL0272-RACY-VERSION:')] },
   { id: 'REL0272-INVENTORY-EIO', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'A transient inventory directory read failure was published as a new successful snapshot without task rows.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-INVENTORY-EIO:')] },
