@@ -39,9 +39,9 @@ describe('config store', () => {
     const store = new ConfigStore(loader(config), config);
     write(config, 'limits:\n  claude: nope\n');
     const bad = store.refresh();
-    assert.match(bad.error ?? '', /previous settings stay in force/);
+    assert.match(bad.error ?? '', /using version from/);
     assert.equal(bad.config.limits.claude, 1);
-    assert.match(bad.config.reloadWarning ?? '', /does not load/);
+    assert.match(bad.config.reloadWarning ?? '', /config invalid since/);
     const again = store.refresh();
     assert.equal(again.error, undefined, 'the same broken text is reported once');
     assert.ok(again.config.reloadWarning, 'but the warning stays');
@@ -108,13 +108,13 @@ describe('watch reloads the config', () => {
     await runWatch(s.ctx, s.notifier, { maxTicks: 2, configStore: store });
     assert.equal(readTaskRecord(s.ctx.config, 'nc-2'), undefined, 'the old limit still holds');
     assert.equal(readQueue(s.ctx.config).length, 1);
-    assert.match(fs.readFileSync(watchLogPath(s.ctx), 'utf8'), /config: config\.yaml does not load, the previous settings stay in force/);
+    assert.match(fs.readFileSync(watchLogPath(s.ctx), 'utf8'), /config: config invalid since/);
     const state = readConfigState(configStatePath(s.config));
     assert.deepEqual([state?.ok, state?.by], [false, 'watch']);
     // doctor says so (the file is fine again by now, the watcher has not looked yet)
     write(s.config, 'limits:\n  claude: 2\n');
     const checks = await runDoctor(new RecordingRunner({ dryRun: false }), () => makeConfigAt(s.config), s.root, '22.10.0', 'linux', s.root, {});
-    assert.match(checks.find((c) => c.name === 'config reload')?.detail ?? '', /the watch keeps the previous settings/);
+    assert.match(checks.find((c) => c.name === 'config reload')?.detail ?? '', /using version from/);
     // the next look at the fixed file starts it
     await runWatch(s.ctx, s.notifier, { maxTicks: 1, configStore: store });
     assert.ok(readTaskRecord(s.ctx.config, 'nc-2'));
@@ -135,7 +135,7 @@ describe('watch reloads the config', () => {
       assert.match(repeated.config.reloadWarning ?? '', /Cannot parse/);
       assert.equal(fs.readFileSync(configStatePath(s.config), 'utf8'), rejected, 'an unchanged broken config must keep its rejection receipt');
     }
-    assert.equal(s.out.filter(line => /previous settings stay in force/.test(line)).length, 1);
+    assert.equal(s.out.filter(line => /using version from/.test(line)).length, 1);
     fs.writeFileSync(s.config.path, valid);
     await reloadConfig(s.ctx, store);
     assert.equal(readConfigState(configStatePath(s.config))?.ok, true);
@@ -179,9 +179,9 @@ describe('the MCP server reloads the config on every call', () => {
     write(config, 'mcp:\n  allow: [mark, send]\nlimits:\n  claude: -1\n');
     const kept = deps.context(() => {}).config;
     assert.deepEqual(kept.mcp.allow, ['mark', 'send'], 'the previous settings stay');
-    assert.match(kept.reloadWarning ?? '', /does not load/);
+    assert.match(kept.reloadWarning ?? '', /config invalid since/);
     const status = await MCP_TOOLS.find((t) => t.name === 'status')!.run(deps, {} as never);
-    assert.match(status.text, /Config warning: config\.yaml does not load/);
+    assert.match(status.text, /Config warning: config invalid since/);
     assert.equal(readConfigState(configStatePath(config))?.by, 'mcp');
   });
 
@@ -199,4 +199,21 @@ describe('the MCP server reloads the config on every call', () => {
       else process.env.AGENTCTL_HOME = prev;
     }
   });
+});
+
+it('FIELD0268-CONFIG: rejected edits keep the invalid-since timestamp and expose the loaded version in limits', async () => {
+  const s = watched('config-timestamps', 'limits: {claude: 1}\n');
+  const goodAt = new Date('2026-11-27T13:35:00Z');
+  const invalidAt = Date.parse('2026-11-27T13:46:00Z');
+  fs.utimesSync(s.config.path, goodAt, goodAt);
+  const store = new ConfigStore(loader(s.config), s.config);
+  write(s.config, 'limits: {claude: wrong}\n');
+  store.refresh(invalidAt);
+  write(s.config, 'limits: [broken\n');
+  const later = store.refresh(invalidAt + 600_000);
+  assert.match(later.config.reloadWarning ?? '', /^config invalid since 2026-11-27T13:46:00.000Z – using version from 2026-11-27T13:35:00.000Z:/);
+  assert.match(later.config.reloadWarning ?? '', /Cannot parse/);
+  const limits = await MCP_TOOLS.find(t => t.name === 'limits')!.run({ context: () => new Context(s.runner, later.config, () => {}), notify: async () => {} }, {});
+  assert.match(limits.text, /config invalid since 2026-11-27T13:46:00.000Z/);
+  assert.match(limits.text, /claude: used=0 limit=1/);
 });

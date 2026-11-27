@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Board, limits and doctor show when the config was rejected and which version remains loaded. MCP tool responses flag an older server than watch. / Tablica, limity i doctor pokazują czas odrzucenia konfiguracji i wersję używaną dalej. Odpowiedzi MCP sygnalizują serwer starszy od watch.
+- Events list the unpulled report names within the response budget. Watch refreshes sizes in bounded batches and replays observed transitions after a skipped journal stage or restart. / Zdarzenia podają nazwy nieodebranych raportów w granicach limitu odpowiedzi. Watch odświeża pomiary partiami i odtwarza wykryte zmiany po pominięciu etapu dziennika lub restarcie.
+
 - Automatic GC resumes dry-run inventory after a deadline, repeats unchanged WALL plans after `report_every` (12h by default), and shows cached sizes for skipped categories and pinned tasks. / Automatyczne GC wznawia plan po limicie czasu, powtarza niezmienione plany po `report_every` (domyślnie 12h) oraz pokazuje pomiary pominiętych kategorii i przypiętych zadań.
 
 - Board Down reaches the pulled-report groups, End or G jumps to the final selectable row, and D opens the GC preview. / Na tablicy strzałka w dół dochodzi do grup odebranych raportów, End lub G skacze do ostatniego wiersza, a D otwiera podgląd GC.

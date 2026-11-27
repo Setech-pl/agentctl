@@ -113,3 +113,19 @@ describe('mcp: over stdio, as the app starts it', () => {
     assert.equal(seen?.context(() => {}).config.path, config.path);
   });
 });
+
+it('FIELD0268-CONFIG: older MCP tool responses carry the watch version without corrupting JSON', async () => {
+  const t = await connected('old-server');
+  try {
+    fs.mkdirSync(t.config.stateDir, {recursive: true});
+    fs.writeFileSync(path.join(t.config.stateDir, 'watch-progress.json'), JSON.stringify({
+      version: '10.0.0', pid: process.pid, tick: 2, startedAt: Date.now(), at: Date.now(),
+    }));
+    const version = await t.client.callTool({name: 'limits', arguments: {format: 'json'}});
+    assert.ok(JSON.parse((version.content as {text: string}[])[0]!.text).providers);
+    assert.match(String(version._meta?.['agentctl/watchWarning']), /9\.9\.9 is older than watch 10\.0\.0.*⌘Q/);
+    const refused = await t.client.callTool({name: 'interrupt', arguments: {task: 'NC-1'}});
+    assert.equal(refused.isError, true);
+    assert.match(String(refused._meta?.['agentctl/watchWarning']), /older than watch/);
+  } finally { await t.close(); }
+});

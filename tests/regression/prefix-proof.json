@@ -658,6 +658,48 @@
       "FIELD0268-BOARD: Down reaches pulled groups and End or G selects the final header"
     ]
   },
+  "FIELD0268-CONFIG": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-CONFIG: rejected edits keep the invalid-since timestamp and expose the loaded version in limits",
+      "FIELD0268-CONFIG: rejected edits keep the invalid-since timestamp and expose the loaded version in limits",
+      "FIELD0268-CONFIG: older MCP tool responses carry the watch version without corrupting JSON",
+      "FIELD0268-CONFIG: older MCP tool responses carry the watch version without corrupting JSON"
+    ]
+  },
+  "FIELD0268-DISK": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-DISK: one bounded tick refreshes multiple 31-hour-old worktree samples",
+      "FIELD0268-DISK: one bounded tick refreshes multiple 31-hour-old worktree samples"
+    ]
+  },
+  "FIELD0268-JOURNAL": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-JOURNAL: observations from a skipped transition stage survive a restart and a later return to baseline",
+      "FIELD0268-JOURNAL: observations from a skipped transition stage survive a restart and a later return to baseline"
+    ]
+  },
+  "FIELD0268-REPORTS": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-REPORTS: events_since names the same 15 unpulled reports as the board",
+      "FIELD0268-REPORTS: events_since names the same 15 unpulled reports as the board"
+    ]
+  },
   "FIX-331D4A3": {
     "rev": "bf115b61891277afd3c99824fb596367b723f434",
     "outcome": "FAILS",

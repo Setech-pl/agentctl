@@ -242,7 +242,11 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     const scheduler = new RefreshScheduler(async () => {
       const started = props.runtime ? performance.now() : 0;
       const config = configStore.refresh(ctx.runner.now()).config;
-      if (ctx.config !== config) ctx.setConfig(config);
+      if (ctx.config !== config) {
+        const warningChanged = ctx.config.reloadWarning !== config.reloadWarning;
+        ctx.setConfig(config);
+        if (warningChanged && !stopped) update(s => ({...s}));
+      }
       // Closed/cancelled rows are detailed only while their section is listed (the `a` key).
       const snap = await loadBoard(ctx, current.current.selected, cache.current, PREVIEW_LINES, { deepClosed: current.current.showHidden });
       lastBoardRefresh = ctx.runner.now();
@@ -370,7 +374,12 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()), ctx.config);
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
   const limitBanner = state.limitPending ? h(Text, { color: 'yellow', bold: true, wrap: 'truncate-end' }, `Zmiany limitów do decyzji: ${state.limitPending} (L)`) : null;
-  const rowsForBody = Math.max(3, state.height - 5 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0) - (limitBanner ? 1 : 0));
+  const configWarning = ctx.config.reloadWarning;
+  const configParts = configWarning && /^(config invalid since .+?) – (using version from .+?): (.*)$/.exec(configWarning);
+  const configLines = configParts ? configParts.slice(1) : configWarning ? [configWarning] : [];
+  const configBanner = configLines.map((text, index) => h(Text, { key: `config-${index}`, color: 'yellow', wrap: 'truncate-end' }, text));
+  const configBannerHeight = configLines.length;
+  const rowsForBody = Math.max(3, state.height - 5 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0) - (limitBanner ? 1 : 0) - configBannerHeight);
   const previewRoom = Math.max(1, rowsForBody - (state.preview?.model ? 3 : 1));
   useInput((input, key) => {
     const result = handleKey(current.current, input, key, previewRoom);
@@ -402,7 +411,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     const mode = viewMode!;
     const panel = mode.limits!;
     const selected = panel.choices[panel.selected]?.line ?? 0;
-    const room = Math.max(1, state.height - 4 - (limitBanner ? 1 : 0));
+    const room = Math.max(1, state.height - 4 - (limitBanner ? 1 : 0) - configBannerHeight);
     const top = Math.min(Math.max(0, mode.lines.length - room), Math.max(0, selected ? selected - 1 + mode.offset : mode.offset));
     const hint = 'Limity · ↑↓ wybór · ←→ przewijanie · +/− i Enter · a zatwierdź · r odrzuć · Esc';
     return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, hint), ...mode.lines.slice(top, top + room).map((text, i) => selected === top + i
@@ -412,7 +421,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const wallMode = state.mode.kind === 'wall' ? state.mode : null;
   const wallBody = (): React.ReactElement => {
     const view = wallView(state, wallMode!);
-    const room = Math.max(1, state.height - 4);
+    const room = Math.max(1, state.height - 4 - configBannerHeight);
     // Keep the selection on the screen: the window starts so that the selected line is inside it.
     const start = view.selected < 0 ? 0 : Math.max(0, Math.min(view.selected - Math.floor(room / 2), view.lines.length - room));
     return h(Box, { flexDirection: 'column' }, h(Text, { bold: true, wrap: 'truncate-end' }, view.title), ...view.lines.slice(start, start + room).map((l, i) => l.selected
@@ -427,9 +436,9 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       : wallMode
       ? wallBody()
       : viewMode
-      ? viewMode.limits ? limitsBody() : h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4 - (limitBanner ? 1 : 0))).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
+      ? viewMode.limits ? limitsBody() : h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `${VIEW_TITLES[viewMode.what]} (↑↓ scroll, Esc back)`), ...viewMode.lines.slice(viewMode.offset, viewMode.offset + Math.max(1, state.height - 4 - (limitBanner ? 1 : 0) - configBannerHeight)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
       : logMode
-      ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
+      ? h(Box, { flexDirection: 'column' }, h(Text, { bold: true }, `Log – ${logMode.lines.length > 1 ? logMode.lines.length - 1 : 0} task${logMode.lines.length === 2 ? '' : 's'} (↑↓ scroll, Esc back)`), ...logMode.lines.slice(logMode.offset, logMode.offset + Math.max(1, state.height - 4 - configBannerHeight)).map((l, i) => h(Text, { key: i, wrap: 'truncate-end', ...(i === 0 && logMode.offset === 0 ? { dimColor: true } : {}) }, l === '' ? ' ' : l)))
       : state.mode.kind === 'help'
       ? h(Box, { flexDirection: 'column' }, ...helpLines(state).map((l, i) => h(Text, { key: i, wrap: 'truncate-end' }, l === '' ? ' ' : l)))
       : h(
@@ -438,7 +447,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selection: listStyle, versions: ctx.config.board.modelVersions }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, room: previewRoom }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, limitBanner, fullScreen ? null : diskBox, fullScreen ? null : limitsBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, ...configBanner, limitBanner, fullScreen ? null : diskBox, fullScreen ? null : limitsBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

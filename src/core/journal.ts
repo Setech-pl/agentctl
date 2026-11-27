@@ -124,6 +124,7 @@ export function readJournal(config: Pick<GlobalConfig, 'path'>, sinceMs: number 
 type JournalIndex = { inode: bigint; device: bigint; modified: bigint; offset: number; tail: Buffer; ids: Set<string> };
 const indexes = new Map<string, JournalIndex>();
 const indexing = new Map<string, Promise<Set<string>>>();
+const reportKey = (task: string, attempt: string) => `report-ready:\0${task}\0${attempt}`;
 const changeKey = (kind: JournalKind, id: string) => `${kind}:\0${id}`;
 
 /** Change IDs survive restarts. Repeated reads parse only bytes appended since the last lookup. */
@@ -152,6 +153,7 @@ export function journalChangeIds(config: Pick<GlobalConfig, 'path'>): Promise<Se
         if (end >= 0) for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
           try {
             const event = JSON.parse(line) as JournalEntry;
+            if (event.kind === 'report-ready' && event.task && event.reportAttempt) index.ids.add(reportKey(event.task, event.reportAttempt));
             if (typeof event.changeId === 'string' && typeof event.kind === 'string') index.ids.add(changeKey(event.kind, event.changeId));
           } catch { /* torn line */ }
         }
@@ -173,12 +175,13 @@ export const indexedJournalChange = (ids: ReadonlySet<string>, kind: JournalKind
 export async function recordJournalChanges(ctx: Context, entries: (Omit<JournalEntry, 'at' | 'changeId'> & {changeId: string})[]): Promise<boolean> {
   if (!entries.length) return true;
   const file = journalPath(ctx.config);
-  return withFileLock(`${file}.changes.lock`, async () => {
+  const append = () => withFileLock(`${file}.changes.lock`, async () => {
     const ids = await journalChangeIds(ctx.config);
     const added = new Set<string>();
     const lines: string[] = [];
     for (const entry of entries) {
-      const key = changeKey(entry.kind, entry.changeId);
+      const key = entry.kind === 'report-ready' && entry.task && entry.reportAttempt
+        ? reportKey(entry.task, entry.reportAttempt) : changeKey(entry.kind, entry.changeId);
       if (added.has(key) || ids.has(key)) continue;
       added.add(key);
       lines.push(JSON.stringify(await prepareJournalEntry(ctx, entry, false)));
@@ -186,6 +189,7 @@ export async function recordJournalChanges(ctx: Context, entries: (Omit<JournalE
     if (!lines.length) return true;
     return ctx.runner.appendFile(file, `${lines.join('\n')}\n`).then(() => true, () => false);
   });
+  return entries.some(entry => entry.kind === 'report-ready') ? withFileLock(`${file}.reports.lock`, append) : append();
 }
 
 /** Record unless the last entry of this kind said the same within `withinMs` (two writers of one fact: a command and the watcher that noticed it). */

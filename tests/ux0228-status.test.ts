@@ -22,3 +22,20 @@ it('UX0228: status text groups pulled tasks; events_since counts only reports aw
   const events = await collectEvents(w.ctx, { client: 'cli', keep: true });
   assert.deepEqual(events.summary.reportsToPull, ['NEW']);
 });
+
+it('FIELD0268-REPORTS: events_since names the same 15 unpulled reports as the board', async () => {
+  const { activeRows, applySnapshot, initialBoardState, loadBoard, ProgressCache } = await import('../src/core/board.ts');
+  const w = world('field-reports');
+  for (let i = 1; i <= 15; i++) w.add(`REP-${i}`, null);
+  w.add('ALREADY-PULLED', 3);
+  const snap = await loadBoard(w.ctx, null, new ProgressCache());
+  const rows = activeRows(applySnapshot(initialBoardState(100, 30), snap));
+  const expected = rows.filter(r => r.state === 'report-ready' && !r.pulled).map(r => r.task).sort();
+  assert.equal(expected.length, 15);
+  const data = await tool('events_since').run(w.deps, {format: 'json', peek: true});
+  const {summary} = JSON.parse(data.text);
+  assert.equal(summary.reportCount, expected.length);
+  assert.deepEqual(summary.reportsToPull.sort(), expected);
+  const text = await tool('events_since').run(w.deps, {peek: true});
+  for (const task of expected) assert.match(text.text, new RegExp(`\\b${task}\\b`));
+});

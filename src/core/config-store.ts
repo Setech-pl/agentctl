@@ -38,6 +38,8 @@ export class ConfigStore {
   private good: GlobalConfig | undefined;
   private goodText: string | undefined;
   private failedText: string | undefined;
+  private invalidSince: number | undefined;
+  private goodSince: number | undefined;
   private warning: string | undefined;
   private file: string | undefined;
   private view: GlobalConfig | undefined;
@@ -49,6 +51,7 @@ export class ConfigStore {
     this.file = file ?? initial?.path;
     if (initial) {
       this.good = initial;
+      this.goodSince = this.modifiedAt();
       this.seen = this.stamp();
       this.goodText = this.read();
     }
@@ -62,6 +65,12 @@ export class ConfigStore {
     } catch {
       return 'missing';
     }
+  }
+
+  private modifiedAt(): number | undefined {
+    if (!this.file) return undefined;
+    try { return fs.statSync(this.file).mtimeMs; }
+    catch { return undefined; }
   }
 
   private read(): string | undefined {
@@ -102,6 +111,8 @@ export class ConfigStore {
       const keys = this.good ? changedKeys(this.good, next) : [];
       this.file = next.path;
       this.good = next;
+      this.goodSince = this.modifiedAt() ?? now;
+      this.invalidSince = undefined;
       this.goodText = this.read();
       this.failedText = undefined;
       this.warning = undefined;
@@ -111,7 +122,10 @@ export class ConfigStore {
       if (!this.good) throw e;
       this.failedText = text;
       this.view = undefined;
-      this.warning = `config.yaml does not load, the previous settings stay in force: ${errorMessage(e).split('\n').filter(Boolean).slice(0, 3).join(' ')}`;
+      this.invalidSince ??= now;
+      const since = new Date(this.invalidSince).toISOString();
+      const version = this.goodSince === undefined ? 'defaults' : new Date(this.goodSince).toISOString();
+      this.warning = `config invalid since ${since} – using version from ${version}: ${errorMessage(e).split('\n').filter(Boolean).slice(0, 3).join(' ')}`;
       return { ...unchanged(), error: this.warning };
     }
   }
@@ -147,4 +161,11 @@ export function noteConfigState(file: string, by: string, nowMs: number, error: 
   if (!was && error === undefined) return;
   const state: ConfigState = { ok: error === undefined, at: new Date(nowMs).toISOString(), by, ...(error ? { error } : {}) };
   atomicWriteFile(file, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+/** Show the durable rejection receipt even when a new CLI process cannot load the file. */
+export function configStateWarning(state: ConfigState | undefined): string | undefined {
+  if (!state || state.ok) return undefined;
+  if (state.error?.startsWith('config invalid since ')) return state.error;
+  return `config invalid since ${state.at} – ${state.by} keeps the previous settings: ${state.error ?? 'config.yaml could not be loaded'}`;
 }

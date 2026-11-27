@@ -35,8 +35,8 @@ import type { GlobalConfig } from './config.ts';
 import { announceLimitConfigChange, holdDiffText, limitEditLock } from './limits.ts';
 import { maintainLimitRequests } from './limit-requests.ts';
 import { findResumable, resumeText } from './resume.ts';
-import { recordJournal, recordJournalOnce } from './journal.ts';
-import type { JournalKind } from './journal.ts';
+import { recordJournal, recordJournalChanges, recordJournalOnce } from './journal.ts';
+import type { JournalEntry, JournalKind } from './journal.ts';
 import type { Context } from './context.ts';
 import { Alerts } from './alert.ts';
 import { awayTick } from './away.ts';
@@ -44,6 +44,9 @@ import { phoneTick } from './phone-send.ts';
 import type { Notifier } from './notify.ts';
 import { reportReadyText } from './event-command.ts';
 import type { SelfArgv } from './events.ts';
+import { inspectReport } from './report-state.ts';
+import { secretRedactor } from './secret-redaction.ts';
+import { randomUUID } from 'node:crypto';
 import { readVerdict } from './verdict.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
@@ -103,6 +106,7 @@ export class WatchMemory {
   /** The pairs of colliding tasks already announced, and when git was last asked. */
   readonly collisions = new CollisionMemory();
   readonly recoveredWrites = new Set<string>();
+  readonly transitionJournal = new TransitionJournal();
   readonly journaledReports = new WeakMap<TaskRecord, string>();
 
   async inventory(ctx: Context): Promise<RecordScan> {
@@ -185,12 +189,78 @@ async function recordReport(ctx: Context, task: string): Promise<void> {
 
 const JOURNALED: Partial<Record<TaskState, JournalKind>> = { 'host-unreachable': 'host-unreachable', 'needs-attention': 'needs-attention', overloaded: 'overloaded', 'report-ready': 'report-ready', 'needs-trust': 'needs-trust', 'needs-input': 'needs-input', limited: 'limited', dead: 'dead', orphan: 'orphan' };
 
-/** The transition goes to the journal that `events` reads (the notification only reaches the desktop). */
-async function journalTransition(ctx: Context, row: StatusRow, e: WatchEvent): Promise<void> {
-  const kind = e.from === 'host-unreachable' && e.to !== 'host-unreachable' ? 'host-recovered' : JOURNALED[e.to];
-  if (!kind || row.tmuxLost || (kind === 'dead' && row.launchExit)) return;
-  const verdict = kind === 'report-ready' ? readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null) : undefined;
-  await recordJournal(ctx, { kind, task: row.task, text: e.notification ?? e.to, ...(verdict ? { verdict } : {}) });
+type PendingTransition = Omit<JournalEntry, 'at' | 'changeId'> & { changeId: string };
+interface TransitionCheckpoint {
+  states: Record<string, TaskState>;
+  pending: PendingTransition[];
+}
+
+/** Capture observed states before publication. The journal stage can be skipped, fail or restart independently. */
+class TransitionJournal {
+  private file: string | undefined;
+  private checkpoint: TransitionCheckpoint | undefined;
+
+  capture(ctx: Context, rows: StatusRow[]): void {
+    if (ctx.runner.dryRun) return;
+    const file = path.join(ctx.config.stateDir, 'watch-transitions.json');
+    if (this.file !== file) {
+      this.file = file;
+      this.checkpoint = undefined;
+      try { this.checkpoint = JSON.parse(fs.readFileSync(file, 'utf8')); }
+      catch {
+        try {
+          const old = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
+          if (old.version === 1 && Array.isArray(old.rows)) this.checkpoint = { states: this.states(old.rows), pending: [] };
+        } catch { /* First watch. Record the baseline without emitting events. */ }
+      }
+    }
+    const states = this.states(rows);
+    const previous = this.checkpoint;
+    if (previous && JSON.stringify(previous.states) === JSON.stringify(states) && fs.existsSync(file)) return;
+    const entries: PendingTransition[] = [];
+    if (previous) for (const row of rows) {
+      if (row.closed || row.cancelled) continue;
+      const from = Object.hasOwn(previous.states, row.task) ? previous.states[row.task] : undefined;
+      if (from === row.state) continue;
+      const kind = from === 'host-unreachable' ? 'host-recovered' : JOURNALED[row.state];
+      if (!kind || row.tmuxLost || (kind === 'dead' && row.launchExit)) continue;
+      let verdict: string | undefined, reportAttempt: string | undefined;
+      if (kind === 'report-ready') {
+        const record = readTaskRecord(ctx.config, row.windowName);
+        if (record) {
+          const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
+          if (!report.ready || (record.attemptId && !report.sentinel && !report.structured)) continue;
+          reportAttempt = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
+        }
+        verdict = readVerdict(row.reportPath, ctx.config.notify.verdictPattern, row.reviewOf != null);
+      }
+      entries.push({
+        changeId: randomUUID(), kind, task: row.task,
+        text: kind === 'report-ready' ? reportReadyText(row.task, verdict) : NOTIFY_ON[row.state]?.(row) ?? row.state,
+        ...(row.cohort ? { cohort: row.cohort } : {}), ...(row.owner ? { owner: row.owner } : {}),
+        ...(verdict ? { verdict } : {}), ...(reportAttempt ? { reportAttempt } : {}),
+      });
+    }
+    const safe = entries.length ? secretRedactor([ctx.config, process.env, entries], new Set(Object.keys(states)))(entries) : entries;
+    this.save({ states, pending: [...(previous?.pending ?? []), ...safe] });
+  }
+
+  async flush(ctx: Context): Promise<void> {
+    const file = this.file, pending = this.checkpoint?.pending.slice(0, 100);
+    if (!pending?.length || !await recordJournalChanges(ctx, pending) || this.file !== file || !this.checkpoint) return;
+    const delivered = new Set(pending.map(entry => entry.changeId));
+    this.save({ ...this.checkpoint, pending: this.checkpoint.pending.filter(entry => !delivered.has(entry.changeId)) });
+  }
+
+  private states(rows: StatusRow[]): Record<string, TaskState> {
+    return Object.fromEntries(rows.filter(row => !row.closed && !row.cancelled).map(row => [row.task, row.state]));
+  }
+
+  private save(checkpoint: TransitionCheckpoint): void {
+    fs.mkdirSync(path.dirname(this.file!), { recursive: true });
+    atomicWriteFile(this.file!, JSON.stringify(checkpoint));
+    this.checkpoint = checkpoint;
+  }
 }
 
 export function watchLogPath(ctx: Context): string {
@@ -342,6 +412,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     if (memory.statusSweep?.config === config) {
       observed = memory.statusSweep.rows;
       memory.rows = observed;
+      memory.transitionJournal.capture(ctx, observed);
       memory.statusSweep = undefined;
       return;
     }
@@ -349,6 +420,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
     // discarding it and repeatedly starting the same work. WatchSteps keeps one sweep in flight.
     const rows = await collect();
     if (ctx.config !== config || options.signal?.aborted) throw new Error('watch configuration or run changed during status collection');
+    memory.transitionJournal.capture(ctx, rows);
     if (signal.aborted) memory.statusSweep = { config, rows };
     else memory.rows = observed = rows;
   });
@@ -376,7 +448,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
           const updated = readTaskRecord(ctx.config, row.windowName);
           const text = `${row.task}: ${updated?.promptError}`;
           await new Alerts(ctx, notifier, { self: options.self }).send({ task: row.task, window: row.windowName }, 'needs-attention', text, 'watch');
-          await journalTransition(ctx, row, { task: row.task, from: row.state, to: 'needs-attention', reason: 'transition', notification: text });
+          await recordJournal(ctx, { kind: 'needs-attention', task: row.task, text });
         }
         if (result !== 'pending') changed = true;
       }
@@ -406,7 +478,10 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
       await journalOutputs(ctx, record);
       if (row.outputs_pending !== true && !signal.aborted) memory.journaledReports.set(record, signature);
     }
-    if (!signal.aborted) memory.rows = processed = allRows;
+    if (!signal.aborted) {
+      memory.transitionJournal.capture(ctx, allRows);
+      memory.rows = processed = allRows;
+    }
   }, 'status collection');
   for (const [name, run] of [
     ['limited recovery', (rows: StatusRow[]) => limitedTick(ctx, rows, notifier)],
@@ -429,6 +504,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });
   stage('attention', async () => { const rows = allRows(); if (rows) await attentionTick(ctx, rows, notifier); }, 'task delivery and reports');
   const events: WatchEvent[] = [];
+  stage('journal transitions', () => memory.transitionJournal.flush(ctx), 'status collection', 'task delivery and reports');
   stage('transitions', async signal => {
     const rows = activeRows();
     if (!rows) return;
@@ -454,9 +530,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
         // The ledger key of a reminder differs from the state names, so it is never taken for the end-of-turn event.
         const key = e.reason === 'waiting-too-long' ? 'waiting-too-long' : e.to;
         if ((await alerts.send({ task: row.task, window: row.windowName }, key, e.notification, 'watch')) === 'duplicate') e.duplicate = true;
-        else if (e.reason === 'transition') await journalTransition(ctx, row, e);
       }
-      if (!e.notification && e.from === 'host-unreachable' && e.reason === 'transition' && row) await journalTransition(ctx, row, e);
       await ctx.runner.appendFile(watchLogPath(ctx), logLine(now, e));
       ctx.out(logLine(now, e).trimEnd());
     }

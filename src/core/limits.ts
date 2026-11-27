@@ -233,6 +233,7 @@ export interface LimitsReport {
   hosts?: { host: string; providers: { agent: AgentName; limit: number | null; used: number; free: number | null; queued: number }[] }[];
   countExternal: boolean;
   config: string;
+  configWarning?: string;
 }
 
 /** `live` is what `liveWindows` returns: windows of agentctl plus the reservations and the external sessions. */
@@ -244,6 +245,7 @@ export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[],
   return {
     countExternal: config.countExternal,
     config: config.path,
+    ...(config.reloadWarning ? { configWarning: config.reloadWarning } : {}),
     hosts: Object.entries(config.hosts).map(([host, h]) => ({ host, providers: h.providers.map(agent => {
       const limit = h.limits?.[agent] ?? null;
       const used = accountTasks([], live.filter(w => w.host === host && w.agent === agent)).slots.length;
@@ -300,7 +302,7 @@ export function renderLimits(report: LimitsReport): string[] {
   const body = report.providers.map((p) => [p.agent, p.limit === null ? '-' : String(p.limit), String(p.used), p.free === null ? '-' : String(p.free), String(p.windows.length), String(p.working.length), String(p.reportReady.length), String(p.reserved), report.countExternal ? String(p.external.length) : 'off', String(p.queued), p.providerHold ? providerHoldText(p.agent, p.providerHold) : holdText(p.queueHold)]);
   const widths = header.map((h, i) => Math.max(h.length, ...body.map((r) => (r[i] as string).length)));
   const fmt = (cells: string[]): string => cells.map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] as number))).join('  ').trimEnd();
-  const lines = [fmt(header), ...body.map(fmt)];
+  const lines = [...(report.configWarning ? [report.configWarning] : []), fmt(header), ...body.map(fmt)];
   for (const p of report.providers) {
     const parts: string[] = [];
     if (p.plan) parts.push(`plan: ${p.plan}`);
@@ -322,12 +324,12 @@ export function renderLimits(report: LimitsReport): string[] {
 
 /** The provider and chat counts for concise MCP responses. */
 export function compactLimits(report: LimitsReport): string {
-  return report.providers.flatMap(p => [
+  return [...(report.configWarning ? [report.configWarning] : []), ...report.providers.flatMap(p => [
     `${p.agent}: used=${p.used}${taskNames(p.slotTasks ?? [])} limit=${p.limit ?? 'n/d'} free=${p.free ?? 'n/d'} reserved=${p.reserved} queued=${p.queued}${taskNames(p.queuedTasks ?? [])} queue_hold=${holdText(p.queueHold)}${p.providerHold ? `; ${providerHoldText(p.agent, p.providerHold)}` : ''}`,
     ...(p.plan ? [`  ${p.agent} plan ${p.plan}`] : []),
     ...(p.working.length || p.reportReady.length ? [`  working=${p.working.length}${taskNames(p.working)} report-ready=${p.reportReady.length}${taskNames(p.reportReady)}`] : []),
     ...(p.chats ?? []).map(chat => `  ${renderChatLoad(chat)}`),
-  ]).join('\n');
+  ])].join('\n');
 }
 
 /** "90%" or "off". */

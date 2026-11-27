@@ -95,7 +95,7 @@ import type { Result } from './core/history.ts';
 import { usageSummaryLines } from './core/usage-limits.ts';
 import { collectUsage, renderUsage, usageMarkdown } from './core/usage-report.ts';
 import { configDir, EFFORTS, loadGlobalConfig } from './core/config.ts';
-import { ConfigStore, configStatePath, noteConfigState, readConfigState } from './core/config-store.ts';
+import { ConfigStore, configStatePath, configStateWarning, noteConfigState, readConfigState } from './core/config-store.ts';
 import { applyExamples } from './examples.ts';
 import type { Effort, GlobalConfig } from './core/config.ts';
 import { Context } from './core/context.ts';
@@ -300,8 +300,8 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       config = deps.loadConfig();
     } catch (e) {
       // A running watch or MCP server keeps working with the last good settings: say so, so that the broken file is not mistaken for an outage.
-      const state = readConfigState(path.join(configDir(), 'config-state.json'));
-      if (e instanceof AgentctlError && state && !state.ok) throw new AgentctlError(e.message, `${e.hint ? `${e.hint} ` : ''}The ${state.by} keeps the previous settings meanwhile (since ${state.at}).`);
+      const warning = configStateWarning(readConfigState(path.join(configDir(), 'config-state.json')));
+      if (warning) throw new AgentctlError(warning, e instanceof AgentctlError ? e.hint : undefined);
       throw e;
     }
     for (const warning of config.warnings ?? []) {

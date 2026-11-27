@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { INSTALL_HINTS } from './agents.ts';
-import { configStatePath, readConfigState } from './config-store.ts';
+import { configStatePath, configStateWarning, readConfigState } from './config-store.ts';
 import { PROJECT_CONFIG_NAME, configDir, loadGlobalConfig, loadProjectConfig } from './config.ts';
 import type { GlobalConfig } from './config.ts';
 import type { Runner } from './runner.ts';
@@ -140,8 +140,8 @@ export async function runDoctor(
     add('MCP permissions', 'ok', 'Existing queue permission still permits only queue insertion; queue:* explicitly enables the queue group. close/interrupt/queue_rm now require preview then confirm.');
   } catch (e) {
     // A running watch or MCP server keeps the last good settings meanwhile: say so.
-    const state = readConfigState(path.join(configDir(env), 'config-state.json'));
-    add('config', 'fail', `${errorMessage(e).split('\n').join(' ')}${state && !state.ok ? ` – the ${state.by} keeps the previous settings (since ${state.at})` : ''}`);
+    const warning = configStateWarning(readConfigState(path.join(configDir(env), 'config-state.json')));
+    add('config', 'fail', warning ?? errorMessage(e).split('\n').join(' '));
   }
 
   section('disk/config (cached sizes)');
@@ -285,8 +285,8 @@ export async function runDoctor(
       }
     }
     add('config', 'ok', config.loaded ? `${config.path}` : `${config.path} not found, using defaults`);
-    const reload = readConfigState(configStatePath(config));
-    if (reload && !reload.ok) add('config reload', 'warn', `the ${reload.by} keeps the previous settings since ${reload.at}: ${reload.error ?? 'the file did not load'}`);
+    const warning = configStateWarning(readConfigState(configStatePath(config)));
+    if (warning) add('config reload', 'warn', warning);
     if (config.mirrorDir) {
       const dir = config.mirrorDir;
       try {

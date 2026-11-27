@@ -183,7 +183,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     ...(attention.length > 6 ? {needYouCount: attention.length} : {}),
     queued: queue.length,
     queuedTasks: queue.slice(0, 6).map(e => e.task),
-    reportsToPull: accounting.reports.slice(0, 6).map(r => r.task),
+    reportsToPull: accounting.reports.map(r => r.task).sort((a, b) => a.localeCompare(b)),
     reportCount: accounting.reports.length,
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
@@ -199,6 +199,9 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const attentionTasks = new Set(rows.filter(r => !r.closed && !r.cancelled && !r.pulled).map(r => r.task));
   const updateNeedYou = () => { report.summary.needYou = [...new Set([...baseNeedYou, ...events.filter(e => !('fragment' in e) && e.kind === 'report-outputs' && attentionTasks.has(e.task ?? '')).flatMap(e => [...(e.decisions ?? []).map(text => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: decision: ${text}`), ...(e.actions ?? []).map(a => `${e.reviewOf ? 'przegląd ' : ''}${e.task}: action: ${a.title} (${a.shell})`)])])]; };
   const fits = () => { updateNeedYou(); return Math.max(Buffer.byteLength(JSON.stringify(report, null, 2)), Buffer.byteLength(renderEvents(report).join('\n'))) <= (opts.maxBytes ?? 16000); };
+  while (summary.reportsToPull.length > 1 && !fits()) {
+    summary.reportsToPull.length = Math.floor(summary.reportsToPull.length / 2);
+  }
   const limit = Math.max(1, Math.min(200, opts.limit ?? 100));
   while (position.index < all.length && events.length < limit) {
     const event = all[position.index]!;
@@ -336,7 +339,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
 
 export function summaryLine(s: EventsSummary): string {
   const reports = s.reportCount ?? s.reportsToPull.length;
-  const parts = [`${s.active} aktywne${taskNames(s.activeTasks ?? [])}`, ...(s.working ? [`${s.working} pracuje${taskNames(s.workingTasks ?? [])}`] : []), `${s.queued} w kolejce${taskNames(s.queuedTasks ?? [])}`, reports > 0 ? `${reports} ${plural(reports, 'raport', 'raporty', 'raportów')} do pobrania${taskNames(s.reportsToPull)}` : 'brak raportów do pobrania'];
+  const parts = [`${s.active} aktywne${taskNames(s.activeTasks ?? [])}`, ...(s.working ? [`${s.working} pracuje${taskNames(s.workingTasks ?? [])}`] : []), `${s.queued} w kolejce${taskNames(s.queuedTasks ?? [])}`, reports > 0 ? `${reports} ${plural(reports, 'raport', 'raporty', 'raportów')} do pobrania${s.reportsToPull.length ? ` (${s.reportsToPull.join(', ')}${reports > s.reportsToPull.length ? ', …' : ''})` : ''}` : 'brak raportów do pobrania'];
   if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie${s.needYouCount ? ` (${s.needYouCount})` : ''}: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;

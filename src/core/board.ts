@@ -1403,7 +1403,7 @@ export function visibleRows(state: BoardState, capacity: number): { rows: BoardR
 
 // ---- texts
 
-export const KEY_HINTS = 'B zamknij odebrane m/M i c/r x X cancel k cohort h l L C G H W R w u/d/p z/a ?';
+export const KEY_HINTS = 'B zamknij odebrane m/M i c/r x X cancel k cohort h l L C D H W R w u/d/p z/a ?';
 
 export const HELP_LINES: string[] = [
   'agentctl board',

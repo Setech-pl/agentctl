@@ -228,28 +228,49 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   return text;
 }
 async function persistDiskMeasurements(ctx: Context, records?: TaskRecord[]): Promise<void> {
-  const repos = (records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host).flatMap(r => r.repos);
-  const worktrees = [...new Set(repos.map(r => r.worktree))];
-  const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [{...m, repo: repos.find(r => r.worktree === wt)?.path}] : []; });
+  const repos = new Map((records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)])
+    .filter(r => !r.host).flatMap(r => r.repos.map(repo => [repo.worktree, repo.path] as const)));
+  const entries = [...repos].flatMap(([wt, repo]) => { const m = lastMeasurement(wt); return m ? [{...m, repo}] : []; });
   await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
 }
 const refreshing = new Set<string>();
 const refreshed = new Map<string, number>();
-/** Incremental watch inventory: one stale worktree per tick, at most once per 5 seconds; workers run at nice 10. */
+const WORKTREE_REFRESH_MS = 60 * 60_000;
+const failedMeasurements = new Map<string, number>();
+/** A small batch per tick, oldest first, sharing the existing bounded worker pool. A failed path cannot starve its peers. */
 export async function refreshDiskMeasurements(ctx: Context, records?: TaskRecord[]): Promise<void> {
   const key = ctx.config.path, now = ctx.runner.now();
   if (ctx.runner.dryRun || refreshing.has(key) || now - (refreshed.get(key) ?? -Infinity) < 5000) return;
   refreshed.set(key, now);
   restoreDiskMeasurements(ctx);
   const targets = [...new Set((records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
-  const target = targets.sort((a, b) => (lastMeasurement(a)?.at ?? 0) - (lastMeasurement(b)?.at ?? 0)).find(wt => !cachedMeasurement(wt) || now - lastMeasurement(wt)!.at >= DISK_INTERVAL_MS);
-  if (!target) return;
+  const due = targets.map(wt => ({ wt, at: lastMeasurement(wt)?.at ?? -Infinity })).sort((a, b) => a.at - b.at);
+  const batch: string[] = [];
+  for (const {wt, at} of due) {
+    const failure = failedMeasurements.get(wt);
+    if (failure !== undefined && now - failure < WORKTREE_REFRESH_MS) continue;
+    try { if (now - at >= WORKTREE_REFRESH_MS || !cachedMeasurement(wt)) batch.push(wt); }
+    catch { batch.push(wt); }
+    if (batch.length >= Math.min(32, ctx.config.disk.workers * 4)) break;
+  }
+  if (!batch.length) return;
   configureMeasurements(ctx.config.disk);
   refreshing.add(key);
   try {
-    const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now() });
-    try { await lease.promise; await persistDiskMeasurements(ctx, records); }
-    finally { lease.release(); }
+    const results = await Promise.allSettled(batch.map(async target => {
+      const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now(), fresh: true });
+      try { await lease.promise; }
+      finally { lease.release(); }
+    }));
+    for (const [index, result] of results.entries()) {
+      const target = batch[index]!;
+      if (result.status === 'fulfilled') failedMeasurements.delete(target);
+      else {
+        if (failedMeasurements.size >= 4096) failedMeasurements.delete(failedMeasurements.keys().next().value!);
+        failedMeasurements.set(target, now);
+      }
+    }
+    if (results.some(result => result.status === 'fulfilled')) await persistDiskMeasurements(ctx, records);
   } finally { refreshing.delete(key); }
 }
 const sampled = new Map<string, number>();

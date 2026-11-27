@@ -202,6 +202,8 @@ The board, CLI and MCP `limits` and `capacity` show effective ceilings. MCP `con
 
 ## Watch, board and notifications
 
+Board, limits and doctor show when a config edit was first rejected and the timestamp of the version still in use. A tool response from an MCP server older than the running watch carries a version warning. Watch refreshes worktree sizes in bounded batches and saves observed transitions for replay if journaling is delayed. `events_since` lists the names of unpulled reports for its scope within the response budget.
+
 | Key | Type / default / layers | Meaning |
 |---|---|---|
 | `watch` | mapping · see below · g | `agentctl watch` and the window icons. |
