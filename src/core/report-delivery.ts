@@ -1,4 +1,4 @@
-import { withResponseBudget } from './response-budget.ts';
+import { withResponseBudget, ResponseBudgetError } from './response-budget.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -28,12 +28,14 @@ async function fields(ctx: Context, record: TaskRecord, receipt: Receipt): Promi
 }
 export async function deliverReportFields(ctx: Context, record: TaskRecord, signature: string, values: Record<string, string>): Promise<void> {
   const receipt = {task: record.task, signature, fields: values};
+  let queued = false;
+  const defer = () => { if (!queued) { enqueue(ctx, receipt); queued = true; } };
   // Delivery never waits on an asynchronous state write either. A late writer may finish;
   // replay is idempotent and still verifies the content signature.
   await withResponseBudget(async () => {
     try { await fields(ctx, record, receipt); }
-    catch (error) { if (!(error instanceof FileLockTimeout)) throw error; enqueue(ctx, receipt); }
-  }, () => enqueue(ctx, receipt), undefined, 100);
+    catch (error) { if (!(error instanceof FileLockTimeout) && !(error instanceof ResponseBudgetError)) throw error; defer(); }
+  }, defer, undefined, 100);
 }
 async function page(ctx: Context, record: TaskRecord, receipt: Receipt): Promise<void> {
   const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');

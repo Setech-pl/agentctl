@@ -1438,6 +1438,16 @@
       "READFAST0269: get_report {\"task\":\"FAST\",\"byte_offset\":16} bypasses blocked status and expired shared clock"
     ]
   },
+  "READFAST0269-ACK": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error",
+      "READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error"
+    ]
+  },
   "READFAST0269-COUNT": {
     "rev": "v0.26.4",
     "outcome": "FAILS",

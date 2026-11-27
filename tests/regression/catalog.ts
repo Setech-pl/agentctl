@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'READFAST0269-ACK', fixedIn: '0.26.5', symptom: 'A slow acknowledgement lock syscall can replace a successfully read report with a deadline error.', scenarios: [s('readfast0269.test.ts', '^READFAST0269-ACK:')] },
   { id: 'READFAST0269-COUNT', fixedIn: '0.26.5', symptom: 'Events report totals stop at the ten displayed task names.', scenarios: [s('readfast0269.test.ts', '^READFAST0269-COUNT:')] },
   { id: 'READFAST0269', fixedIn: '0.26.5', symptom: 'Report reads wait for status collection and exhaust the shared MCP deadline on loaded hosts; report counts trust snapshots.', scenarios: [s('readfast0269.test.ts', '^READFAST0269:')] },
   { id: 'AUTOGC0266-SCALE', fixedIn: '0.26.4', symptom: 'auto_gc rechecked every candidate before the first deletion, walking every worktree (node_modules included) and rereading all TASK.md files per item, with no deadline: at ~1500 tasks a run never finished and loaded the watch.', scenarios: [s('autogc0266.test.ts', '^AUTOGC0266-SCALE:')] },
