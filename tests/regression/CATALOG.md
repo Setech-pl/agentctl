@@ -10,6 +10,8 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| FIELD0268-COHORT-MOVE | A stale header of a moved task withheld the cohort completion notice after its successor finished. | `tests/cohort.test.ts` (`^FIELD0268-COHORT-MOVE:`) | 0.27.2 | fails on 0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff (1 failing of 1) |
+| FIELD0268-JOURNAL-ONCE | A delivery failure noticed on the first tick produced two journal entries. | `tests/hotfix-0173-p.test.ts` (`^0173-P3: watch restart at the deadline`) | 0.27.2 | fails on 0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff (1 failing of 1) |
 | FIELD0268-GC-RESUME-IO | A missing free-space sample or a different mount alias discarded a paused GC plan. | `tests/autogc0266.test.ts` (`^FIELD0268-GC-RESUME-IO:`) | 0.27.2 | fails on f63261cecbf52e7285e400d3c1a1c41434c3e835 (1 failing of 1) |
 | FIELD0268-AUTOGC | Automatic GC announced incomplete previews, discarded deadline progress and showed pinned worktrees as zero bytes. | `tests/autogc0266.test.ts` (`^FIELD0268-AUTOGC:`) | 0.27.2 | fails on v0.26.4 (2 failing of 2) |
 | FIELD0268-CONFIG | Invalid configuration lacked version timestamps and older MCP sessions did not identify the newer watcher. | `tests/config-reload.test.ts` (`^FIELD0268-CONFIG:`)<br>`tests/mcp-server.test.ts` (`^FIELD0268-CONFIG:`) | 0.27.2 | fails on v0.26.4 (2 failing of 2) |

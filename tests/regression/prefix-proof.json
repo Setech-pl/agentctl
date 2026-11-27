@@ -658,6 +658,17 @@
       "FIELD0268-BOARD: Down reaches pulled groups and End or G selects the final header"
     ]
   },
+  "FIELD0268-COHORT-MOVE": {
+    "rev": "0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0268-COHORT-MOVE: a replaced window does not block the completion notice before its header event arrives",
+      "cohort: \"all reports ready\"",
+      "FIELD0268-COHORT-MOVE: a replaced window does not block the completion notice before its header event arrives"
+    ]
+  },
   "FIELD0268-CONFIG": {
     "rev": "v0.26.4",
     "outcome": "FAILS",
@@ -698,6 +709,16 @@
     "failing": [
       "FIELD0268-JOURNAL: observations from a skipped transition stage survive a restart and a later return to baseline",
       "FIELD0268-JOURNAL: observations from a skipped transition stage survive a restart and a later return to baseline"
+    ]
+  },
+  "FIELD0268-JOURNAL-ONCE": {
+    "rev": "0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "0173-P3: watch restart at the deadline still emits one attention notification and journal event",
+      "0173-P3: watch restart at the deadline still emits one attention notification and journal event"
     ]
   },
   "FIELD0268-REPORTS": {

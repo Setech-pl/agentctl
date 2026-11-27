@@ -363,7 +363,9 @@ describe('cohort: "all reports ready"', () => {
     assert.equal(s.notified.length, 2);
   });
 
-  it('the watcher sends it, a closed task with a report counts, an old window replaced by a move does not hold it back', async () => {
+  it('FIELD0268-COHORT-MOVE: a replaced window does not block the completion notice before its header event arrives', async t => {
+    const watch = fs.watch;
+    t.mock.method(fs, 'watch', (file: fs.PathLike) => watch(file, { persistent: false }));
     const s = setup('watch');
     s.seed('A-1', 'closed', 'Sprint-1');
     s.seed('A-2', 'ready', 'Sprint-1');

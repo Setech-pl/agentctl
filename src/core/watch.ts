@@ -448,7 +448,6 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
           const updated = readTaskRecord(ctx.config, row.windowName);
           const text = `${row.task}: ${updated?.promptError}`;
           await new Alerts(ctx, notifier, { self: options.self }).send({ task: row.task, window: row.windowName }, 'needs-attention', text, 'watch');
-          await recordJournal(ctx, { kind: 'needs-attention', task: row.task, text });
         }
         if (result !== 'pending') changed = true;
       }

@@ -87,7 +87,7 @@ describe('board: grouping by cohort', () => {
     assert.match(queueCells(queue[0]!, false, { marker: 1, task: 10, who: 18, state: 14, time: 7, progress: 8, report: 7 }).map((c) => c.text).join('|'), /Q-1/);
   });
 
-  it('g folds the group of the selected task (its rows leave the list and the cursor path), G opens every group', () => {
+  it('g folds the group of the selected task (its rows leave the list and the cursor path), E opens every group', () => {
     let s = boardOf(rows, { selected: 'A-1' });
     let r = press(s, 'g');
     s = r.state;
@@ -95,7 +95,7 @@ describe('board: grouping by cohort', () => {
     assert.equal(s.selected, 'B-1', 'the cursor moves off the folded group');
     assert.deepEqual(navTasks(s), ['B-1', 'B-2', 'C-1']);
     const titles = listItems(s).flatMap((i) => (i.kind === 'group' ? [groupTitle(i)] : []));
-    assert.equal(titles[0], '+ alpha (1) 1✓ – g opens, G opens all');
+    assert.equal(titles[0], '+ alpha (1) 1✓ – E opens all');
     assert.equal(listItems(s).filter((i) => i.kind === 'row').length, 3);
     s = press(s, 'g').state; // on B-1: folds Wave too
     assert.deepEqual(s.folded, ['alpha', 'wave']);

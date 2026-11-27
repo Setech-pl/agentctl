@@ -607,7 +607,9 @@ export class TaskRecordIndex {
     this.rootVersion = version;
     const changes = [...this.changed];
     this.changed.clear();
-    await scanNames(changes, async window => {
+    const superseded = new Set<string>();
+    const refreshRecord = async (window: string) => {
+      const added = !this.records.has(window);
       const file = path.join(root, window, 'TASK.md');
       const stat = await fs.promises.lstat(file, {bigint: true}).catch(() => undefined);
       const version = stat && fileVersion(stat);
@@ -617,9 +619,18 @@ export class TaskRecordIndex {
       if (this.generation !== generation) return;
       if (stat) files?.set(file, {version, record});
       else files?.delete(file);
-      if (record) this.records.set(window, record);
-      else this.records.delete(window);
-    });
+      if (record) {
+        this.records.set(window, record);
+        if (added && record.continues) {
+          const previous = windowName(record.continues);
+          if (this.records.has(previous)) superseded.add(previous);
+        }
+      } else this.records.delete(window);
+    };
+    await scanNames(changes, refreshRecord);
+    // A move can create a new folder before the old header's fs.watch event is delivered.
+    for (const window of changes) superseded.delete(window);
+    await scanNames([...superseded], refreshRecord);
     return [...this.records.values()];
   }
 

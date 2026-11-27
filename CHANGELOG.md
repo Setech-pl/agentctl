@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- A prompt delivery failure gets one journal entry after watch restarts. Cohort completion notices include the latest task move even while the filesystem notification is pending. / Błąd dostarczenia promptu trafia do dziennika raz po restarcie watch. Powiadomienie o ukończeniu kohorty uwzględnia przeniesienie zadania także przed dotarciem zdarzenia z systemu plików.
+
 - A paused automatic GC plan survives a temporarily unavailable free-space reading. / Wstrzymany plan automatycznego GC pozostaje dostępny, gdy odczyt wolnego miejsca chwilowo nie działa.
 
 - Board, limits and doctor show when the config was rejected and which version remains loaded. MCP tool responses flag an older server than watch. / Tablica, limity i doctor pokazują czas odrzucenia konfiguracji i wersję używaną dalej. Odpowiedzi MCP sygnalizują serwer starszy od watch.

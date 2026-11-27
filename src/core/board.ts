@@ -1308,7 +1308,7 @@ export function pulledTitle(item: Extract<ListItem, { kind: 'pulled' }>): string
 /** Header of a cohort group: `- sprint-1 (4) 2⚙ 1✓ 1⧗`; `+` while it is folded. The last group is "bez kohorty". */
 export function groupTitle(item: Extract<ListItem, { kind: 'group' }>, icons: Record<TaskState, string> | null = null): string {
   const counts = countsLine(item.rows, item.queued, icons ?? DEFAULT_WINDOW_ICONS);
-  return `${item.folded ? '+' : '-'} ${item.name ?? 'bez kohorty'}${item.note ? ` · ${item.note}` : ''} (${item.rows.length + item.queued})${counts ? ` ${counts}` : ''}${item.folded ? ' – g opens, G opens all' : ''}`;
+  return `${item.folded ? '+' : '-'} ${item.name ?? 'bez kohorty'}${item.note ? ` · ${item.note}` : ''} (${item.rows.length + item.queued})${counts ? ` ${counts}` : ''}${item.folded ? ' – E opens all' : ''}`;
 }
 
 /** `Queue (3)` title under the active tasks. */

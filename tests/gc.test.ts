@@ -264,10 +264,10 @@ describe('gc: CLI, board and MCP', () => {
     assert.match((await runCli(w.config, w.runner, ['gc', '--include-cache', '--apply', '-y'])).stdout, /Nothing to clean up/);
   });
 
-  it('board G shows the preview in a view, and the MCP gc_preview reads the same plan (no tool cleans up)', async () => {
+  it('board D shows the preview in a view, and the MCP gc_preview reads the same plan (no tool cleans up)', async () => {
     const w = world('views');
     task(w, 'NC-1', { closed: true }, { 'old.log': 20 });
-    const r = handleKey(initialBoardState(100, 30), 'G', {});
+    const r = handleKey(initialBoardState(100, 30), 'D', {});
     assert.deepEqual(r.effects, [{ type: 'view', what: 'gc' }]);
     assert.equal(r.state.mode.kind, 'view');
     assert.match((await loadViewLines(w.ctx, 'gc')).join('\n'), /Would remove:/);

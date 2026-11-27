@@ -202,6 +202,8 @@ Tablica, CLI i MCP `limits` oraz `capacity` pokazują obliczone pułapy. MCP `co
 
 ## Watch, board i powiadomienia
 
+Tablica, limity i doctor pokazują czas pierwszego odrzucenia edycji konfiguracji oraz datę wersji nadal używanej. Odpowiedź narzędzia z serwera MCP starszego niż działający watch zawiera ostrzeżenie o wersji. Watch odświeża pomiary worktree partiami i zapisuje wykryte zmiany do późniejszego odtworzenia, jeśli etap dziennika się opóźni. `events_since` wymienia nieodebrane raporty w zakresie danego czatu i w granicach limitu odpowiedzi.
+
 | Key | Typ / domyślne / warstwy | Znaczenie |
 |---|---|---|
 | `watch` | mapping · see below · g | Obserwacja, ikony i status bar. |
