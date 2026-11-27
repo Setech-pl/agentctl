@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- READFAST0269 I/O regression counters include bounded report reads. / Liczniki regresji I/O uwzględniają ograniczony odczyt raportów.
+
 - READFAST0269 prepared for 0.26.5. / Poprawka READFAST0269 przygotowana do 0.26.5.
 
 - Watch proposes confirmation-bound GC after local integration, routing one WALL message to each affected task-owning chat. / Po lokalnej integracji watch proponuje GC wymagające potwierdzenia i wysyła jedną wiadomość WALL do każdego czatu, którego zadania obejmuje plan.
