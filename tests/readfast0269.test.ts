@@ -102,3 +102,16 @@ it('READFAST0269: deferred acknowledgement never marks a replacement report', as
   await applyReportDeliveries(f.ctx);
   assert.equal(readTaskRecord(f.config, 'fast')?.pulled, undefined);
 });
+it('READFAST0269-COUNT: events count every ready task while listing only ten names', async () => {
+  const f = fixture('count');
+  f.release();
+  for (let i = 0; i < 12; i++) {
+    const record = seedTask(f.config, `READY-${i}`);
+    fs.mkdirSync(path.dirname(record.report), {recursive: true});
+    fs.writeFileSync(record.report, 'Werdykt: PASS\nReady.\n<!-- agentctl:report-end -->');
+  }
+  const result = await f.call('events_since', {format: 'json'});
+  const data = JSON.parse(result.text);
+  assert.equal(data.summary.reportsToPullTotal, 13);
+  assert.equal(data.summary.reportsToPull.length, 10);
+});

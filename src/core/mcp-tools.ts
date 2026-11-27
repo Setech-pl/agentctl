@@ -2689,7 +2689,8 @@ for (const tool of MCP_TOOLS) {
       }
       const watchAt = snapshotTools.has(tool.name) ? watchSnapshotTime(ctx.config) : undefined;
       const watchAge = watchAt === undefined ? '' : [`Watch snapshot age: ${Math.max(0, (ctx.runner.now() - watchAt) / 1000).toFixed(1)} s.`, watchSnapshotWarning(watchAt, ctx.runner.now())].filter(Boolean).join(' ') + '\n';
-      const reports = tool.name === 'events_since' ? `Reports to pull: ${directReportRows(ctx).filter(r => !r.hidden && !r.pulled && r.state === 'report-ready').map(r => r.task).join(', ') || 'none'}\n` : '';
+      const readyReports = tool.name === 'events_since' ? directReportRows(ctx).filter(r => !r.hidden && !r.pulled && r.state === 'report-ready' && (!args.cohort || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort)))) : [];
+      const reports = tool.name === 'events_since' ? `Reports to pull: ${readyReports.slice(0, 10).map(r => r.task).join(', ') || 'none'} (${readyReports.length} raportów do pobrania)\n` : '';
       const prefix = `${reports}${watchAge}${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: ${budgetS} s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
       let text = prefix + (stale || !cached ? durableStatus(ctx) : [queue, cached.result.text].join('\n'));

@@ -30,6 +30,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.26.5] - 2026-11-27
 
+- READFAST0269-COUNT: Events show the full ready-report count, with at most ten task names. / Zdarzenia pokazują pełną liczbę gotowych raportów i do dziesięciu nazw zadań.
 - READFAST0269: MCP reads reports directly from task files, bypassing status collection and the shared deadline; contended acknowledgements wait for watch. / MCP czyta raporty bezpośrednio z plików zadań, omija status i wspólny budżet; zajęte potwierdzenia czekają na watch.
 - Configure `mcp.response_budget_s` (default 8, maximum 50; recommend 25 under load). / Konfiguracja budżetu MCP (domyślnie 8, maksymalnie 50; zalecane 25 pod obciążeniem).
 

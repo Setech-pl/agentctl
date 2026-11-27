@@ -98,6 +98,7 @@ export interface EventsSummary {
   queued: number;
   /** Reports ready and not pulled yet. */
   reportsToPull: string[];
+  reportsToPullTotal?: number;
 }
 
 export interface EventsReport {
@@ -146,13 +147,15 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const alive = open.filter((r) => r.window === 'alive' && !r.finished);
   const queue = waiting(readQueue(config)).filter((e) => cohort === null || (e.cohort !== undefined && cohortKey(e.cohort) === cohortKey(cohort)));
   const ratingKey = `${config.path}|${opts.client}`;
+  const readyReports = selectReady(directReportRows(ctx).filter(r => !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort)))), false);
   const summary: EventsSummary = {
     active: alive.length,
     ...(!ratingShown.has(ratingKey) ? { unmarked: foldHistory(readHistory(config)).filter(r => r.reportAt && !r.result).length } : {}),
     working: alive.filter((r) => r.state === 'working' || r.state === 'background').length,
     needYou: open.filter((r) => r.state === 'limited' || r.state === 'needs-attention' || r.state === 'needs-input' || r.state === 'needs-trust' || r.state === 'waiting' || (r.reportCandidate && r.report !== 'yes')).map((r) => `${r.task} (${r.state})${r.state === 'limited' ? `: ${r.usage_hint ?? 'limit wyczerpany'}${r.usage_reset_at ? `; reset ${formatLocalTime(r.usage_reset_at)}` : ''}` : ''}${r.question ? `: ${r.question}` : r.state === 'needs-attention' || (r.reportCandidate && r.report !== 'yes') ? `: ${r.hint}` : ''}`),
     queued: queue.length,
-    reportsToPull: selectReady(directReportRows(ctx).filter(r => !r.hidden && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort)))), false).map((r) => r.task).slice(0, 10),
+    reportsToPull: readyReports.map(r => r.task).slice(0, 10),
+    reportsToPullTotal: readyReports.length,
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
@@ -293,7 +296,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
 };
 
 export function summaryLine(s: EventsSummary): string {
-  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPull.length} ${plural(s.reportsToPull.length, 'raport', 'raporty', 'raportów')} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
+  const parts = [`${s.active} aktywne${s.working > 0 ? ` (${s.working} pracuje)` : ''}`, `${s.queued} w kolejce`, s.reportsToPull.length > 0 ? `${s.reportsToPullTotal ?? s.reportsToPull.length} ${plural(s.reportsToPullTotal ?? s.reportsToPull.length, 'raport', 'raporty', 'raportów')} do pobrania (${s.reportsToPull.join(', ')})` : 'brak raportów do pobrania'];
   if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie: ${s.needYou.join(', ')}`);
   return `Teraz: ${parts.join(' · ')}.`;
