@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { checkHarnessSafety, commandV, Harness, HarnessRefusal } from '../scripts/live-harness.ts';
+import { checkHarnessSafety, commandV, Harness, HarnessRefusal, maskSystemBins } from '../scripts/live-harness.ts';
 import { liveCacheRoot, historicalCacheRoots } from '../scripts/live-cache.ts';
 import type { SafetyInput } from '../scripts/live-harness.ts';
 import { loadGlobalConfig } from '../src/core/config.ts';
@@ -138,8 +138,11 @@ function input(name: string, over: Partial<SafetyInput> & { found?: Record<strin
   const fakeBin = path.join(root, 'fakebin');
   fs.mkdirSync(fakeBin, { recursive: true });
   const found: Record<string, string> = over.found ?? Object.fromEntries(['claude', 'codex', 'pbcopy', 'pbpaste', 'terminal-notifier', 'osascript'].map((n) => [n, path.join(fakeBin, n)]));
+  // A system directory of the sandbox: the host's /usr/bin may hold a real agent (Linux), which these unit checks do not depend on.
+  const sysBin = path.join(root, 'sysbin');
+  fs.mkdirSync(sysBin, { recursive: true });
   return {
-    root, fakeBin, pathEnv: `${fakeBin}:/usr/bin:/bin`, resolve: (n) => found[n],
+    root, fakeBin, pathEnv: `${fakeBin}:${sysBin}`, resolve: (n) => found[n],
     agentctlHome: path.join(root, 'ah'), codexHome: path.join(root, 'ch'), ...over,
   };
 }
@@ -205,11 +208,28 @@ describe('live harness: refusals', () => {
     // start() would also start tmux; the pieces that decide safety are the same without it:
     fs.mkdirSync(h.fakeBin, { recursive: true });
     for (const n of ['claude', 'codex', 'pbcopy', 'pbpaste', 'terminal-notifier', 'osascript']) fs.writeFileSync(path.join(h.fakeBin, n), '#!/bin/sh\n', { mode: 0o755 });
+    if (h.sysBin) maskSystemBins(h.sysBin);
     h.check();
     assert.equal(h.env.PATH?.startsWith(h.fakeBin), true);
     assert.equal(h.env.TMUX, undefined);
     assert.ok(!h.env.PATH?.includes('/opt/homebrew'), 'the real agents live there');
   });
+});
+
+it('HARNESS-SYSBIN: a system directory with real agents is replaced by a masked copy that keeps the other tools', () => {
+  const usr = scratch.sub('sys-usr-bin'), bin = scratch.sub('sys-bin');
+  for (const name of ['claude', 'codex', 'kimi', 'ls', 'bash']) fs.writeFileSync(path.join(usr, name), '#!/bin/sh\n', { mode: 0o755 });
+  fs.symlinkSync(path.join(usr, 'claude'), path.join(usr, 'claude-code'));
+  fs.writeFileSync(path.join(bin, 'sh'), '#!/bin/sh\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'ls'), '#!/bin/sh\n', { mode: 0o755 });
+  const base = input('sysbin');
+  const sysBin = path.join(base.root, 'masked');
+  maskSystemBins(sysBin, [usr, bin]);
+  assert.deepEqual(fs.readdirSync(sysBin).sort(), ['bash', 'ls', 'sh']);
+  assert.equal(fs.readlinkSync(path.join(sysBin, 'ls')), path.join(usr, 'ls'), 'the first directory wins, as on PATH');
+  checkHarnessSafety({ ...base, pathEnv: `${base.fakeBin}:${sysBin}` });
+  assert.equal(commandV("claude", sysBin), undefined);
+  assert.throws(() => checkHarnessSafety({ ...base, pathEnv: `${base.fakeBin}:${usr}` }), /has a real "claude"/);
 });
 
 // Kimi safety is required even before the adapter becomes available.
