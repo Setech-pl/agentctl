@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-RACY-VERSION | On Linux a queue entry rewritten within one clock tick (same size, reused inode) was still read with its old status. | `tests/queue.test.ts` (`^REL0272-RACY-VERSION:`) | 0.27.2 | fails on 6e98ca541a83cbc0d1a7c8d4778d2b58e014f02a (1 failing of 1) |
 | REL0272-INVENTORY-EIO | A transient inventory directory read failure was published as a new successful snapshot without task rows. | `tests/watch-snapshot.test.ts` (`^REL0272-INVENTORY-EIO:`) | 0.27.2 | fails on 41389e16720925de95d380fa026cc2f6b6633812 (1 failing of 1) |
 | REL0272-PRESSURE-TEARDOWN | The injector kept burning CPU while the completed canary was deleting thousands of disposable directories. | `tests/canary-mirror.test.ts` (`^REL0272-PRESSURE-TEARDOWN:`) | 0.27.2 | fails on 41389e16720925de95d380fa026cc2f6b6633812 (1 failing of 1) |
 | REL0272-HEADER-PIPELINE | One slow task header held up every later batch in a cold or incremental inventory. | `tests/watch-snapshot.test.ts` (`^REL0272-HEADER-PIPELINE:`) | 0.27.2 | fails on ce3f8972f18b810361bc43d7c99ce71999157970 (1 failing of 1) |

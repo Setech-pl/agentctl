@@ -597,8 +597,8 @@ export class TaskRecordIndex {
       this.reconcileAt = now + 60_000;
       this.records.clear();
       for (const record of all) this.records.set(record.window, record);
-    } else if (version !== this.rootVersion) {
-      // A new or moved state directory is visible even before the recursive watcher delivers its callback.
+    } else if (version === undefined || version !== this.rootVersion) {
+      // A new or moved state directory is visible even before the recursive watcher delivers its callback; an unknown (racy) version is a change.
       const names = new Set(await readTaskDirectory(root));
       if (this.generation !== generation) return [];
       for (const window of this.records.keys()) if (!names.has(window)) this.records.delete(window);

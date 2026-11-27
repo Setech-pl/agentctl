@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-RACY-VERSION', fixedIn: '0.27.2', proofAgainst: '6e98ca541a83cbc0d1a7c8d4778d2b58e014f02a', symptom: 'On Linux a queue entry rewritten within one clock tick (same size, reused inode) was still read with its old status.', scenarios: [s('queue.test.ts', '^REL0272-RACY-VERSION:')] },
   { id: 'REL0272-INVENTORY-EIO', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'A transient inventory directory read failure was published as a new successful snapshot without task rows.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-INVENTORY-EIO:')] },
   { id: 'REL0272-PRESSURE-TEARDOWN', fixedIn: '0.27.2', proofAgainst: '41389e16720925de95d380fa026cc2f6b6633812', symptom: 'The injector kept burning CPU while the completed canary was deleting thousands of disposable directories.', scenarios: [s('canary-mirror.test.ts', '^REL0272-PRESSURE-TEARDOWN:')] },
   { id: 'REL0272-HEADER-PIPELINE', fixedIn: '0.27.2', proofAgainst: 'ce3f8972f18b810361bc43d7c99ce71999157970', symptom: 'One slow task header held up every later batch in a cold or incremental inventory.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-HEADER-PIPELINE:')] },
