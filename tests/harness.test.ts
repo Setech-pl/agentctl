@@ -95,7 +95,8 @@ it('FIELD0230-SOCKET: a 66-byte task cache keeps isolated tmux within the socket
 });
 
 it('NOTIFY0251-SOCKET: a 67-byte task cache keeps isolated tmux within the socket limit', () => {
-  const root = '/' + 'x'.repeat(66);
+  // 67 bytes for a 3-digit uid (501, the field case); one byte shorter per extra uid digit, so the boundary is the same on every host.
+  const root = '/' + 'x'.repeat(100 - Buffer.byteLength(`/live-123456/tmx/tmux-${process.getuid?.() ?? 0}/default`) - 1);
   process.env.AGENTCTL_LIVE_CACHE = root;
   const h = new Harness({name: 'p19-stdio', cacheRoot: root}, REPO_ROOT);
   const other = new Harness({name: 'p19-setup', cacheRoot: root}, REPO_ROOT);
