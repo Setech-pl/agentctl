@@ -38,6 +38,13 @@ export interface TmuxOptions {
  * Windows are told apart by their task name, never by their literal tmux name: `watch` puts a state icon in front of it
  * ("⚙ nc-42"). Every operation looks the window up first and targets its tmux ID (or, without one, its current name).
  */
+/**
+ * stderr of a session-scoped tmux command whose session (or whole server) is gone: an empty inventory, not an error.
+ * tmux 3.4 (Ubuntu) says "can't find window: NAME" for a missing `=NAME` target and "no current target" once the server
+ * (exit-empty off) has no sessions left; other versions say "can't find session" (REL0272-TMUX-ABSENT).
+ */
+export const TMUX_SESSION_ABSENT = /no server running|failed to connect to server|can't find session|can't find window|no sessions|no current target|error connecting to.*No such file/i;
+
 export class Tmux {
   readonly runner: Runner;
   readonly session: string;
@@ -82,7 +89,7 @@ export class Tmux {
   async livePanes(): Promise<WindowInfo[]> {
     const format = '#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_dead}\t#{@agentctl-role}';
     const r = await this.runner.exec('tmux', ['list-panes', '-s', '-t', `=${this.session}`, '-F', format], {readOnly: true, timeoutMs: 1500});
-    if (r.code !== 0 && !/no server running|failed to connect to server|can't find session|no sessions/i.test(r.stderr)) {
+    if (r.code !== 0 && !TMUX_SESSION_ABSENT.test(r.stderr)) {
       throw Error(`Cannot verify tmux pane inventory: ${r.stderr.trim() || `exit ${r.code}`}`);
     }
     return r.stdout.split('\n').flatMap(line => {

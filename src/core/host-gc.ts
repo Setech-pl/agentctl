@@ -40,7 +40,8 @@ export function remoteGcProgram(): void {
     return { bytes, newest };
   };
   const listing = run('tmux', ['list-windows', '-t', '=agentctl-' + input.host, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}']);
-  if (listing.error || listing.status !== 0 && !/can't find session|no server running|no sessions|error connecting to.*No such file/i.test(listing.stderr)) throw Error('cannot verify remote tmux windows: ' + listing.stderr);
+  // TMUX_SESSION_ABSENT (tmux.ts), inline: this program runs on the remote host from its source text.
+  if (listing.error || listing.status !== 0 && !/no server running|failed to connect to server|can't find session|can't find window|no sessions|no current target|error connecting to.*No such file/i.test(listing.stderr)) throw Error('cannot verify remote tmux windows: ' + listing.stderr);
   const live = listing.stdout.split('\n').filter(Boolean).map(line => line.split('\t'));
   const finished = (r: any) => (r.closed || r.cancelled || r.archived) && !live.some(w => w[2] === r.window || w[1] === r.window || w[1]?.endsWith(' ' + r.window));
   const records = input.records as any[];

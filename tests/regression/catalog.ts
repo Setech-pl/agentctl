@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0272-TMUX-ABSENT', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: "On tmux 3.4 a vanished agentctl session made every watch status collection fail ('no current target' / \"can't find window\"), so reports were never detected.", scenarios: [s('tmux-absent.test.ts', '^REL0272-TMUX-ABSENT:')] },
   { id: 'REL0272-CANDIDATE-WATCH', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'Watch never discovered a configured report candidate for a task without an earlier candidate, so needs-input tasks showed no report flag.', scenarios: [s('hotfix-0173.test.ts', '^REL0272-CANDIDATE-WATCH:')] },
   { id: 'REL0272-STATUS-AGE', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'MCP status fell back to the 8 s budget path whenever a healthy but loaded watch cycle exceeded two intervals.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-STATUS-AGE:')] },
   { id: 'REL0272-SNAPSHOT-HOLD', fixedIn: '0.27.2', proofAgainst: 'df4175630a4f20388406b8342656e242d929476c', symptom: 'A provider hold set by watch maintenance after the tick published sent limits, queue_list and status to the 8 s fallback until the next tick.', scenarios: [s('watch-snapshot.test.ts', '^REL0272-SNAPSHOT-HOLD:')] },

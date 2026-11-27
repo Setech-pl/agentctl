@@ -1975,6 +1975,16 @@
       "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory"
     ]
   },
+  "REL0272-TMUX-ABSENT": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version",
+      "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version"
+    ]
+  },
   "REVIEW0256-DOWNGRADE": {
     "rev": "v0.27.1",
     "outcome": "FAILS",

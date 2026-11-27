@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0272-TMUX-ABSENT | On tmux 3.4 a vanished agentctl session made every watch status collection fail ('no current target' / "can't find window"), so reports were never detected. | `tests/tmux-absent.test.ts` (`^REL0272-TMUX-ABSENT:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
 | REL0272-CANDIDATE-WATCH | Watch never discovered a configured report candidate for a task without an earlier candidate, so needs-input tasks showed no report flag. | `tests/hotfix-0173.test.ts` (`^REL0272-CANDIDATE-WATCH:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
 | REL0272-STATUS-AGE | MCP status fell back to the 8 s budget path whenever a healthy but loaded watch cycle exceeded two intervals. | `tests/watch-snapshot.test.ts` (`^REL0272-STATUS-AGE:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
 | REL0272-SNAPSHOT-HOLD | A provider hold set by watch maintenance after the tick published sent limits, queue_list and status to the 8 s fallback until the next tick. | `tests/watch-snapshot.test.ts` (`^REL0272-SNAPSHOT-HOLD:`) | 0.27.2 | fails on df4175630a4f20388406b8342656e242d929476c (1 failing of 1) |
