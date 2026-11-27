@@ -22,7 +22,8 @@ await withHarness({ name: 'audit-0174', cacheRoot: root, config: 'limits: {claud
   const one = h.spawnAgentctl(['watch'], path.join(h.root, 'watch-1.log')), two = h.spawnAgentctl(['watch'], path.join(h.root, 'watch-2.log'));
   const retry = h.agentctl(['queue', 'retry', 'B']); check('W4 CLI retry overlaps two independent watcher processes', retry.code === 0);
   let max = 0, sawReservation = false, windows: string[] = [];
-  for (let n = 0; n < 65; n++) {
+  // Sample until the started window exists (a slower host takes longer than 6.5 s to set up); the slot bound holds on every sample.
+  for (let n = 0; n < 300; n++) {
     windows = h.tmux(['list-windows', '-t', `=${h.session}`, '-F', '#{window_name}']).stdout.split('\n').filter(Boolean).filter(n => !['watch', 'board'].includes(n));
     const reservations = pendingStarts(config).filter(r => !windows.some(w => w.endsWith(r.window)));
     sawReservation ||= reservations.length > 0; max = Math.max(max, windows.length + reservations.length);
