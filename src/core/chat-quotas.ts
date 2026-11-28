@@ -7,11 +7,12 @@ import type { Problems } from './util.ts';
 import { WALL_CHAT_NAME } from './wall-config.ts';
 
 type Shares = Partial<Record<AgentName, number>>;
-type ChatQuota = Shares & { share?: number };
+type QuotaOverrides = Partial<Record<AgentName, number | 'off'>>;
+type ChatQuota = QuotaOverrides & { share?: number };
 export interface ChatQuotas {
   overprovision: number;
   chats: Record<string, ChatQuota>;
-  default: Shares;
+  default: QuotaOverrides;
   floor: Shares;
   shareFloor?: number;
   cohorts: Record<string, string>;
@@ -35,11 +36,12 @@ export function chatOwner(value: unknown): string | undefined {
 export function parseChatQuotas(raw: unknown, p: Problems): ChatQuotas | undefined {
   if (raw === undefined) return undefined;
   if (!isObject(raw)) { p.add('config.quotas must be a mapping'); return undefined; }
-  const shares = (value: unknown, key: string): Shares => {
-    const result: Shares = {};
+  const shares = (value: unknown, key: string, allowOff = false): QuotaOverrides => {
+    const result: QuotaOverrides = {};
     if (value === undefined) return result;
     if (!isObject(value)) { p.add(`${key} must be a mapping`); return result; }
     for (const [id, count] of Object.entries(value)) {
+      if (allowOff && (count === 'off' || count === null) && PROVIDER_IDS.includes(id as AgentName)) { result[id as AgentName] = 'off'; continue; }
       if (!PROVIDER_IDS.includes(id as AgentName) || typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
         p.add(`${key}.${id} must name a provider and have a nonnegative integer value`);
       } else result[id as AgentName] = count;
@@ -48,8 +50,8 @@ export function parseChatQuotas(raw: unknown, p: Problems): ChatQuotas | undefin
   };
   const chats: ChatQuotas['chats'] = Object.create(null);
   const cohorts: ChatQuotas['cohorts'] = Object.create(null);
-  const quotas: ChatQuotas = { overprovision: 1.5, chats, cohorts, default: shares(raw.default, 'config.quotas.default'),
-    floor: typeof raw.floor === 'number' ? {} : shares(raw.floor, 'config.quotas.floor'), per_host: false, self_service: 'off' };
+  const quotas: ChatQuotas = { overprovision: 1.5, chats, cohorts, default: shares(raw.default, 'config.quotas.default', true),
+    floor: typeof raw.floor === 'number' ? {} : shares(raw.floor, 'config.quotas.floor') as Shares, per_host: false, self_service: 'off' };
   for (const key of Object.keys(raw)) if (!Object.hasOwn(quotas, key)) p.add(`unknown config.quotas key "${key}"`);
   if (typeof raw.floor === 'number') {
     if (Number.isSafeInteger(raw.floor) && raw.floor >= 0) quotas.shareFloor = raw.floor;
@@ -73,7 +75,7 @@ export function parseChatQuotas(raw: unknown, p: Problems): ChatQuotas | undefin
       else if (isObject(value)) {
         const { share, ...overrides } = value;
         const where = `config.quotas.chats.${name}`;
-        chats[name] = shares(overrides, where);
+        chats[name] = shares(overrides, where, true);
         if (validShare(share)) chats[name]!.share = share;
         else if (share !== undefined) p.add(`${where}.share must be a percentage from 0 to 100`);
       } else shares(value, `config.quotas.chats.${name}`);
@@ -117,6 +119,7 @@ function sharesFor(config: GlobalConfig, agent: AgentName) {
       return { chat, share: ceiling, floor: limit === 'off' ? 0 : floor, percent };
     }
     const configured = entry?.[agent] ?? q.default[agent];
+    if (configured === 'off') return { chat, share: null, floor: 0 };
     const share = configured ?? null;
     const floor = Math.min(share ?? Infinity, q.floor[agent] ?? (named && share !== null && share > 0 ? 1 : 0));
     return { chat, share, floor };

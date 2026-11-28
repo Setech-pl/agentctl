@@ -12,10 +12,14 @@ import { splitSpecs } from '../src/core/spec.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { checkWindowLimit } from '../src/core/checks.ts';
 import { readJournal } from '../src/core/journal.ts';
-import { findResumable } from '../src/core/resume.ts';
+import { type ExecOptions, RealRunner } from '../src/core/runner.ts';
+import { withStartLock } from '../src/core/start-lock.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
+import { fileVersion } from '../src/core/file-version.ts';
+/** The racy window of fileVersion (src/core/file-version.ts). */
+const RACY_WINDOW_NS = 100_000_000n;
 
 const scratch = useScratch();
 
@@ -64,6 +68,55 @@ async function add(s: Setup, text: string, opts: { agent?: 'claude' | 'codex' } 
   return (await commitQueueAdd(s.ctx, plan.items, opts)).map((e) => e.task);
 }
 
+it('REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independent replacements', async t => {
+  const {ctx, config, repo} = setup('read-cache');
+  await saveEntry(ctx, {seq: 1, order: 1, task: 'CACHE-ORDER', status: 'queued', priority: 'normal',
+    agent: 'claude', model: 'opus', effort: 'high', after: ['WAIT-1'], queuedAt: new Date().toISOString(), spec: specOf(repo, 'CACHE-ORDER')});
+  const dir = queueDir(config);
+  const file = path.join(dir, fs.readdirSync(dir).find(name => name.endsWith('.json'))!);
+  const read = fs.readFileSync;
+  const stat = fs.statSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (target: fs.PathOrFileDescriptor, options: Parameters<typeof read>[1]) => {
+    if (target === file) reads++;
+    return read(target, options);
+  });
+  t.mock.method(fs, 'statSync', (target: fs.PathLike, options: Parameters<typeof stat>[1]) => {
+    const meta = stat(target, options);
+    if (target === file && meta && 'ctimeNs' in meta && typeof meta.ctimeNs === 'bigint') meta.ctimeNs = (meta.ctimeNs - RACY_WINDOW_NS) | 1n;
+    return meta;
+  });
+  const [first] = readQueue(config);
+  assert.ok(first);
+  first.after.push('CLIENT-CHANGE');
+  assert.deepEqual(readQueue(config)[0]!.after, ['WAIT-1']);
+  assert.equal(reads, 1);
+  const tmp = path.join(dir, '.replacement');
+  fs.writeFileSync(tmp, JSON.stringify({...first, priority: 'high'}));
+  fs.renameSync(tmp, file);
+  assert.equal(readQueue(config)[0]!.priority, 'high');
+  assert.equal(reads, 2);
+});
+
+it('REL0272-RACY-VERSION: a same-size rewrite that reuses the inode within one clock tick is not served from the cache', async t => {
+  const {ctx, config, repo} = setup('racy-version');
+  const entry = {seq: 1, order: 1, task: 'RACY-ORDER', status: 'queued' as const, priority: 'normal' as const,
+    agent: 'claude' as const, model: 'opus', effort: 'high', after: [], queuedAt: new Date().toISOString(), spec: specOf(repo, 'RACY-ORDER')};
+  await saveEntry(ctx, entry);
+  const dir = queueDir(config);
+  const file = path.join(dir, fs.readdirSync(dir).find(name => name.endsWith('.json'))!);
+  // Linux: the atomic replace gets the freed inode back and the coarse file clock has not ticked, so both writes share every stat field.
+  const frozen = fs.statSync(file, {bigint: true});
+  frozen.ctimeNs = frozen.mtimeNs = BigInt(Date.now()) * 1_000_000n - 5_000_001n;
+  const stat = fs.statSync;
+  t.mock.method(fs, 'statSync', (target: fs.PathLike, options: Parameters<typeof stat>[1]) => target === file ? frozen : stat(target, options));
+  assert.equal(readQueue(config)[0]!.status, 'queued');
+  await saveEntry(ctx, {...entry, status: 'failed'});
+  assert.equal(readQueue(config)[0]!.status, 'failed');
+  assert.equal(fileVersion(frozen, frozen.ctimeNs + RACY_WINDOW_NS - 1n), undefined);
+  assert.equal(typeof fileVersion(frozen, frozen.ctimeNs + RACY_WINDOW_NS), 'string');
+});
+
 describe('queue: adding', () => {
   it('FIELD0256-LAUNCH: Codex exits within grace, retries once and remains resumable with its cause', async () => {
     const s = setup('launch-health', 'limits: {codex: 1}\ncapacity: {codex_refresh: false}\n');
@@ -79,6 +132,7 @@ describe('queue: adding', () => {
     await s.runner.sleep(53_000);
     const memory = new WatchMemory();
     await watchTick(s.ctx, memory, s.notifier);
+    await memory.launchHealth.idle();
     await memory.queue.idle();
     const retry = s.tmux.windows.find(w => w.name.endsWith(window))!;
     assert.ok(retry && retry.id !== first.id, 'the original task gets one fresh window');
@@ -131,7 +185,7 @@ describe('queue: adding', () => {
   it('FIELD0256-HOLD: the first missed tick announces its reason and a reservation is visible', async t => {
     let load = 0;
     t.mock.method(os, 'loadavg', () => [load, 0, 0]);
-    const s = setup('hold-notice', 'limits: {claude: 1}\ncapacity: {load_threshold: 10, codex_refresh: false}\n');
+    const s = setup('hold-notice', 'limits: {claude: 1}\ncapacity: {load_threshold: 10, codex_refresh: false}\nqueue: {hold_on_load: true}\n');
     assert.equal((await runCli(s.config, s.runner, ['limits', 'reserve', 'claude=1', '--note', 'owner review'])).code, 0);
     await add(s, specOf(s.repo, 'RESERVED'));
     assert.deepEqual(await s.tick(), []);
@@ -366,16 +420,14 @@ describe('queue: starting', () => {
     assert.equal(readQueue(s.config).length, 0);
   });
 
-  it('a start that its watcher did not finish is marked failed (no one is doing it), unless the task exists', async () => {
+  it('a start interrupted before its task record is requeued and retried', async () => {
     const s = setup('stale');
-    await add(s, specOf(s.repo, 'NC-1') + specOf(s.repo, 'NC-2'));
-    const [first, second] = readQueue(s.config);
-    for (const e of [first!, second!]) fs.writeFileSync(path.join(queueDir(s.config), `${String(e.seq).padStart(4, '0')}-${e.task}.json`), JSON.stringify({ ...e, status: 'starting' }));
-    seedTask(s.config, 'NC-2');
-    await s.tick();
-    const left = readQueue(s.config);
-    assert.deepEqual(left.map((e) => [e.task, e.status]), [['NC-1', 'failed']]);
-    assert.match(left[0]!.error ?? '', /interrupted/);
+    await add(s, specOf(s.repo, 'NC-1'));
+    const entry = readQueue(s.config)[0]!;
+    await saveEntry(s.ctx, { ...entry, status: 'starting', startingPid: 99_999_999 });
+    assert.deepEqual(await s.tick(), ['NC-1']);
+    assert.deepEqual(readQueue(s.config), []);
+    assert.ok(readJournal(s.config).some(e => e.kind === 'queue-retry' && e.task === 'NC-1'));
   });
 
   it('while one task waits for folder trust the others still start', async () => {
@@ -669,35 +721,14 @@ describe('P33: a start whose window never became ready', () => {
     assert.equal(s.runner.commands.filter(c => c.includes('paste-buffer')).length, 0);
   });
 
-  it('a watcher stopped mid-wait (Ctrl-C): the entry is dropped, the window closed, the task is to resume', async () => {
+  it('an already stopped watcher claims no new work', async () => {
     const s = setup('abort-start');
     await add(s, specOf(s.repo, 'INT-1'));
     const controller = new AbortController();
     controller.abort();
-    const began = await queueTick(s.ctx, s.memory, s.notifier, { signal: controller.signal });
-    await s.memory.idle();
-    assert.deepEqual(began, ['INT-1']);
-    assert.deepEqual(readQueue(s.config), [], 'the entry is gone: record and queue agree');
-    assert.ok(!s.tmux.windows.some((w) => w.name === 'int-1'), 'the never-ready window was closed');
-    assert.ok(readTaskRecord(s.config, 'int-1'), 'the record stays');
-    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'INT-1' && /interrupted/.test(e.text)));
-    fs.mkdirSync(`${s.repo}-int-1`, { recursive: true }); // the worktree the start made
-    assert.ok((await findResumable(s.ctx)).some((c) => c.task === 'INT-1'), 'the task lands in "to resume"');
-  });
-
-  it('a stale "starting" entry of a dead watcher: the never-ready window is closed and the task is to resume', async () => {
-    const s = setup('stale-start');
-    await add(s, specOf(s.repo, 'STALE-1'));
-    const entry = readQueue(s.config)[0]!;
-    seedTask(s.config, 'STALE-1', { repos: [{ path: s.repo, worktree: `${s.repo}-stale-1` }], promptDelivery: 'launching', pendingPrompt: 'Prompt of STALE-1.' });
-    fs.mkdirSync(`${s.repo}-stale-1`, { recursive: true });
-    s.tmux.add('stale-1', ''); // the window is up, the agent never showed its input
-    await saveEntry(s.ctx, { ...entry, status: 'starting', startingPid: 99999999, startingAt: new Date().toISOString() });
-    await s.tick();
-    assert.deepEqual(readQueue(s.config), [], 'the entry is dropped, not failed: the record exists');
-    assert.ok(!s.tmux.windows.some((w) => w.name === 'stale-1'), 'the leftover window was closed');
-    assert.ok(readJournal(s.config).some((e) => e.kind === 'queue-failed' && e.task === 'STALE-1' && /interrupted/.test(e.text)));
-    assert.ok((await findResumable(s.ctx)).some((c) => c.task === 'STALE-1'));
+    assert.deepEqual(await queueTick(s.ctx, s.memory, s.notifier, { signal: controller.signal }), []);
+    assert.equal(readQueue(s.config)[0]?.status, 'queued');
+    assert.equal(readTaskRecord(s.config, 'int-1'), undefined);
   });
 
   it('the intentional close of a never-ready start window is no tmux loss; a later genuine loss of the attempt still is', async () => {
@@ -708,6 +739,7 @@ describe('P33: a start whose window never became ready', () => {
     fs.mkdirSync(`${s.repo}-nvr-1`, { recursive: true });
     s.tmux.add('nvr-1', '', '@77'); // the window is up, the agent never showed its input
     await saveEntry(s.ctx, { ...entry, status: 'starting', startingPid: 99999999, startingAt: new Date().toISOString() });
+    await setPaused(s.ctx, true);
     await s.tick();
     assert.ok(!s.tmux.windows.some((w) => w.name === 'nvr-1'), 'the never-ready window was closed');
     const row = (await collectStatus(s.ctx, { progress: false })).find((r) => r.task === 'NVR-1')!;
@@ -803,4 +835,132 @@ it('R5: heavies waiting for a heavy slot stack their count instead of all showin
   assert.equal(views[0]!.condition.kind, 'ready');
   assert.match(views[1]!.condition.text, /heavy.*1\/1/);
   assert.match(views[2]!.condition.text, /heavy.*2\/1/);
+});
+
+it('HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed', async t => {
+  const s = setup('hotfix-stale-lock');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  fs.mkdirSync(s.config.stateDir, { recursive: true });
+  const old = new Date(Date.now() - 200_000);
+  fs.writeFileSync(file, JSON.stringify({ pid: 99_999_999, task: 'INT67', at: old.toISOString() }));
+  fs.utimesSync(file, old, old);
+  const now = Date.now();
+  let clockReads = 0;
+  t.mock.method(Date, 'now', () => now + 61_000 * clockReads++);
+  try {
+    await withStartLock(s.ctx, async () => {
+      assert.equal(Number(fs.readFileSync(file, 'utf8')), process.pid);
+      const metadata = JSON.parse(fs.readFileSync(`${file}.owner.json`, 'utf8'));
+      assert.equal(metadata.pid, process.pid);
+      assert.equal(metadata.task, 'RECOVERED');
+      assert.ok(metadata.at);
+    }, 'RECOVERED');
+    assert.equal(fs.existsSync(file), false);
+    assert.match(s.out.join(' '), /start.lock.*99999999.*INT67/);
+  } finally { fs.rmSync(file, { force: true }); }
+});
+
+for (const stage of ['worktree', 'setup'] as const) {
+  it(`HOTFIX0263-START: hung ${stage} releases admission and a setup slot by the second tick`, async t => {
+    const s = setup(`hotfix-${stage}`, 'limits: {claude: 3, codex: 1}\nqueue: {parallel_starts: 2, max_parallel_setups: 1}\n');
+    const real = new RealRunner();
+    const launch = s.runner.exec.bind(s.runner);
+    const now = Date.now;
+    let offset = 0, covered = false, requestedTimeout: number | undefined;
+    t.mock.method(Date, 'now', () => now() + offset);
+    Object.assign(s.config, { setupTimeoutS: 0.05 });
+    // The logical clock expires the checkout stage between its metadata probes and its next command.
+    // For setup, Node stands in for a hung install and is killed by the real command runner.
+    s.runner.exec = async (cmd: string, args: string[], opts: ExecOptions = {}) => {
+      const badWorktree = cmd === 'git' && args.includes('worktree') && args.includes('add') && args.some(arg => arg.endsWith('-hung'));
+      const badSetup = cmd === 'sh' && opts.cwd?.endsWith('-hung');
+      if (stage === 'worktree' && badWorktree || stage === 'setup' && badSetup) {
+        requestedTimeout = opts.timeoutMs;
+        if (stage === 'worktree') offset = 700_000;
+        const result = await real.exec(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { timeoutMs: 50 });
+        offset = 0;
+        covered = stage === 'worktree' ? result.stderr.includes('before launch') : result.stderr.includes('ETIMEDOUT');
+        return result;
+      }
+      return launch(cmd, args, opts);
+    };
+    await add(s, specOf(s.repo, 'HUNG', stage === 'setup' ? { setup: '[npm ci]' } : {}) + specOf(s.repo, 'NEXT'));
+    assert.deepEqual(await s.tick(), ['HUNG']);
+    assert.ok(!fs.existsSync(path.join(s.config.stateDir, 'start.lock')));
+    assert.ok(!readQueue(s.config).some(e => e.status === 'starting'));
+    assert.deepEqual(await s.tick(), ['NEXT']);
+    assert.ok(covered, `real runner did not enforce the ${stage} deadline`);
+    if (stage === 'setup') assert.equal(requestedTimeout, 50);
+  });
+}
+
+it('HOTFIX0264-F1: admission can wait beyond five seconds for a holder', async t => {
+  const s = setup('hotfix0264-wait');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  fs.mkdirSync(s.config.stateDir, { recursive: true });
+  fs.writeFileSync(file, String(process.pid));
+  const now = Date.now();
+  let reads = 0;
+  t.mock.method(Date, 'now', () => now + (reads++ ? 10_000 : 0));
+  const waiting = withStartLock(s.ctx, async () => 'committed');
+  // The first failed acquisition advances the clock. Release before the next poll.
+  fs.unlinkSync(file);
+  assert.equal(await waiting, 'committed');
+});
+
+it('HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners after 30 seconds', async t => {
+  const s = setup('hotfix0264-expired');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  fs.mkdirSync(s.config.stateDir, { recursive: true });
+  const now = Date.now();
+  let current = now;
+  t.mock.method(Date, 'now', () => { const at = current; current += 61_000; return at; });
+  for (const owner of [
+    JSON.stringify({ pid: process.pid, task: 'STALE', at: new Date(now - 181_000).toISOString() }),
+    '',
+    '0',
+    '{"pid":0}',
+  ]) {
+    fs.writeFileSync(file, owner);
+    fs.utimesSync(file, new Date(now - 30_000), new Date(now - 30_000));
+    current = now;
+    assert.equal(await withStartLock(s.ctx, async () => 'recovered'), 'recovered');
+    assert.equal(fs.existsSync(file), false);
+  }
+});
+
+it('HOTFIX0264-F1: a prepared queue start retries the TASK.md commit without replaying setup', async t => {
+  const s = setup('hotfix0264-prepared');
+  const file = path.join(s.config.stateDir, 'start.lock');
+  const now = Date.now;
+  let offset = 0, setupRuns = 0, probes = 0;
+  t.mock.method(Date, 'now', () => now() + offset);
+  const read = fs.readFileSync;
+  t.mock.method(fs, 'readFileSync', (filePath: Parameters<typeof fs.readFileSync>[0], opts: Parameters<typeof fs.readFileSync>[1]) => {
+    const data = Reflect.apply(read, fs, [filePath, opts]);
+    if (setupRuns && filePath === file && String(data) === String(process.pid)) {
+      offset = 61_000;
+      if (++probes === 3) fs.unlinkSync(file);
+    }
+    return data;
+  });
+  const exec = s.runner.exec.bind(s.runner);
+  s.runner.exec = async (command, args, opts) => {
+    const result = await exec(command, args, opts);
+    if (command === 'sh' && args.at(-1) === 'npm ci') {
+      setupRuns++;
+      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
+    }
+    return result;
+  };
+  await add(s, specOf(s.repo, 'PREPARED', { setup: '[npm ci]' }));
+  try {
+    assert.deepEqual(await s.tick(), ['PREPARED']);
+    assert.equal(setupRuns, 1);
+    assert.equal(probes, 3);
+    assert.deepEqual(readQueue(s.config), []);
+    assert.ok(readTaskRecord(s.config, 'prepared'));
+  } finally {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
 });

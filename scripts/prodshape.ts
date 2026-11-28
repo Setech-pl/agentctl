@@ -1,0 +1,198 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
+import { pathToFileURL } from 'node:url';
+import { liveCacheRoot } from './live-cache.ts';
+import { exerciseCanary, runIsolatedCanary, type CanaryMetrics } from '../src/core/canary.ts';
+import { profileWatch } from './watch-profile.ts';
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+const load = () => os.loadavg()[0] ?? 0;
+
+export function pressureWorkerArgs(platform = process.platform, extraNice = 19): string[] {
+  // Competing application processes are outside the gate's Darwin background scheduling group.
+  // Clear that inherited policy for the CPU-only load workers while retaining their low nice priority.
+  const policy = platform === 'darwin' ? 'taskpolicy -B -p "$$" || exit\n' : '';
+  return ['-n', String(extraNice), '/bin/sh', '-c', `${policy}while :; do :; done`];
+}
+
+export function additionalPressureWorkers(cores: number, workers: number, load1: number): number {
+  const step = Math.max(1, Math.ceil(cores / 4));
+  if (load1 >= 3 * cores) return -Math.max(0, Math.min(2 * step, workers - cores));
+  if (load1 > 2 * cores + 8) return -Math.max(0, Math.min(step, workers - cores));
+  return load1 < 2 * cores + 4 ? Math.max(0, Math.min(step, 6 * cores - workers)) : 0;
+}
+
+export function initialPressureWorkers(cores: number, load1: number): number {
+  return Math.max(Math.ceil(cores / 4), 2 * cores + 8 - Math.floor(load1));
+}
+
+function installStopHandlers() {
+  const stop = new AbortController();
+  const abort = () => stop.abort();
+  process.on('SIGINT', abort);
+  process.on('SIGTERM', abort);
+  return {stop, close() { process.off('SIGINT', abort); process.off('SIGTERM', abort); }};
+}
+
+async function runFixture(work: string, evidence: string, signal: AbortSignal, beforeWatch: () => Promise<void>, afterWatch: () => Promise<void>): Promise<void> {
+  const cores = os.cpus().length, target = 2 * cores;
+  let current: CanaryMetrics | undefined;
+  const save = (details: object) => fs.writeFileSync(evidence, JSON.stringify({cores, target,
+    ...(process.platform === 'darwin' ? {watchPolicy: 'application, inherited nice'} : {}),
+    ...details, ...(current ? {metrics: current} : {})}, null, 2) + '\n');
+  const profile = profileWatch(console.log);
+  try {
+    current = await runIsolatedCanary(work, console.log, world => exerciseCanary(world, {
+      scale: true, minTicks: 20, signal, load, observeStep: profile.observe, beforeWatch,
+      sample: metrics => { current = {...metrics}; save({status: 'RUNNING'}); },
+    }), 2, 5, afterWatch);
+    assert.ok(current.ticks >= 20 && current.tasks >= 1500 && current.worktreeDirs >= 2000 && current.queued === 40 && current.wall >= 150);
+    assert.ok(current.minLoad1 >= target, `CPU contention fell below ${target} during the watch`);
+    save({status: 'PASS'});
+    console.log(JSON.stringify(current));
+  } catch (error) {
+    save({status: 'FAIL', error: String(error)});
+    throw error;
+  } finally { profile.restore(); }
+}
+
+async function applicationFixture(work: string, evidence: string, signal: AbortSignal, warmPressure: (signal: AbortSignal) => Promise<void>, endPressure: () => Promise<void>): Promise<void> {
+  if (process.platform !== 'darwin') return runFixture(work, evidence, signal, () => warmPressure(signal), endPressure);
+  // The gate controller stays in Darwin background policy. A tmux watch on the real machine runs as an application.
+  // Keep the gate's nice level and the same CPU workers and filesystem delays for the measured service process.
+  console.log('prodshape watcher uses application scheduling (inherited nice and observed CPU contention)');
+  const worker = spawn('/bin/sh', ['-c', 'taskpolicy -B -p "$$" && exec "$@"', 'prodshape-watch', process.execPath,
+    '--experimental-strip-types', '--no-warnings', process.argv[1]!, '--watch-workload'], {stdio: ['inherit', 'inherit', 'inherit', 'ipc']});
+  let escalation: NodeJS.Timeout | undefined;
+  const stop = () => {
+    worker.kill('SIGTERM');
+    escalation ??= setTimeout(() => worker.kill('SIGKILL'), 5000);
+  };
+  const lifetime = new AbortController();
+  let warming: Promise<void> | undefined;
+  let pressureError: unknown;
+  worker.on('message', message => {
+    const respond = async () => {
+      if (message === 'watch-finished') {
+        await endPressure();
+        if (worker.connected) worker.send('pressure-stopped');
+        return;
+      }
+      assert.equal(message, 'fixture-ready');
+      await warmPressure(AbortSignal.any([signal, lifetime.signal]));
+      if (worker.connected) worker.send('pressure-ready');
+    };
+    const responding = respond().catch(error => { pressureError = error; stop(); });
+    if (message === 'fixture-ready') warming = responding;
+  });
+  signal.addEventListener('abort', stop, {once: true});
+  if (signal.aborted) stop();
+  try {
+    const [code] = await once(worker, 'close');
+    if (pressureError) throw pressureError;
+    assert.equal(code, 0, 'prodshape watch workload failed');
+  } finally {
+    lifetime.abort();
+    await warming;
+    signal.removeEventListener('abort', stop);
+    clearTimeout(escalation);
+  }
+}
+
+async function main() {
+  const work = liveCacheRoot(process.env.AGENTCTL_PRODSHAPE_WORK);
+  const evidence = process.env.AGENTCTL_PRODSHAPE_EVIDENCE;
+  if (!evidence) throw Error('prodshape requires an evidence path from the gate');
+  liveCacheRoot(path.dirname(evidence));
+  const {stop, close} = installStopHandlers();
+  if (process.argv[2] === '--watch-workload') {
+    const exchange = async (message: string, expected: string) => {
+      assert.ok(process.send && process.connected, 'prodshape watch workload requires its controller');
+      const reply = once(process, 'message', {signal: stop.signal});
+      process.send(message);
+      assert.equal((await reply)[0], expected);
+    };
+    try {
+      return await runFixture(work, evidence, stop.signal,
+        () => exchange('fixture-ready', 'pressure-ready'), async () => {
+          if (!stop.signal.aborted) await exchange('watch-finished', 'pressure-stopped');
+        });
+    } finally {
+      close();
+      if (process.connected) process.disconnect?.();
+    }
+  }
+  const cores = os.cpus().length, target = 2 * cores;
+  const workers: { process: ChildProcess; closed: Promise<unknown>; retiring: boolean }[] = [];
+  let closing = false;
+  let workerError: Error | undefined;
+  let adjustedAt = 0;
+  const addWorkers = (count: number, extraNice: number) => {
+    for (let i = 0; i < count; i++) {
+      const child = spawn('nice', pressureWorkerArgs(process.platform, extraNice), {stdio: 'ignore'});
+      const closed = once(child, 'close').catch(error => { workerError = error; stop.abort(); });
+      const worker = {process: child, closed, retiring: false};
+      workers.push(worker);
+      child.once('exit', () => { if (!worker.retiring && !closing && !stop.signal.aborted) { workerError = Error('CPU pressure loop exited early'); stop.abort(); } });
+    }
+  };
+  const keepPressure = () => {
+    if (stop.signal.aborted) return;
+    const observed = load();
+    const live = workers.filter(worker => !worker.retiring);
+    const change = additionalPressureWorkers(cores, live.length, observed);
+    // load1 is a lagging average. Grow slowly and let overshoot unwind sooner.
+    if (!change || Date.now() - adjustedAt < (change < 0 ? 10_000 : 25_000)) return;
+    adjustedAt = Date.now();
+    if (change > 0) addWorkers(change, 0);
+    else for (const worker of live.slice(change)) {
+      worker.retiring = true;
+      worker.process.kill('SIGTERM');
+    }
+    console.log('prodshape pressure adjusted to ' + (live.length + change) + ' CPU workers at load1 ' + observed.toFixed(2));
+  };
+  let pressureTimer: NodeJS.Timeout | undefined;
+  const warmPressure = async (signal: AbortSignal) => {
+    addWorkers(initialPressureWorkers(cores, load()), 19);
+    const warm = Date.now();
+    adjustedAt = warm;
+    while (load() < target + 4 && !signal.aborted) {
+      assert.ok(Date.now() - warm < 300_000, `CPU contention did not reach load1 ${target}, observed ${load()}`);
+      keepPressure();
+      await sleep(1000);
+    }
+    signal.throwIfAborted();
+    pressureTimer = setInterval(keepPressure, 5000);
+    console.log(`prodshape CPU load1 ${load().toFixed(2)} / ${cores} cores, target ${target}`);
+  };
+  let pressureEnded: Promise<void> | undefined;
+  const endPressure = () => pressureEnded ??= (async () => {
+    clearInterval(pressureTimer);
+    closing = true;
+    for (const worker of workers) worker.process.kill('SIGTERM');
+    const escalate = setTimeout(() => { for (const worker of workers) if (worker.process.exitCode === null) worker.process.kill('SIGKILL'); }, 2000);
+    try { await Promise.allSettled(workers.map(worker => worker.closed)); }
+    finally { clearTimeout(escalate); }
+  })();
+  try {
+    await applicationFixture(work, evidence, stop.signal, warmPressure, endPressure);
+    if (workerError) throw workerError;
+  } catch (error) {
+    const failure = workerError ?? error;
+    let saved: Record<string, unknown> = {};
+    try { saved = JSON.parse(fs.readFileSync(evidence, 'utf8')); } catch { /* startup or interrupted write */ }
+    if (saved.status !== 'FAIL' || workerError) fs.writeFileSync(evidence, JSON.stringify({cores, target, ...saved, status: 'FAIL', error: String(failure)}, null, 2) + '\n');
+    throw failure;
+  } finally {
+    close();
+    await endPressure();
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch(error => { console.error(error); process.exitCode = 1; });
+}

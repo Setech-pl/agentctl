@@ -41,7 +41,7 @@ export function isWindowReset(old: PlanWindowView, cur: PlanWindowView, now: num
 }
 
 /** Synchronous, short critical section; competing readers leave sampling to the owner, never block a usage query. */
-export function recordSamples(config: GlobalConfig, plans: ProviderValues<PlanState>, totals: ProviderValues<number>, now: number): void {
+export function recordSamples(config: GlobalConfig, plans: ProviderValues<PlanState>, totals: ProviderValues<number> | (() => ProviderValues<number>), now: number): void {
   const file = samplesPath(config);
   const lock = `${file}.lock`;
   let release: (() => void) | undefined;
@@ -87,6 +87,7 @@ export function recordSamples(config: GlobalConfig, plans: ProviderValues<PlanSt
         const old = previous?.windows.find((x) => x.kind === w.kind);
         if (old && isWindowReset(old, w, now)) emitReset(provider, w.kind, old.resetsAt, `${provider} ${w.label}: window reset; current usage ${w.usedPercent}%`);
       }
+      if (typeof totals === 'function') totals = totals();
       samples.push({ provider, at: p.readAt, capturedAt: now, windows: p.windows, taskTokens: providerValue(totals, provider) });
     }
     if (samples.length > before) {

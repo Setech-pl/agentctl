@@ -5,10 +5,10 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: agentctl-update [--ref <ref>] [--dry-run] [--no-watch] [--no-link] [--help]
+Usage: agentctl-update [--ref <ref>] [--dry-run] [--no-watch] [--no-link] [--no-rollback] [--help]
 
 For an npm installation: npm install -g @setech-pl/agentctl@latest (no tmux restart).
-Clone-only options --ref, --no-watch and --no-link are rejected in npm mode.
+Clone-only options --ref, --no-watch, --no-link and --no-rollback are rejected in npm mode.
 
 Updates the stable copy of agentctl (a detached git worktree of the repo) and makes the global
 `agentctl` and `agentctl-update` commands run from it:
@@ -16,17 +16,17 @@ Updates the stable copy of agentctl (a detached git worktree of the repo) and ma
   1. git fetch origin (in the repo)
   2. no stable copy yet: git worktree add --detach <stable> <ref>
      stable copy exists: refuse if it has local changes, else git checkout --detach <ref>
-  3. npm ci, npm run build, then npm link, in the stable copy
-  4. agentctl doctor (a failure makes this script exit non-zero)
-  5. find the watch window by @agentctl-role (legacy name fallback), restart watch and board through their role-aware --restart commands
-     (task windows are untouched)
-  6. print the previous and the new commit, and whether watch was restarted
+  3. retain the previous worktree, built executable, dependencies and config backup
+  4. npm ci, npm run build, npm link, then agentctl doctor
+  5. restart watch and the existing board, and check the candidate for up to three minutes
+  6. on failure, restore the stable copy and config, restart the services and post a WALL info
 
 Options:
   --ref <ref>   what to install (default: origin/main)
   --dry-run     print the commands without running any of them
-  --no-watch    do not restart watch or board
+  --no-watch    skip service restarts and the post-upgrade health check
   --no-link     do not run npm link (for tests: the global commands stay where they are)
+  --no-rollback keep the candidate in place if the upgrade or health check fails
   --help        this text
 
 Environment:
@@ -69,8 +69,64 @@ script_dir() {
 
 commit_of() { git -C "$1" log -1 --format='%h %s' "${2:-HEAD}" 2>/dev/null || echo '(none)'; }
 
+# TypeScript owns the health checks. Retain built artifacts because rebuilding the previous
+# commit during recovery could need the same network, package registry or disk space that failed.
+backup_runtime() {
+  node -e '
+    const fs = require("node:fs"), path = require("node:path");
+    const [stable, backup] = process.argv.slice(1);
+    for (const name of ["dist", "node_modules"]) {
+      const from = path.join(stable, name);
+      if (fs.existsSync(from)) fs.cpSync(from, path.join(backup, "tree", name), {recursive:true, verbatimSymlinks:true, preserveTimestamps:true, mode:fs.constants.COPYFILE_FICLONE});
+    }
+  ' "$1" "$2"
+}
+
+restore_runtime() {
+  node -e '
+    const fs = require("node:fs"), path = require("node:path");
+    const [stable, backup] = process.argv.slice(1);
+    for (const name of ["dist", "node_modules"]) {
+      const current = path.join(stable, name), saved = path.join(backup, "tree", name);
+      if (fs.existsSync(current)) fs.renameSync(current, path.join(backup, "failed-" + name));
+      if (fs.existsSync(saved)) fs.renameSync(saved, current);
+    }
+  ' "$1" "$2"
+}
+
+restore_config() {
+  node -e '
+    const fs = require("node:fs"), path = require("node:path");
+    const [config, backup] = process.argv.slice(1);
+    const saved = path.join(backup, "config.yaml");
+    const exists = fs.existsSync(config);
+    if (exists && fs.existsSync(saved) && fs.readFileSync(config).equals(fs.readFileSync(saved))) process.exit(0);
+    if (exists) fs.copyFileSync(config, path.join(backup, "config.failed.yaml"), fs.constants.COPYFILE_EXCL);
+    if (!fs.existsSync(saved)) {
+      if (exists) fs.unlinkSync(config);
+      process.exit(0);
+    }
+    const stage = fs.mkdtempSync(path.join(path.dirname(config), ".agentctl-rollback-"));
+    const file = path.join(stage, "config.yaml");
+    try {
+      fs.copyFileSync(saved, file);
+      fs.chmodSync(file, fs.statSync(saved).mode & 0o777);
+      fs.renameSync(file, config);
+    } finally {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+      fs.rmdirSync(stage);
+    }
+  ' "$1" "$2"
+}
+
+role_target() {
+  printf '%s\n' "$inventory" | awk -F '\t' -v role="$1" -v legacy="=$session:$1" '
+    $3 == role { tagged=$1 } $2 == role && $3 == "" { fallback=$1 } $1 == role { fallback=legacy }
+    END { if (tagged != "") print tagged; else if (fallback != "") print fallback }'
+}
+
 main() {
-  local ref='origin/main' watch=1 link=1 clone_options=0
+  local ref='origin/main' watch=1 link=1 rollback=1 clone_options=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --ref) [ $# -ge 2 ] || { echo "agentctl-update: --ref needs a value" >&2; return 2; }; clone_options=1; ref="$2"; shift 2 ;;
@@ -78,6 +134,7 @@ main() {
       --dry-run) DRY_RUN=1; shift ;;
       --no-watch) clone_options=1; watch=0; shift ;;
       --no-link) clone_options=1; link=0; shift ;;
+      --no-rollback) clone_options=1; rollback=0; shift ;;
       -h|--help) usage; return 0 ;;
       *) echo "agentctl-update: unknown argument: $1 (see --help)" >&2; return 2 ;;
     esac
@@ -86,7 +143,7 @@ main() {
   local repo stable session
   repo="${AGENTCTL_REPO:-$(cd "$(script_dir)/.." && pwd)}"
   if [ -z "${AGENTCTL_REPO:-}" ] && [ ! -e "$repo/.git" ]; then
-    [ "$clone_options" -eq 0 ] || { echo 'agentctl-update: --ref, --no-watch and --no-link require a clone' >&2; return 2; }
+    [ "$clone_options" -eq 0 ] || { echo 'agentctl-update: clone options require a clone' >&2; return 2; }
     local package_name
     package_name="$(node -p 'require(process.argv[1]).name' "$repo/package.json")"
     run npm install -g "$package_name@latest"
@@ -99,9 +156,14 @@ main() {
   echo "stable: $stable"
   echo "ref:    $ref"
 
-  run git -C "$repo" fetch origin
+  local before='(none)' before_sha='' backup='' old='' version='candidate-version'
+  local state_home="${AGENTCTL_HOME:-$HOME/.agentctl}" config
+  case "$state_home" in '~/'*) state_home="$HOME/${state_home#\~/}";; esac
+  config="$state_home/config.yaml"
+  local watch_result='no (--no-watch)' board_result='no (--no-watch)' inventory='' watch_target='' board_target=''
+  local tmux_locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
+  case "$tmux_locale" in *UTF-8*|*utf8*|*utf-8*) ;; *) tmux_locale=en_US.UTF-8 ;; esac
 
-  local before='(none)'
   if [ -e "$stable" ]; then
     before="$(commit_of "$stable")"
     if [ -n "$(git -C "$stable" status --porcelain)" ]; then
@@ -109,57 +171,131 @@ main() {
       git -C "$stable" status --short >&2
       return 1
     fi
-    run git -C "$stable" checkout --detach "$ref"
-  else
-    run git -C "$repo" worktree add --detach "$stable" "$ref"
   fi
-
-  run_in "$stable" npm ci
-  run_in "$stable" npm run build
-  if [ "$link" -eq 1 ]; then
-    run_in "$stable" npm link
-  else
-    echo "(--no-link: npm link skipped, the global commands are unchanged)"
-  fi
-
-  local doctor_rc=0
-  show "$stable/dist/bin/agentctl.js" doctor
-  if [ "$DRY_RUN" -eq 0 ]; then "$stable/dist/bin/agentctl.js" doctor || doctor_rc=$?; fi
-
-  local watch_result='no (--no-watch)' board_result='no (--no-watch)'
-  if [ "$watch" -eq 1 ]; then
-    local role target result inventory='' tmux_locale="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
-    case "$tmux_locale" in *UTF-8*|*utf8*|*utf-8*) ;; *) tmux_locale=en_US.UTF-8 ;; esac
-    if LC_ALL="$tmux_locale" tmux has-session -t "=$session" 2>/dev/null; then
-      inventory="$(LC_ALL="$tmux_locale" tmux list-windows -t "=$session" -F $'#{window_id}\t#{window_name}\t#{@agentctl-role}' 2>/dev/null)"
+  if [ "$DRY_RUN" -eq 0 ]; then
+    update_lock="$stable.updating"
+    mkdir -p "$(dirname "$stable")"
+    if ! mkdir "$update_lock"; then
+      echo "agentctl-update: another update owns $update_lock" >&2
+      return 1
     fi
-    for role in watch board; do
-      result="no (no window \"$role\" in session \"$session\")"
-      target="$(printf '%s\n' "$inventory" | awk -F '\t' -v role="$role" -v legacy="=$session:$role" '$3 == role { tagged=$1 } $2 == role && $3 == "" { fallback=$1 } $1 == role { fallback=legacy } END { if (tagged != "") print tagged; else if (fallback != "") print fallback }')"
-      if [ -n "$target" ]; then
-        if [ "$doctor_rc" -ne 0 ]; then
-          result='no (doctor failed, the old process keeps running)'
-        else
-          run "$stable/dist/bin/agentctl.js" "$role" --tmux --restart
-          result='yes'
-          [ "$DRY_RUN" -eq 1 ] && result='yes (dry run: would be)'
-        fi
-      fi
-      if [ "$role" = watch ]; then watch_result="$result"; else board_result="$result"; fi
-    done
+    trap 'rmdir "$update_lock"' EXIT
+    if [ -e "$stable.previous" ] && [ ! -L "$stable.previous" ]; then
+      echo "agentctl-update: $stable.previous already exists and is not a backup symlink" >&2
+      return 1
+    fi
   fi
 
-  # The Claude app keeps its MCP server process through an update; say so (it is never stopped from here).
-  show "$stable/dist/bin/agentctl.js" mcp check
-  if [ "$DRY_RUN" -eq 0 ]; then "$stable/dist/bin/agentctl.js" mcp check || true; fi
+  run git -C "$repo" fetch origin
+  if [ "$watch" -eq 1 ] && LC_ALL="$tmux_locale" tmux has-session -t "=$session" 2>/dev/null; then
+    inventory="$(LC_ALL="$tmux_locale" tmux list-windows -t "=$session" -F $'#{window_id}\t#{window_name}\t#{@agentctl-role}' 2>/dev/null || true)"
+    watch_target="$(role_target watch)"
+    board_target="$(role_target board)"
+  fi
+  if [ "$DRY_RUN" -eq 0 ] && [ -e "$stable" ]; then
+    before_sha="$(git -C "$stable" rev-parse HEAD)"
+    backup="$(mktemp -d "$stable.backup.XXXXXXXX")"
+    run git -C "$repo" worktree add --detach "$backup/tree" "$before_sha"
+    backup_runtime "$stable" "$backup"
+    printf '%s\n' "$stable" > "$backup/stable-path"
+    if [ -f "$config" ]; then
+      config="$(node -p 'require("node:fs").realpathSync(process.argv[1])' "$config")"
+      cp -p "$config" "$backup/config.yaml"
+    fi
+    if [ -L "$stable.previous" ]; then old="$(readlink "$stable.previous")"; fi
+  elif [ "$DRY_RUN" -eq 1 ] && [ -e "$stable" ]; then
+    echo 'Would retain the current stable worktree, its runtime and config before checkout.'
+  fi
 
+  local failed='' touched_watch=0 health_since
+  if [ -e "$stable" ]; then
+    run git -C "$stable" checkout --detach "$ref" || failed='candidate checkout'
+  else
+    run git -C "$repo" worktree add --detach "$stable" "$ref" || failed='candidate checkout'
+  fi
+  if [ -z "$failed" ]; then run_in "$stable" npm ci || failed='npm ci'; fi
+  if [ -z "$failed" ]; then run_in "$stable" npm run build || failed='build'; fi
+  if [ "$link" -eq 0 ]; then
+    echo "(--no-link: npm link skipped, the global commands are unchanged)"
+  elif [ -z "$failed" ]; then
+    run_in "$stable" npm link || failed='npm link'
+  fi
+  if [ -z "$failed" ]; then run "$stable/dist/bin/agentctl.js" doctor || failed='agentctl doctor'; fi
+
+  if [ "$watch" -eq 1 ]; then
+    watch_result='no (upgrade failed before watch restart)'
+    board_result="no (no window "board" in session "$session")"
+    if [ -z "$failed" ]; then
+      health_since='upgrade-start-ms'
+      if [ "$DRY_RUN" -eq 0 ]; then
+        version="$(node -p 'require(process.argv[1]).version' "$stable/package.json")" || failed='candidate version'
+        health_since="$(node -p 'Date.now()')"
+        if [[ "$ref" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$version" != "${ref#v}" ]; then failed="version $version does not match $ref"; fi
+      fi
+      if [ -z "$failed" ]; then
+        touched_watch=1
+        run "$stable/dist/bin/agentctl.js" watch --tmux --restart || failed='watch restart'
+        watch_result='yes'
+        [ "$DRY_RUN" -eq 1 ] && watch_result='yes (dry run: would be)'
+      fi
+      if [ -n "$board_target" ] && [ -z "$failed" ]; then
+        run "$stable/dist/bin/agentctl.js" board --tmux --restart || failed='board restart'
+        board_result='yes'
+        [ "$DRY_RUN" -eq 1 ] && board_result='yes (dry run: would be)'
+      fi
+      if [ -z "$failed" ]; then
+        run "$stable/dist/bin/agentctl.js" upgrade-health --expect "$version" --since "$health_since" || failed='post-upgrade health check'
+      fi
+    fi
+  fi
+
+  if [ -n "$failed" ]; then
+    echo "agentctl-update: $failed failed" >&2
+    if [ "$DRY_RUN" -eq 0 ] && [ -n "$backup" ] && [ "$rollback" -eq 1 ]; then
+      local recovery='restored previous stable copy'
+      # These are independent so a config restoration error does not prevent restoring the executable.
+      run git -C "$stable" checkout --detach "$before_sha" || recovery='git rollback failed'
+      restore_runtime "$stable" "$backup" || recovery='runtime rollback failed'
+      restore_config "$config" "$backup" || recovery='config rollback failed'
+      if [ "$link" -eq 1 ]; then run_in "$stable" npm link || recovery='global link rollback failed'; fi
+      if [ "$watch" -eq 1 ] && { [ "$touched_watch" -eq 1 ] || [ -n "$watch_target" ]; }; then
+        run "$stable/dist/bin/agentctl.js" watch --tmux --restart || recovery='watch rollback restart failed'
+      fi
+      if [ "$watch" -eq 1 ] && [ -n "$board_target" ]; then
+        run "$stable/dist/bin/agentctl.js" board --tmux --restart || recovery='board rollback restart failed'
+      fi
+      echo "agentctl-update: $recovery; backup: $backup" >&2
+      run env -u AGENTCTL_TASK "$stable/dist/bin/agentctl.js" wall post agentctl --kind info --to owner         --subject 'Wycofanie aktualizacji agentctl' --body "Aktualizacja $ref: $failed. Wynik przywracania: $recovery." || true
+    elif [ "$rollback" -eq 0 ]; then
+      echo "agentctl-update: --no-rollback; retained backup: ${backup:-none}" >&2
+    fi
+    return 1
+  fi
+
+  if [ -n "$backup" ]; then
+    node -e '
+      const fs = require("node:fs"), path = require("node:path");
+      const [backup, link] = process.argv.slice(1);
+      const temp = path.join(backup, "stable-link");
+      fs.symlinkSync(path.resolve(backup, "tree"), temp);
+      fs.renameSync(temp, link);
+    ' "$backup" "$stable.previous"
+    # Restrict retirement to a real, marked backup created next to this stable checkout.
+    local old_root="${old%/tree}"
+    local suffix="${old_root#"$stable.backup."}"
+    if [[ "$old" == "$stable".backup.*/tree && "$suffix" =~ ^[a-zA-Z0-9]{8}$ ]] && [ ! -L "$old_root" ] && [ ! -L "$old" ] &&
+       [ -f "$old_root/stable-path" ] && [ "$(cat "$old_root/stable-path")" = "$stable" ] &&
+       git -C "$repo" worktree remove --force "$old"; then
+      node -e 'require("node:fs").rmSync(process.argv[1], {recursive:true, force:true})' "$old_root"
+    fi
+    echo "retained previous stable copy: $stable.previous"
+  fi
+  run "$stable/dist/bin/agentctl.js" mcp check || true
   echo
   echo "previous: $before"
   if [ "$DRY_RUN" -eq 1 ]; then echo "new:      (dry run) $ref"; else echo "new:      $(commit_of "$stable")"; fi
   echo "watch restarted: $watch_result"
   echo "board restarted: $board_result"
-  if [ "$doctor_rc" -ne 0 ]; then echo "agentctl doctor failed (exit $doctor_rc)" >&2; fi
-  return "$doctor_rc"
 }
 
 main "$@"; exit $?

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -256,7 +257,8 @@ describe('folding, log and stats', () => {
     assert.match(logMarkdown(foldHistory(history)), /^\| when \| task \|/);
   });
 
-  it('--since and --cohort filter; both through the CLI, with --json and --clip (a stand-in for the clipboard tool)', async () => {
+  it('--since and --cohort filter; both through the CLI, with --json and --clip (a stand-in for the clipboard tool)', async (t) => {
+    t.mock.method(os, 'platform', () => 'darwin'); // the clipboard fixture fakes the macOS tools (pbcopy/pbpaste)
     const s = setup('log-cli');
     fs.writeFileSync(historyPath(s.config), `${history.map((h) => JSON.stringify(h)).join('\n')}\n`);
     assert.deepEqual(selectHistory(s.ctx, { cohort: 'SPRINT' }).map((t) => t.task), ['B-1']);

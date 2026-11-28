@@ -90,6 +90,37 @@ export function checkHarnessSafety(input: SafetyInput): void {
   }
 }
 
+/** The system directories every sandbox PATH ends with. */
+export const SYSTEM_BIN_DIRS = ['/usr/bin', '/bin'] as const;
+
+/** Does a system directory hold one of the agents (a package-managed real `claude` or `codex` on Linux)? */
+export function holdsRealAgent(dir: string): boolean {
+  return SAFETY_AGENTS.some(name => fs.existsSync(path.join(dir, name)));
+}
+
+/**
+ * Fill `sysbin` with links to every command of the system directories except the agents and anything that resolves to one of
+ * them (an alias such as `claude-code`), first directory first like PATH. Used instead of /usr/bin:/bin when those hold a real
+ * agent, so the sandbox keeps the system tools without ever reaching the real provider.
+ */
+export function maskSystemBins(sysbin: string, dirs: readonly string[] = SYSTEM_BIN_DIRS): void {
+  fs.mkdirSync(sysbin, { recursive: true });
+  const real = (p: string): string | undefined => { try { return fs.realpathSync(p); } catch { return undefined; } };
+  const masked = new Set(dirs.flatMap(dir => SAFETY_AGENTS.map(name => real(path.join(dir, name)))).filter((p): p is string => p !== undefined));
+  const seen = new Set<string>();
+  for (const dir of [...new Set(dirs.map(d => real(d) ?? d))]) {
+    let names: string[];
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const name of names) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const file = path.join(dir, name);
+      if ((SAFETY_AGENTS as readonly string[]).includes(name) || masked.has(real(file) ?? file)) continue;
+      fs.symlinkSync(file, path.join(sysbin, name));
+    }
+  }
+}
+
 /** `command -v name` for a PATH, without a shell: the first executable file of that name. */
 export function commandV(name: string, pathEnv: string): string | undefined {
   for (const dir of pathEnv.split(path.delimiter).filter(Boolean)) {
@@ -177,6 +208,8 @@ export class Harness {
   readonly agentLog: string;
   readonly notifyLog: string;
   readonly clipboard: string;
+  /** The masked copy of the system directories, when they hold a real agent. */
+  readonly sysBin: string | undefined;
   readonly env: NodeJS.ProcessEnv;
   socketPath = '';
   private children: ChildProcess[] = [];
@@ -207,7 +240,9 @@ export class Harness {
     this.agentLog = path.join(this.root, 'agent.log');
     this.notifyLog = path.join(this.root, 'notify.log');
     this.clipboard = path.join(this.root, 'clipboard.txt');
-    const pathEnv = `${this.fakeBin}:/usr/bin:/bin`;
+    // On hosts whose /usr/bin holds a real agent (Linux packages), PATH ends with a masked copy instead; checkHarnessSafety still refuses a real one.
+    this.sysBin = SYSTEM_BIN_DIRS.some(holdsRealAgent) ? path.join(this.root, 'sysbin') : undefined;
+    const pathEnv = [this.fakeBin, ...(this.sysBin ? [this.sysBin] : SYSTEM_BIN_DIRS)].join(path.delimiter);
     this.env = {
       PATH: pathEnv,
       HOME: this.home,
@@ -256,6 +291,7 @@ export class Harness {
     for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string, this.env.KIMI_CODE_HOME as string, this.env.TMPDIR as string]) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(this.root, 'gitconfig'), '[user]\n\tname = Harness\n\temail = harness@example.invalid\n[init]\n\tdefaultBranch = main\n');
     for (const [name, body] of Object.entries(FAKES)) fs.writeFileSync(path.join(this.fakeBin, name), body, { mode: 0o755 });
+    if (this.sysBin) maskSystemBins(this.sysBin);
     for (const name of LINKED_COMMANDS) {
       const real = commandV(name, process.env.PATH ?? '');
       if (!real) throw new HarnessRefusal(`"${name}" is not installed`);

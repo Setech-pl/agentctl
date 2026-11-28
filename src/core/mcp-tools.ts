@@ -1,6 +1,8 @@
 import { hostPlacementStats } from './host-commands.ts';
 import { assertHost, manualHostPause, hostPauseUntil, setHostPause } from './host-availability.ts';
 import { probeLocalHost } from './host-health.ts';
+import { gcLocation, pathsOverlap } from './start-paths.ts';
+import { trashOwners } from './trash.ts';
 import { chatOwner, effectiveChatCeilings, quotaWarnings } from './chat-quotas.ts';
 import { accountTasks, taskNames } from './task-accounting.ts';
 import { planRemoteGc } from './host-gc.ts';
@@ -404,7 +406,14 @@ function planSummary(ctx: Context, save = true): string {
 async function runUsage(deps: McpDeps, args: { cohort?: string | undefined; since?: string | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const cohort = args.cohort === undefined ? undefined : findCohort(ctx.config, args.cohort).name;
-  const report = await collectUsage(ctx, { cohort, since: args.since });
+  let rows: StatusRow[] | undefined;
+  try {
+    const snapshot = JSON.parse(await fs.promises.readFile(watchSnapshotPath(ctx.config), 'utf8'));
+    const age = ctx.runner.now() - snapshot.at;
+    if (snapshot.version === 1 && !snapshot.degraded && age >= 0 && age < 60_000 && Array.isArray(snapshot.rows)
+      && snapshot.configHash === createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) rows = snapshot.rows;
+  } catch { /* a CLI without a running watch collects status directly */ }
+  const report = await collectUsage(ctx, { cohort, since: args.since, rows });
   const limits = (Object.keys(report.plans) as AgentName[]).map((p) => `${p}: ${planLine(providerValue(report.plans, p), report.now)}`).join('; ');
   return ok(`Plan limits - ${limits}. Tokens = input + output + cache writes of the tasks agentctl started (cache reads are listed apart); period: days since ${report.sinceDay}.\n\n${JSON.stringify(report, null, 2)}`);
 }
@@ -459,6 +468,8 @@ async function runEventsSince(deps: McpDeps, args: { since?: string | undefined;
 }
 
 interface GcPreviewArgs {
+  as?: string;
+  purge_trash?: boolean;
   request_id?: string;
   include_cache?: boolean;
   keep_cache?: string[];
@@ -472,15 +483,67 @@ interface GcPreviewArgs {
   limit?: number;
 }
 
+function gcCaller(ctx: Context, as: unknown, client?: string): string | undefined {
+  if (ctx.config.mcp.gcScope === 'all') return undefined;
+  if (ctx.config.mcp.gcScope === 'owner') throw new AgentctlError('mcp.gc_scope: owner reserves GC writes for the owner CLI');
+  const declared = typeof as === 'string' ? as : undefined;
+  const mapped = wallIdentity(ctx.config, { client });
+  const caller = orderOwner(ctx.config, declared, client);
+  const boundClients = caller ? ctx.config.wall.chats[caller.slice(5)]?.clients ?? [] : [];
+  if (!caller || !caller.startsWith('chat:') || (mapped.kind === 'chat' && mapped.id !== caller) ||
+      (client && boundClients.length && !boundClients.includes(client))) {
+    throw new AgentctlError('mcp.gc_scope: own-cohort requires your configured chat identity');
+  }
+  return caller;
+}
+
+function scopeMcpGc(ctx: Context, args: GcPreviewArgs, plan: GcPlan, client?: string): GcPlan {
+  const caller = gcCaller(ctx, args.as, client);
+  if (!caller) return plan;
+  const records = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)];
+  const members = [...records, ...readQueue(ctx.config)];
+  const ownsCohort = (name: string | undefined) => {
+    if (!name) return false;
+    const cohort = members.filter(record => record.cohort && cohortKey(record.cohort) === cohortKey(name));
+    return cohort.length > 0 && cohort.every(record => record.owner === caller);
+  };
+  if (args.cohort && !ownsCohort(args.cohort) || plan.integration && plan.integration.owner !== caller) {
+    throw new AgentctlError('mcp.gc_scope: applying GC to another chat’s cohort requires all');
+  }
+  const owns = (record: { owner?: string; cohort?: string }) => record.owner === caller && ownsCohort(record.cohort);
+  const items = plan.items.filter(item => {
+    if (item.trash) {
+      const owners = trashOwners(ctx, item.trash.original, records.filter(record => !record.host));
+      return owners.length > 0 && owners.every(owns);
+    }
+    const samePath = (first: string, second: string) => {
+      try {
+        return pathsOverlap(item.host ? path.resolve(first) : gcLocation(path.resolve(first)), item.host ? path.resolve(second) : gcLocation(path.resolve(second)));
+      } catch { return true; } // An unresolvable ownership path cannot authorize removal.
+    };
+    const owners = records.filter(record => record.host === item.host && (record.task === item.task ||
+      item.kind === 'worktree' && record.repos.some(repo => samePath(repo.worktree, item.target)) ||
+      item.kind === 'cache' && record.report && samePath(path.dirname(record.report), item.target) ||
+      item.kind === 'branch' && record.repos.some(repo => repo.branch === item.branch && samePath(repo.path, item.repo ?? ''))));
+    return owners.length > 0 && owners.every(owns);
+  });
+  return { ...plan, items, freeBytes: items.reduce((sum, item) => sum + item.bytes, 0) };
+}
+
+function verifyMcpGcScope(ctx: Context, args: GcPreviewArgs, plan: GcPlan, client?: string): void {
+  const current = scopeMcpGc(ctx, args, plan, client);
+  if (current.items.length !== plan.items.length) throw new AgentctlError('GC authorization changed since preview; nothing was done');
+}
+
 async function planMcpGc(ctx: Context, args: GcPreviewArgs, refreshHosts = false): Promise<GcPlan> {
   if (args.request_id) {
     const saved = readGcPreview(ctx, args.request_id);
     if (!('plan' in saved) || !saved.plan.integration) throw new AgentctlError('Integration GC preview unavailable; preview again.');
     return recheckIntegrationGc(ctx, saved.plan);
   }
-  const options = { olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
+  const options = { purgeTrash: args.purge_trash, olderThan: args.older_than, branches: args.branches, cohort: args.cohort,
     forceDirty: args.force_dirty, includeCache: args.include_cache, keepCache: args.keep_cache, keep: args.keep };
-  if (refreshHosts) await planRemoteGc(ctx, options, parseAge(args.older_than ?? '7d'));
+  if (refreshHosts && !args.purge_trash) await planRemoteGc(ctx, options, parseAge(args.older_than ?? '7d'));
   return planGc(ctx, { ...options, cachedSizes: true });
 }
 
@@ -559,6 +622,10 @@ interface SetLimitsArgs extends Partial<Record<AgentName, number | string>> {
 }
 
 async function runSetLimits(deps: McpDeps, args: SetLimitsArgs): Promise<ToolResult> {
+  const version = /^(\d+)\.(\d+)/.exec(deps.server?.version ?? '');
+  if (version && Number(version[1]) === 0 && Number(version[2]) < 27) {
+    throw new AgentctlError('MCP < 0.27 cannot set limits. Quit (⌘Q) and reopen the chat app to use owner approval.');
+  }
   return writeTool(deps, 'set_limits', { detail: `${PROVIDER_IDS.map(id => `${id}=${args[id] ?? '-'}`).join(' ')}${args.queue_hold !== undefined ? ` queue_hold=${JSON.stringify(args.queue_hold)}` : ''} confirm=${Boolean(args.confirm)}` }, async (ctx) => {
     const assignments: LimitAssignments = {};
     for (const agent of activeProviders(ctx.config)) if (args[agent] !== undefined) {
@@ -1386,8 +1453,8 @@ export const MCP_TOOLS: McpToolDef[] = [
     kind: 'read',
     description:
       'What "agentctl gc" would free now, without doing anything: git worktrees of closed, cancelled and archived tasks without uncommitted changes, only with owner-confirmed include_cache: true, old unreferenced cache entries (keep_cache tasks stay); state folders to archive, merged branches (merged: true), each with its size, and what is skipped and why. ' +
-      'Use the separately allowed gc tool to apply this protected plan with preview and confirm: true (branches default false).',
-    input: { include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
+      'Use purge_trash: true to list previously trashed agentctl items. Use the separately allowed gc tool to apply the preview with confirm: true (branches default false).',
+    input: { purge_trash: z.boolean().optional().describe('Select Trash items with receipts and separately listed, ownership-marked legacy items.'), include_cache: z.boolean().optional().describe('Explicit owner confirmation to delete old unreferenced cache entries; default false.'), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional().describe('Owner-authorized tasks whose dirty/unpushed worktrees may be removed.'), request_id: z.string().optional().describe('Read a GC preview accepted by watch: the request UUID from Accepted.'), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), older_than: z.string().max(10).optional().describe('Age of the files next to the reports before they count: 12h, 7d, 2w. Default 7d.'), merged: z.boolean().optional().describe('true: also list merged branches of finished tasks.'), cohort: cohortArg.optional() },
     annotations: readOnly('Preview of the clean-up'),
     run: (deps, args) => guarded(() => runGcPreview(deps, args as { older_than?: string; merged?: boolean; cohort?: string })),
   }),
@@ -1410,8 +1477,8 @@ export const MCP_TOOLS: McpToolDef[] = [
       'WRITE, off unless the user put "set_limits" in mcp.allow. With the default owner-approve policy, request a change and include a reason. The owner decides within two hours from the board or owner CLI. A chat confirmation cannot apply the change. Use 0 for no provider ceiling and "off" to disable a provider. ' +
       'Timed provider hold: hold: {glm: "21:50"}, ISO timestamp, duration "3h", or "off"; every active provider is supported. Holds block starts even with plan n/d, appear in limits/capacity/board/queue_list and expire with an event. ' +
       `queue_hold format, exactly: a whole percentage 1-100 for every active provider (queue_hold: 90), "off" for no hold at all (queue_hold: "off"), or per provider {claude: 90, codex: "off"} (only the named providers change; "off" removes that provider's hold). Above that percentage of its plan, in any window, the queue starts no task of the provider; queue_list shows "wstrzymane: … > usage.queue_hold N%"; limits, capacity and config_show show the current hold. ` +
-      'Use quota: {chat: "nc", share: 40} for a percentage or quota: {chat: "nc", claude: 4} for an absolute provider override. profile names a configured profile. Under direct policy the previous permissions and preview/confirm flow apply. A timed provider hold always uses direct preview/confirm.',
-    input: { as: wallAsArg, quota: z.object({chat: z.string().min(1).max(60), share: z.number().min(0).max(100).optional(), ...perProvider(PROVIDER_IDS, () => z.number().int().min(0).optional())}).strict().optional(), overprovision: z.number().min(1).optional(), profile: z.string().min(1).max(60).optional(), reason: z.string().max(500).optional(), ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('Confirms a direct edit or provider hold. Only the owner can approve a limit request.') },
+      'Use quota: {chat: "nc", share: 40} for a percentage or quota: {chat: "nc", claude: 4} for an absolute provider override (0 blocks starts, off or null removes that provider quota). profile names a configured profile. Under direct policy the previous permissions and preview/confirm flow apply. A timed provider hold always uses direct preview/confirm.',
+    input: { as: wallAsArg, quota: z.object({chat: z.string().min(1).max(60), share: z.number().min(0).max(100).optional(), ...perProvider(PROVIDER_IDS, () => z.union([z.number().int().min(0), z.literal('off'), z.null()]).optional())}).strict().optional(), overprovision: z.number().min(1).optional(), profile: z.string().min(1).max(60).optional(), reason: z.string().max(500).optional(), ...perProvider(DEFAULT_PROVIDERS, id => setLimitArg.describe(`New limit for ${provider(id).displayName}; 0 = no limit, "off" = disabled. Omit to leave it.`)), queue_hold: queueHoldArg, hold: z.record(z.string(), z.string()).optional().describe('Timed provider hold: {glm: "21:50"}, ISO timestamp, "3h", or "off". Applies to every active provider.'), confirm: z.boolean().optional().describe('Confirms a direct edit or provider hold. Only the owner can approve a limit request.') },
     annotations: { title: 'Request or change limits', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: (deps, args) => guarded(() => runSetLimits(deps, args as SetLimitsArgs)),
   }),
@@ -1796,7 +1863,7 @@ MCP_TOOLS.push(
   extraWrite('manager_start', 'manager', 'Start the supervising manager session', { project: optionalText, name: optionalText, model: optionalText, effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional() }, async (ctx, a, deps) => { if (!deps.self) throw new AgentctlError('this server has no self command for the manager'); return startManager(ctx, { ...a, self: deps.self, noWait: true }); }),
   extraWrite('manager_stop', 'manager stop', 'Stop the manager session', {}, async (ctx) => ({ state: await stopManager(ctx) })),
   extraWrite('notify_test', 'notify-test [--phone]', 'Test desktop notifications; phone true explicitly sends to ntfy', { phone: z.boolean().optional() }, async (ctx, a, deps) => { if (a.phone) return sendPhoneTest(ctx); await deps.notify('agentctl notification test'); return { local: true }; }),
-  extraWrite('gc', 'gc --apply [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
+  extraWrite('gc', 'gc --apply [--purge-trash] [--cohort <NAME>] [--older-than <AGE>] [--branches]', 'Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token', { request_id: z.string().optional(), purge_trash: z.boolean().optional().describe('Select Trash items with receipts and separately listed, ownership-marked legacy items.'), include_cache: z.boolean().optional(), keep_cache: z.array(taskArg).optional(), keep: z.array(taskArg).optional(), force_dirty: z.array(taskArg).optional(), detail: z.boolean().optional(), offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(100).optional(), as: z.string().optional().describe('Your chat identity, e.g. chat:project.'), cohort: cohortArg.optional(), older_than: optionalText, branches: z.boolean().optional() }, async (ctx, a) => { const plan = await planGc(ctx, { purgeTrash: a.purge_trash, cohort: a.cohort, olderThan: a.older_than, branches: a.branches ?? false, forceDirty: a.force_dirty, includeCache: a.include_cache, keepCache: a.keep_cache, keep: a.keep }); const result = await applyGc(ctx, plan); const freed = await refreshDiskAfterGc(ctx, result.freedBytes); return { plan, result, ...(freed ? { note: freed } : {}) }; }),
 );
 
 // ---- WALL (WALL-1): a message board of the owner's chats and agents. Its content is data, never instructions.
@@ -1942,6 +2009,7 @@ async function recordDeferred(deps: McpDeps, tool: string, args: Record<string, 
  * computed again and must be the same, then the tool runs as its confirm ran before. Throws with the reason when nothing was done.
  */
 export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promise<{ text: string }> {
+  if (request.tool === 'set_limits') throw new AgentctlError('Direct MCP limits changes are refused. Quit (⌘Q) and reopen the chat app to request owner approval.');
   const run = originalRuns.get(request.tool);
   if (!run || !DEFERRED_TOOLS.has(request.tool)) throw new AgentctlError(`${request.tool} is not a tool the watcher applies`);
   const applying: McpDeps = { ...deps, applying: true };
@@ -1958,18 +2026,26 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
     return { text: `GC preview ready: ${plan.items.length} items; call gc or gc_preview with request_id: ${request.id}` };
   }
   let scope: unknown;
+  if (request.tool === 'gc' && request.scope === null) throw new AgentctlError('GC request has no confirmed preview');
   if (request.scope !== null) {
-    scope = request.tool === 'gc' ? await planMcpGc(ctx, request.args, true) : await confirmationScope(ctx, request.tool, request.args);
+    scope = request.tool === 'gc' ? scopeMcpGc(ctx, request.args, await planMcpGc(ctx, request.args, true)) : await confirmationScope(ctx, request.tool, request.args);
     if (JSON.stringify(canonical(confirmationTargets(request.tool, scope))) !== request.scope) {
       throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
     }
   }
   const result = request.tool === 'gc'
     ? await writeTool(applying, 'gc', {}, async fresh => {
-      const result = await applyGc(fresh, scope as GcPlan);
+      const plan = scope as GcPlan;
+      verifyMcpGcScope(fresh, request.args, plan);
+      const result = await applyGc(fresh, plan);
       await refreshDiskAfterGc(fresh, result.freedBytes);
-      const text = gcResultLine(result, typeof request.args.cohort === 'string' ? request.args.cohort : undefined);
-      return { text, executed: true, announce: text };
+      if (request.args.purge_trash !== true) {
+        const summary = gcResultLine(result, typeof request.args.cohort === 'string' ? request.args.cohort : undefined);
+        return {text: summary, executed: true, announce: summary};
+      }
+      // Trash results carry measured per-volume data before the bounded item lists.
+      const { freedBytes, freedByVolume, done, failed } = result;
+      return { text: JSON.stringify({ freedBytes, freedByVolume, done, failed }), executed: true, announce: `gc: ${done.length} items, ${freedBytes} bytes` };
     })
     : request.tool === 'archive'
     ? await writeTool(applying, 'archive', {}, async (fresh) => { await applyArchive(fresh, scope as Awaited<ReturnType<typeof archiveClosed>>); return { text: JSON.stringify(scope, null, 2), executed: true, announce: 'archive closed task state' }; })
@@ -2000,7 +2076,12 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     const plan = scope as Awaited<ReturnType<typeof sendScope>>;
     return { target: plan.identity, message: plan.message?.id };
   }
-  if (name === 'gc') return (scope as GcPlan).items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead }) => ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead }));
+  if (name === 'gc') {
+    const plan = scope as GcPlan;
+    return plan.items.map(({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead, trash }) =>
+      ({ kind, task, target, repo, branch, host, hostFingerprint, dirtyFiles, unpushedCommits, head, dead, trash,
+        deleteMode: !host && (kind === 'cache' || kind === 'node-modules') ? plan.deleteMode : undefined }));
+  }
   const project = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(project);
     if (!value || typeof value !== 'object') return value;
@@ -2160,15 +2241,19 @@ for (const tool of MCP_TOOLS) {
     let input = provided;
     let prepared: GcPlan | undefined;
     if (tool.name === 'gc' && provided.request_id !== undefined) {
-      const { request_id, detail, offset, limit, ...selection } = provided;
+      const { request_id, detail, offset, limit, as, ...selection } = provided;
       if (confirm || preview_token || Object.keys(selection).length || typeof request_id !== 'string') {
-        return fail('GC request_id retrieves a plan. Pass only request_id and optional detail, offset or limit; then confirm with preview_token.');
+        return fail('GC request_id retrieves a plan. Pass request_id and optional as, detail, offset or limit; then confirm with preview_token.');
       }
       const saved = readGcPreview(ctx, request_id);
       if (!('plan' in saved)) return saved;
       if (ctx.runner.now() - saved.at >= ctx.config.preview.ttlS * 1000) return fail('GC preview plan expired; request a fresh plan.');
-      input = { ...saved.args, ...(detail !== undefined ? { detail } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) };
+      input = { ...saved.args, ...(as !== undefined ? { as } : {}), ...(detail !== undefined ? { detail } : {}), ...(offset !== undefined ? { offset } : {}), ...(limit !== undefined ? { limit } : {}) };
       prepared = saved.plan;
+    }
+    if (tool.name === 'gc' && input.as === undefined) {
+      const mapped = wallIdentity(ctx.config, { client: deps.clientId });
+      if (mapped.kind === 'chat') input = { ...input, as: mapped.id };
     }
     // Required preview fields remain required for a preview or explicit-argument confirm.
     // A token-only confirm restores the validated arguments from its session preview.
@@ -2240,6 +2325,7 @@ for (const tool of MCP_TOOLS) {
       }
       if (ctx.runner.now() - preview.at > preview.ttlS * 1000) return deny(`TTL expired (${preview.ttlS}s since preview)`);
     }
+    if (tool.name === 'gc') gcCaller(ctx, effective.as, deps.clientId);
     // P93: the confirm of new/queue does not plan again (git, tmux, every task record: seconds on a loaded host). Its scope identity is the
     // argument hash alone (confirmationTargets), the plan is the preview's, and the watcher validates the accepted specs.
     const accepting = Boolean(confirm) && (tool.name === 'new' || tool.name === 'queue');
@@ -2251,6 +2337,7 @@ for (const tool of MCP_TOOLS) {
     let scope: unknown = prepared;
     try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective))); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
+    if (tool.name === 'gc') scope = scopeMcpGc(ctx, effective, scope as GcPlan, deps.clientId);
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
     const scopeIdentity = JSON.stringify(canonical(confirmationTargets(tool.name, scope)));
     if (!confirm) {
@@ -2300,6 +2387,7 @@ for (const tool of MCP_TOOLS) {
       });
       if (tool.name === 'gc') return writeTool(deps, 'gc', {}, async (fresh) => {
         const plan = scope as GcPlan;
+        verifyMcpGcScope(fresh, effective, plan, deps.clientId);
         const result = await applyGc(fresh, plan);
         const freed = await refreshDiskAfterGc(fresh, result.freedBytes);
         return { text: JSON.stringify({ ...result, ...(freed ? { note: freed } : {}) }, null, 2), executed: true, announce: gcResultLine(result, typeof effective.cohort === 'string' ? effective.cohort : undefined) };
@@ -2487,13 +2575,13 @@ function durableStatus(ctx: Context, scopedChat?: string): string {
     'Active tasks from journal/events (last known; no live window probe):',
     ...[...latest.values()].filter(e => !inactive.has(e.task!) && !['dead', 'launch-failed', 'cancelled', 'queue-failed'].includes(e.kind)).slice(-20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.kind} (${formatLocalTime(e.at)})`)].join('\n');
 }
-export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal): Promise<void> {
+export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: number, signal?: AbortSignal, disk?: DiskReport): Promise<void> {
   if (ctx.runner.dryRun) return;
   const deps: McpDeps = { context: () => ctx, notify: async () => {} };
   const observed = rows ?? await collectStatus(ctx, {archived: true});
   const live = await liveWindows(ctx, observed);
   const queue = await runQueueList(deps, {}, {rows: observed, live});
-  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live});
+  const capacity = await collectCapacityFull(ctx, {diskBudgetMs: DISK_BUDGET_MS, cachedOnly: true, save: false, rows: observed, live, disk});
   const limits = collectLimits(ctx.config, live, ctx.runner.now(), true, observed);
   const config = await originalRuns.get('config_show')!(deps, {});
   // Snapshot diagnostics observe state only: spawning provider CLIs each tick both blocks watch and can start a session.
@@ -2514,7 +2602,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
     providerHolds: readProviderHoldState(ctx.config).holds,
     reservations: readReservations(ctx.config, ctx.runner.now()),
-    rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
+    rows: observed, live, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
   if (signal?.aborted) return;
   writeWatchSnapshot(ctx, snapshot);
@@ -2525,14 +2613,14 @@ function writeWatchSnapshot(ctx: Context, snapshot: object): void {
   atomicWriteFile(watchSnapshotPath(ctx.config), JSON.stringify(snapshot));
 }
 
-export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport, step: string): void {
-  let capacity: Capacity | undefined;
+export function publishDegradedMcpSnapshot(ctx: Context, disk: DiskReport | undefined, step: string): void {
+  let previous: Record<string, unknown> | undefined;
   try {
-    const previous = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
-    capacity = previous.capacity;
-  } catch { /* no previous capacity */ }
-  writeWatchSnapshot(ctx, { version: 1, at: ctx.runner.now(), degraded: step, disk,
-    ...(capacity ? {capacity: {...capacity, disk}} : {}) });
+    previous = JSON.parse(fs.readFileSync(watchSnapshotPath(ctx.config), 'utf8'));
+  } catch { /* no previous snapshot */ }
+  if (!previous || !Array.isArray(previous.rows) || typeof previous.at !== 'number') return;
+  const now = ctx.runner.now();
+  writeWatchSnapshot(ctx, { ...previous, version: 1, at: previous.at, degraded: step, degraded_at: now, ...(disk ? {disk} : {}) });
 }
 
 async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Record<string, unknown>): Promise<ToolResult | undefined> {
@@ -2552,7 +2640,8 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     const warning = watchSnapshotWarning(snap.at, now);
     const explicit = args.capacity === true || args.detail === true;
     const disk = snap.disk ?? snap.capacity?.disk;
-    if ((warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
+    const retainedRows = name === 'status' && !!snap.degraded && Array.isArray(snap.rows) && !!snap.capacity && Array.isArray(snap.queue);
+    if (!retainedRows && (warning || snap.degraded) && ['status', 'capacity', 'doctor'].includes(name)) {
       const stepWarning = watchStepWarning(ctx.config) ?? (snap.degraded && `Watch: pominięty etap – ${snap.degraded}.`);
       const note = [`${ageLine(snap.at, now)}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`, warning, stepWarning].filter(Boolean).join(' ');
       if (name === 'doctor') return ok(JSON.stringify([...snap.doctor ?? [], {name: 'watch snapshot', status: 'warn', detail: note, snapshot_age_s: age / 1000}], null, 2));
@@ -2567,11 +2656,31 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
       return ok([note, diskLine(freshDisk), ...((explicit || name === 'capacity') && capacity
         ? [`Capacity from snapshot (${capacityAt}):`, ...snapshotLines(capacity)] : []), fallback, ...(name === 'status' ? reservationLines(ctx.config, now) : [])].filter(Boolean).join('\n'));
     }
-    if (snap.degraded || (age >= 2 * ctx.config.watch.interval * 1000 && !(name === 'capacity' || name === 'status' && explicit))
-      || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
-      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now))
-      || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex')) return undefined;
-    const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.`;
+    // A healthy, complete scheduling snapshot still describes the last tick when its
+    // nominal interval was missed. Config, reservations and holds are checked separately.
+    // A loaded watch cycle (tick plus interval) exceeds two intervals while the watch is healthy; status, like limits and
+    // queue_list, serves the last complete snapshot with its age instead of an 8 s fallback (REL0272-STATUS-AGE).
+    const readAgeLimit = ['limits', 'queue_list', 'status'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
+    // Holds and reservations change between ticks (an automatic hold is set by maintenance after the tick published). With the
+    // snapshot's own rows and live windows, the parts that depend on them are derived again instead of discarding a fresh snapshot.
+    const holdsMoved = JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
+      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now));
+    const derivable = Array.isArray(snap.live) && Array.isArray(snap.rows);
+    if (!retainedRows && (snap.degraded || (age >= readAgeLimit && !(name === 'capacity' || name === 'status' && explicit))
+      || (holdsMoved && !derivable)
+      || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'))) return undefined;
+    if (holdsMoved && derivable) {
+      const limits = collectLimits(ctx.config, snap.live, now, false, snap.rows);
+      // Plan readings are usage facts of the tick, not hold state: keep the published ones instead of reopening usage logs.
+      for (const provider of limits.providers) {
+        const plan = snap.limits?.providers?.find((entry: {agent: string}) => entry.agent === provider.agent)?.plan;
+        if (plan !== undefined) provider.plan = plan;
+      }
+      snap.limits = limits;
+      const queue = await runQueueList(deps, {}, {rows: snap.rows, live: snap.live});
+      snap.queue = JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2));
+    }
+    const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.${retainedRows ? ` Watch: pominięty etap – ${snap.degraded}.` : ''}`;
     if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
     const json = args.format === 'json' || args.detail === true;
     let data: unknown, text = '';
@@ -2582,7 +2691,7 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
       const rows = shownRows(allRows, Boolean(args.all));
       const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? rows.length);
       const shown = rows.slice(offset, offset + limit);
-      const statusData = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
+      const statusData = { tasks: [...shown.map(statusRowForChat), ...queue.filter((q: { task: string }) => !rows.some(r => r.task === q.task)).map((q: { task: string; status: string; startCondition: string }) => ({...q, state: q.status === 'queued' ? 'registered' : q.status}))], disk: snap.capacity.disk, ...(retainedRows ? {snapshot_note: note} : {}), ...(args.capacity || args.detail ? { capacity: capacitySnapshot(snap.capacity) } : {}) };
       const overlaps = shown.filter(r => r.collide.length > 0).length;
       text = [statusLine(rows, allRows.length - rows.length), ...(overlaps ? [`⚠${overlaps} tasks overlap; overlap has details.`] : []), diskLine(snap.capacity.disk), ...reservationLines(ctx.config, now), ...providerHoldLines(ctx.config, ctx.runner.now()), ...peakLines(ctx.config, ctx.runner.now()), ...shown.filter(r => !pulledOpen(r)).map(compactStatus), ...pulledSummary(shown), ...shown.filter(pulledOpen).map(compactStatus), ...queue.map((q: {task: string; owner?: string; startCondition: string}) => `${q.task}${q.owner ? ` (${q.owner})` : ''}: ${q.startCondition}`), ...(args.capacity ? snapshotLines(capacitySnapshot(snap.capacity)) : [])].join('\n');
       const capacity: Capacity = snap.capacity;
@@ -2651,7 +2760,8 @@ for (const tool of MCP_TOOLS.filter(t => snapshotTools.has(t.name))) {
 }
 
 /** Session-local snapshots: continuing a response never repeats a write or consumes another event page. */
-const responses = new WeakMap<McpDeps, Map<string, { tool: string; text: string; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number }>>();
+interface CachedResponse { tool: string; text: string; bytes: number; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number }
+const responses = new WeakMap<McpDeps, Map<string, CachedResponse>>();
 MCP_TOOLS.push(def({ name: 'response_page', title: 'Continue a bounded response', kind: 'read', description: 'Retrieve a cached response fragment without repeating the original operation. CLI: no equivalent (MCP response transport).', input: { response_id: z.string().max(100), response_offset: z.number().int().min(0) }, annotations: readOnly('Continue a bounded response'), run: async () => fail('response_id is required') }));
 export function responseWireBytes(result: ToolResult): number {
   return Buffer.byteLength(JSON.stringify({ content: [{ type: 'text', text: result.text }], ...(result.isError ? { isError: true } : {}) }));
@@ -2665,7 +2775,7 @@ for (const tool of MCP_TOOLS) {
     let cache = responses.get(deps);
     if (!cache) { cache = new Map(); responses.set(deps, cache); }
     let id = response_id as string | undefined;
-    let saved: { tool: string; text: string; isError?: boolean; onDelivered?: () => Promise<void>; covered?: number };
+    let saved: CachedResponse;
     if (id) {
       const found = cache.get(id);
       if (!found || (tool.name !== 'response_page' && found.tool !== tool.name)) return fail('Response expired or belongs to another tool. Repeat the original read/preview; do not repeat a confirmed write.');
@@ -2674,15 +2784,16 @@ for (const tool of MCP_TOOLS) {
       if (response_offset !== undefined) return fail('response_offset requires response_id');
       const result = await guarded(() => run(deps, input));
       if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) { await result.onDelivered?.(); const { onDelivered: _callback, ...delivered } = result; return delivered; }
-      saved = { tool: tool.name, text: result.text, onDelivered: result.onDelivered, covered: 0, ...(result.isError ? { isError: true } : {}) };
+      saved = { tool: tool.name, text: result.text, bytes: Buffer.byteLength(result.text), onDelivered: result.onDelivered, covered: 0, ...(result.isError ? { isError: true } : {}) };
       id = crypto.randomUUID();
-      while (cache.size >= 16 || [...cache.values()].reduce((n, r) => n + Buffer.byteLength(r.text), 0) > 8 * 1024 * 1024) cache.delete(cache.keys().next().value!);
+      while (cache.size >= 16 || [...cache.values()].reduce((n, r) => n + r.bytes, 0) > 8 * 1024 * 1024) cache.delete(cache.keys().next().value!);
       cache.set(id, saved);
     }
     const offset = Number(response_offset ?? 0);
     if (offset > saved.text.length) return fail('response_offset is beyond end');
-    const page = (end: number): ToolResult => ({ text: JSON.stringify({ truncated: true, response_id: id, response_offset: offset, next_response_offset: end, has_more: end < saved.text.length, total_bytes: Buffer.byteLength(saved.text), fragment: saved.text.slice(offset, end), continuation: 'Call response_page with response_id and response_offset=next_response_offset only; concatenate fragments. No operation is repeated.' }), ...(saved.isError ? { isError: true } : {}) });
-    let lo = offset, hi = saved.text.length;
+    const page = (end: number): ToolResult => ({ text: JSON.stringify({ truncated: true, response_id: id, response_offset: offset, next_response_offset: end, has_more: end < saved.text.length, total_bytes: saved.bytes, fragment: saved.text.slice(offset, end), continuation: 'Call response_page with response_id and response_offset=next_response_offset only; concatenate fragments. No operation is repeated.' }), ...(saved.isError ? { isError: true } : {}) });
+    // The JSON wire page cannot contain more UTF-16 code units than its UTF-8 byte budget.
+    let lo = offset, hi = Math.min(saved.text.length, offset + budget);
     while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); const result = page(mid); if (responseWireBytes(result) <= budget && Buffer.byteLength(JSON.stringify(result)) <= budget) lo = mid; else hi = mid - 1; }
     if (lo > offset && /[\uD800-\uDBFF]/.test(saved.text[lo - 1]!)) lo--;
     if (offset <= (saved.covered ?? 0)) saved.covered = Math.max(saved.covered ?? 0, lo);
@@ -2734,7 +2845,7 @@ for (const tool of MCP_TOOLS) {
 /** Identity is accepted uniformly. Tools that do not consume it keep it out of confirmation hashes. */
 for (const tool of MCP_TOOLS) {
   tool.input = {as: z.string().max(81).optional().describe('Caller identity for WALL/events; accepted and ignored elsewhere.'), ...tool.input};
-  if (tool.name.startsWith('wall_') || chatUsageTools.has(tool.name) || ['events_since', 'new', 'queue', 'set_limits'].includes(tool.name)) continue;
+  if (tool.name.startsWith('wall_') || chatUsageTools.has(tool.name) || ['events_since', 'new', 'queue', 'set_limits', 'gc'].includes(tool.name)) continue;
   const run = tool.run;
   tool.run = (deps, args) => {const {as: _as, ...input} = args; return run(deps, input);};
 }

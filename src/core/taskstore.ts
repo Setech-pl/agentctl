@@ -285,6 +285,26 @@ export function readTaskRecord(config: GlobalConfig, window: string): TaskRecord
   return readRecordFile(taskFile(config, window));
 }
 
+/** Async header reads keep watch timers responsive when the state volume stalls. */
+export async function readRecordFileAsync(file: string): Promise<TaskRecord | undefined> {
+  const fd = await fs.promises.open(file, 'r').catch(() => undefined);
+  if (!fd) return;
+  try {
+    const chunks: Buffer[] = [];
+    for (let length = 0; length < 1024 * 1024;) {
+      const chunk = Buffer.alloc(4096);
+      const { bytesRead } = await fd.read(chunk);
+      if (bytesRead) chunks.push(chunk.subarray(0, bytesRead));
+      length += bytesRead;
+      const text = Buffer.concat(chunks).toString('utf8');
+      const header = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text);
+      if (header || !bytesRead) return parseTaskRecord(header?.[0] ?? text);
+      if (!text.startsWith('---\n') && !text.startsWith('---\r\n')) return;
+    }
+  } catch { /* missing/unreadable record */ }
+  finally { await fd.close().catch(() => undefined); }
+}
+
 /** The prompt the task started with: the text after the header, up to the first follow-up that `send` appended. */
 export function readTaskPrompt(config: GlobalConfig, window: string): string | undefined {
   let text: string;
@@ -457,32 +477,58 @@ interface CachedRecordFile {
 
 /** Parsed TASK.md files per scanned directory; an unchanged file (same reusable high-resolution file version) is not read again. */
 const recordScanCache = new Map<string, Map<string, CachedRecordFile>>();
+const activeRecordIndexes = new Map<string, Set<TaskRecordIndex>>();
 
-/** Yield every 25 folders so a long scan does not block the event loop (the board shares it with key handling). */
+/** A committed local write is visible before the filesystem watch notification arrives. */
+export function invalidateTaskRecord(file: string): void {
+  const directory = path.dirname(file), root = path.dirname(directory);
+  recordScanCache.get(root)?.delete(file);
+  for (const index of activeRecordIndexes.get(root) ?? []) index.markChanged(path.basename(directory));
+}
+
+// Yield during synchronous board reads. Watch's asynchronous reads keep a bounded number of files open.
 const SCAN_CHUNK = 25;
+const ASYNC_SCAN_CONCURRENCY = 96;
 
-async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
+async function readTaskDirectory(dir: string): Promise<string[]> {
+  try { return await fs.promises.readdir(dir); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function scanNames<T>(names: readonly string[], scan: (name: string) => Promise<T>): Promise<T[]> {
+  const results = new Array<T>(names.length);
+  let next = 0;
+  const worker = async () => {
+    for (let index = next++; index < names.length; index = next++) results[index] = await scan(names[index]!);
+  };
+  await Promise.all(Array.from({length: Math.min(ASYNC_SCAN_CONCURRENCY, names.length)}, worker));
+  return results;
+}
+
+async function scanRecordsIn(dir: string, asyncIO: boolean): Promise<TaskRecord[]> {
   let files = recordScanCache.get(dir);
   if (!files) {
     files = new Map();
     recordScanCache.set(dir, files);
   }
-  let names: string[] = [];
-  try {
-    names = fs.readdirSync(dir).sort();
-  } catch {
-    names = [];
+  let names: string[];
+  if (asyncIO) names = (await readTaskDirectory(dir)).sort();
+  else {
+    try { names = fs.readdirSync(dir).sort(); }
+    catch { names = []; }
   }
   const prefix = `${dir}${path.sep}`;
   const seen = new Set<string>();
   const records: TaskRecord[] = [];
-  let done = 0;
-  for (const name of names) {
+  const scan = async (name: string) => {
     const file = path.join(dir, name, 'TASK.md');
     seen.add(file);
     let st: fs.BigIntStats | undefined;
     try {
-      st = fs.lstatSync(file, { bigint: true });
+      st = asyncIO ? await fs.promises.lstat(file, { bigint: true }) : fs.lstatSync(file, { bigint: true });
     } catch {
       files.delete(file);
     }
@@ -490,22 +536,125 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
       const version = fileVersion(st);
       const hit = files.get(file);
       if (version !== undefined && hit?.version === version) {
-        if (hit.record) records.push(hit.record);
+        return hit.record;
       } else {
         let record: TaskRecord | undefined;
         try {
-          record = readRecordFile(file);
+          record = asyncIO ? await readRecordFileAsync(file) : readRecordFile(file);
         } catch {
           record = undefined;
         }
         files.set(file, { version, record });
-        if (record) records.push(record);
+        return record;
       }
     }
-    if (++done % SCAN_CHUNK === 0) await new Promise((resolve) => setImmediate(resolve));
+  };
+  if (asyncIO) {
+    for (const record of await scanNames(names, scan)) if (record) records.push(record);
+  } else {
+    for (let i = 0; i < names.length; i += SCAN_CHUNK) {
+      for (const name of names.slice(i, i + SCAN_CHUNK)) {
+        const record = await scan(name);
+        if (record) records.push(record);
+      }
+      await new Promise(resolve => setImmediate(resolve));
+    }
   }
   for (const key of files.keys()) if (key.startsWith(prefix) && !seen.has(key)) files.delete(key);
   return records;
+}
+
+/** A watcher-owned active-task index. Periodic reconciliation covers platforms that drop watch events. */
+export class TaskRecordIndex {
+  private readonly records = new Map<string, TaskRecord>();
+  private readonly changed = new Set<string>();
+  private root?: string;
+  private watcher?: fs.FSWatcher;
+  private rootVersion?: string;
+  private reconcileAt = 0;
+  private pending: Promise<TaskRecord[]> | undefined;
+  private generation = 0;
+
+  current(config: GlobalConfig, now: number, root = config.stateDir): Promise<TaskRecord[]> {
+    if (this.root !== root) {
+      this.close();
+      this.root = root;
+      let indexes = activeRecordIndexes.get(root);
+      if (!indexes) activeRecordIndexes.set(root, indexes = new Set());
+      indexes.add(this);
+    }
+    if (this.pending) return this.pending;
+    if (!this.watcher) {
+      try {
+        this.watcher = fs.watch(root, {recursive: true, persistent: false}, (_event, file) => {
+          if (!file) { this.reconcileAt = 0; return; }
+          const [window, leaf] = file.split(path.sep);
+          if (window && (!leaf || leaf === 'TASK.md')) this.markChanged(window);
+        });
+        this.reconcileAt = 0;
+        this.watcher.on('error', () => this.close());
+      } catch { /* a missing state directory will be retried */ }
+    }
+    const generation = this.generation;
+    const pending = this.refresh(root, now, generation).finally(() => { if (this.pending === pending) this.pending = undefined; });
+    this.pending = pending;
+    return pending;
+  }
+
+  markChanged(window: string): void { this.changed.add(window); }
+
+  private async refresh(root: string, now: number, generation: number): Promise<TaskRecord[]> {
+    const stat = await fs.promises.stat(root, {bigint: true}).catch(() => undefined);
+    if (this.generation !== generation) return [];
+    const version = stat && fileVersion(stat);
+    if (now >= this.reconcileAt) {
+      const all = await scanRecordsIn(root, true);
+      if (this.generation !== generation) return [];
+      this.reconcileAt = now + 60_000;
+      this.records.clear();
+      for (const record of all) this.records.set(record.window, record);
+    } else if (version === undefined || version !== this.rootVersion) {
+      // A new or moved state directory is visible even before the recursive watcher delivers its callback; an unknown (racy) version is a change.
+      const names = new Set(await readTaskDirectory(root));
+      if (this.generation !== generation) return [];
+      for (const window of this.records.keys()) if (!names.has(window)) this.records.delete(window);
+      for (const window of names) if (!this.records.has(window)) this.changed.add(window);
+    }
+    this.rootVersion = version;
+    const changes = [...this.changed];
+    this.changed.clear();
+    await scanNames(changes, async window => {
+      const file = path.join(root, window, 'TASK.md');
+      const stat = await fs.promises.lstat(file, {bigint: true}).catch(() => undefined);
+      const version = stat && fileVersion(stat);
+      const files = recordScanCache.get(root);
+      const cached = files?.get(file);
+      const record = !stat ? undefined : version !== undefined && cached?.version === version ? cached.record : await readRecordFileAsync(file);
+      if (this.generation !== generation) return;
+      if (stat) files?.set(file, {version, record});
+      else files?.delete(file);
+      if (record) this.records.set(window, record);
+      else this.records.delete(window);
+    });
+    return [...this.records.values()];
+  }
+
+  close(): void {
+    if (this.root) {
+      const indexes = activeRecordIndexes.get(this.root);
+      indexes?.delete(this);
+      if (!indexes?.size) activeRecordIndexes.delete(this.root);
+    }
+    this.watcher?.close();
+    this.watcher = undefined;
+    this.root = undefined;
+    this.pending = undefined;
+    this.generation++;
+    this.reconcileAt = 0;
+    this.rootVersion = undefined;
+    this.records.clear();
+    this.changed.clear();
+  }
 }
 
 /**
@@ -513,9 +662,8 @@ async function scanRecordsIn(dir: string): Promise<TaskRecord[]> {
  * this on every refresh and hands the one list to every consumer; one-shot commands keep listTaskRecords/listArchivedRecords.
  * Callers must not mutate the returned records: they are the cache (collectStatus works on copies).
  */
-export async function snapshotRecords(config: GlobalConfig): Promise<RecordScan> {
-  const current = await scanRecordsIn(config.stateDir);
-  const archived = await scanRecordsIn(archiveDir(config));
+export async function snapshotRecords(config: GlobalConfig, asyncIO = false): Promise<RecordScan> {
+  const [current, archived] = await Promise.all([scanRecordsIn(config.stateDir, asyncIO), scanRecordsIn(archiveDir(config), asyncIO)]);
   return { current, archived, all: [...current, ...archived] };
 }
 
@@ -559,10 +707,9 @@ export async function setHeaderFields(runner: Runner, file: string, fields: Reco
     else doc.set(key, value);
   }
   const rest = text.replace(/\r\n/g, '\n').slice(match[0].length);
-  // Known writes invalidate even if a filesystem preserves its metadata tuple.
-  recordScanCache.get(path.dirname(path.dirname(file)))?.delete(file);
   try { await runner.writeFile(file, `---\n${doc.toString().trimEnd()}\n---${rest}`); }
   catch (error) { noteStateWriteFailure(file, error); throw error; }
+  if (!runner.dryRun) invalidateTaskRecord(file);
   return true;
   };
   try { return runner.dryRun ? await change() : await withStateWriteLock(taskLock(file), change); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }

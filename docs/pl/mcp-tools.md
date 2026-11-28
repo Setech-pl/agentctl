@@ -42,7 +42,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 |---|---|---|---|
 | `status` | odczyt | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Stan zadań i raportów; cache podaje wiek, po 5 min krótki fallback kolejki/dziennika. |
 | `events_since` | odczyt | `as?`, `all?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | Przyrost według as czatu (client nadpisuje), otwarta skrzynka WALL; peek zachowuje kursor. |
-| `gc_preview` | odczyt | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
+| `gc_preview` | odczyt | `as?`, `purge_trash?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Chroniony plan sprzątania z rozmiarami i powodami pominięcia; bez usuwania. |
 | `limits` | odczyt | `as?`, `format?`, `detail?` | Limity slotów, zajętość, rezerwacje, kolejka i obowiązujący queue_hold. |
 | `set_limits` | zapis | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Złóż właścicielowi wniosek o zmianę limitów, progu kolejki, kwot lub profilu. Czasowy hold działa bezpośrednio po potwierdzeniu. |
 | `reserve` | zapis | `as?`, `claude?`, `codex?`, `note?`, `until?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Zarezerwuj sloty dla agentów uruchamianych ręcznie. |
@@ -106,7 +106,7 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `manager_start` | zapis | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Uruchom sesję nadzorczą Claude z Remote Control. |
 | `manager_stop` | zapis | `as?`, `confirm?`, `preview_token?` | Zatrzymaj sesję manager. |
 | `notify_test` | zapis | `as?`, `phone?`, `confirm?`, `preview_token?` | Test powiadomienia lokalnego; phone jawnie wysyła do ntfy. |
-| `gc` | zapis | `as?`, `request_id?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
+| `gc` | zapis | `as?`, `request_id?`, `purge_trash?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Zastosuj chroniony plan sprzątania po podglądzie; opcjonalne scalone lokalne gałęzie. |
 | `wall_read` | odczyt | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Kanały, nagłówki z filtrami albo wiadomość z treścią, refs, historią i wątkiem. |
 | `wall_post` | zapis | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Opublikuj dozwoloną wiadomość po kontroli autora, refs, rozmiaru i sekretów. |
 | `wall_reply` | zapis | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Odpowiedz w kanale rodzica; answer oznacza otwarte pytanie jako answered. |
@@ -128,4 +128,4 @@ send_enter: dodatkowe uprawnienie send enter_only; nie przyznaje zwykłego send.
 
 ## Snapshot ticka
 
-`status`, `queue_list`, `capacity`, `limits`, `config_show` i `doctor` czytają atomowy snapshot ticka, gdy jest młodszy niż dwa interwały watch i pasuje konfiguracja. Tekst podaje wiek, JSON pole `snapshot_age_s`. Brak/stary snapshot uruchamia oznaczony odczyt ograniczony budżetem. Doctor ze snapshotu pomija sondowanie wersji/dostawców; do tej diagnostyki służy CLI doctor.
+`status`, `queue_list`, `capacity`, `limits`, `config_show` i `doctor` czytają atomowy snapshot ticka, gdy pasuje konfiguracja i jest młodszy niż 60 s (`status`, `queue_list`, `limits`; obciążony cykl watch może przekroczyć dwa interwały) lub dwa interwały watch (`config_show`, `doctor`). Blokada dostawcy lub rezerwacja ustawiona po ticku jest uwzględniana w limitach i kolejce ze snapshotu. Tekst podaje wiek, JSON pole `snapshot_age_s`. Brak/stary snapshot uruchamia oznaczony odczyt ograniczony budżetem. Doctor ze snapshotu pomija sondowanie wersji/dostawców; do tej diagnostyki służy CLI doctor.

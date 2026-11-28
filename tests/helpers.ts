@@ -1,4 +1,5 @@
 import { composerFixture } from './composer-fixture.ts';
+import { RACY_WINDOW_NS } from '../src/core/file-version.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after } from 'node:test';
@@ -166,6 +167,10 @@ export class FakeTmux {
         const format = args[args.indexOf('-F') + 1] ?? '#{window_name}';
         return { stdout: this.windows.map((w) => format.replace('#{window_id}', w.id).replace('#{window_name}', w.name).replace('#{@agentctl-role}', w.role ?? '').replace('#{pane_dead}', w.exitCode === undefined ? '0' : '1').replace('#{pane_dead_status}', String(w.exitCode ?? ''))).join('\n') };
       }
+      case 'list-panes': {
+        const format = args[args.indexOf('-F') + 1] ?? '#{pane_id}';
+        return {stdout: this.windows.map(w => format.replace('#{session_name}', this.session).replace('#{window_id}', w.id).replace('#{window_name}', w.name).replace('#{pane_id}', `%${w.id.slice(1)}`).replace('#{pane_dead}', w.exitCode === undefined ? '0' : '1').replace('#{@agentctl-role}', w.role ?? '')).join('\n')};
+      }
       case 'has-session':
         return { code: this.windows.length ? 0 : 1 };
       case 'list-clients':
@@ -256,3 +261,9 @@ export async function runCli(config: GlobalConfig, runner: Runner, argv: string[
 export function completedRecordFromSpec(...args: Parameters<typeof recordFromSpec>): TaskRecord {
   return { ...recordFromSpec(...args), turnEndedAt: new Date(Math.max(Date.now(), args[2])).toISOString() };
 }
+
+/**
+ * Wait until every file written so far is older than the racy window of fileVersion (src/core/file-version.ts), so a cache may
+ * reuse it: tests that assert "an unchanged scan reads nothing" call this after building their fixtures.
+ */
+export const pastRacyWindow = (): Promise<void> => new Promise(resolve => setTimeout(resolve, Number(RACY_WINDOW_NS / 1_000_000n) + 50));

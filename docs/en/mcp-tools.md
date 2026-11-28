@@ -24,7 +24,7 @@ WALL `as` distinguishes Projects sharing a client name. Configured chat/task ide
 
 ## Bounded responses and reports
 
-`status`, `queue_list`, `capacity`, `limits`, `config_show` and `doctor` read the atomically published tick snapshot when its age is less than two watch intervals and config matches. Text reports snapshot age; JSON exposes `snapshot_age_s`. Missing/stale snapshots use a labeled bounded fallback. Snapshot doctor deliberately defers provider/version probes; use CLI doctor for those diagnostics.
+`status`, `queue_list`, `capacity`, `limits`, `config_show` and `doctor` read the atomically published tick snapshot when config matches and it is younger than 60 s (`status`, `queue_list`, `limits`; a loaded watch cycle can exceed two intervals) or two watch intervals (`config_show`, `doctor`). A provider hold or reservation set after the tick is applied to the snapshot's limits and queue. Text reports snapshot age; JSON exposes `snapshot_age_s`. Missing/stale snapshots use a labeled bounded fallback. Snapshot doctor deliberately defers provider/version probes; use CLI doctor for those diagnostics.
 
 Default `mcp.max_response_kb` is 8 KiB with an 8 s response budget. Truncated results are JSON envelopes with response_id, fragment, next_response_offset and has_more. Call `response_page` with only the response_id and response_offset=next_response_offset, concatenate fragments, and do not repeat the original write/event read. Cached continuations belong to their server session and may expire.
 
@@ -44,7 +44,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 |---|---|---|---|
 | `status` | read | `as?`, `all?`, `cohort?`, `format?`, `detail?`, `offset?`, `limit?`, `capacity?` | Status of all agent tasks |
 | `events_since` | read | `as?`, `all?`, `cursor?`, `limit?`, `client?`, `since?`, `cohort?`, `peek?`, `format?`, `detail?` | What changed since the last look |
-| `gc_preview` | read | `as?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
+| `gc_preview` | read | `as?`, `purge_trash?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `request_id?`, `detail?`, `offset?`, `limit?`, `older_than?`, `merged?`, `cohort?` | Preview of the clean-up |
 | `limits` | read | `as?`, `format?`, `detail?` | Limits of simultaneous agents |
 | `set_limits` | write | `as?`, `quota?`, `overprovision?`, `profile?`, `reason?`, `claude?`, `codex?`, `queue_hold?`, `hold?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Request or change limits |
 | `reserve` | write | `as?`, `claude?`, `codex?`, `note?`, `until?`, `release?`, `confirm?`, `preview_token?`, `kimi?`, `glm?` | Reserve places for agents started by hand |
@@ -108,7 +108,7 @@ Arguments marked ? are optional. Provider fields below include enabled optional 
 | `manager_start` | write | `as?`, `project?`, `name?`, `model?`, `effort?`, `confirm?`, `preview_token?` | Start the supervising manager session |
 | `manager_stop` | write | `as?`, `confirm?`, `preview_token?` | Stop the manager session |
 | `notify_test` | write | `as?`, `phone?`, `confirm?`, `preview_token?` | Test desktop notifications; phone true explicitly sends to ntfy |
-| `gc` | write | `as?`, `request_id?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token |
+| `gc` | write | `as?`, `request_id?`, `purge_trash?`, `include_cache?`, `keep_cache?`, `keep?`, `force_dirty?`, `detail?`, `offset?`, `limit?`, `cohort?`, `older_than?`, `branches?`, `confirm?`, `preview_token?` | Reclaim disk space from finished tasks using the same protected plan as gc_preview. When watch accepts a plan request, poll gc with request_id to obtain the confirmation token |
 | `wall_read` | read | `as?`, `channel?`, `id?`, `since?`, `archive?`, `status?`, `kind?`, `limit?`, `before?` | Read the WALL |
 | `wall_post` | write | `as?`, `channel?`, `kind?`, `subject?`, `body?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Post on the WALL |
 | `wall_reply` | write | `as?`, `reply_to?`, `body?`, `subject?`, `kind?`, `refs?`, `to?`, `confirm?`, `preview_token?` | Reply on the WALL |

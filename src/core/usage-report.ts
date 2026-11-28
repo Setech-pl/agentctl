@@ -7,7 +7,8 @@ import type { AgentName } from './config.ts';
 import type { Context } from './context.ts';
 import { collectStatus } from './status.ts';
 import type { StatusRow } from './status.ts';
-import { allRecords, collectTaskUsage, formatReset, hhmm, openReader, readPlans, stalePlanLabel } from './usage.ts';
+import { collectTaskUsage, formatReset, hhmm, openReader, readPlans, stalePlanLabel } from './usage.ts';
+import { snapshotRecords } from './taskstore.ts';
 import type { PlanState, TaskUsage } from './usage.ts';
 import type { UsageReader } from './usage-sources.ts';
 import { addTokens, formatTokens, freshTokens, localDay, sumBuckets, zeroTokens } from './usage-parse.ts';
@@ -81,10 +82,11 @@ export async function collectUsage(ctx: Context, opts: UsageOptions = {}): Promi
   const sinceDay = localDay(now - parseAge(since));
   const today = localDay(now);
   const reader = opts.reader ?? openReader(config);
-  const records = allRecords(config);
+  const inventory = await snapshotRecords(config, true);
+  const records = inventory.all;
   const usage = collectTaskUsage(config, reader, records, now);
-  const rows = new Map((opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true }))).map((r) => [r.task, r] as const));
-  const plans = readPlans(config, reader, now);
+  const rows = new Map((opts.rows ?? (await collectStatus(ctx, { progress: false, archived: true, records: inventory }))).map((r) => [r.task, r] as const));
+  const plans = readPlans(config, reader, now, records, usage);
   if (probeNote && plans.claude) plans.claude.note = [plans.claude.note, probeNote].filter(Boolean).join('; ');
   reader.save();
 

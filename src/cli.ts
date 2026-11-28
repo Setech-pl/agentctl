@@ -1,5 +1,6 @@
 import { addHost, doctorHost, hostPlacementStats } from './core/host-commands.ts';
 import { setHostPause } from './core/host-availability.ts';
+import { linkBaseWarnings } from './core/links.ts';
 import { peakLines } from './core/peak.ts';
 import { holdUntil, providerHoldLines } from './core/provider-hold.ts';
 import { pulledCohortTasks, checkPulledClose } from './core/pulled.ts';
@@ -84,7 +85,8 @@ import { accountTasks, taskNames } from './core/task-accounting.ts';
 import { summarizeSpecs } from './core/summary.ts';
 import { DesktopNotifier, NOTIFIER_MEMORY_MS, notifierOptionsFor } from './core/notify.ts';
 import type { Notifier, NotifyResult } from './core/notify.ts';
-import { ensureWatchWindow, runWatch, WATCH_WINDOW } from './core/watch.ts';
+import { ensureWatchWindow, runWatch, WatchRestart, WATCH_RESTART_CODE, WATCH_WINDOW } from './core/watch.ts';
+import { runWatchWorker, superviseWatch, watchWorkerHeartbeat } from './core/watch-supervisor.ts';
 import { applyStatusLine, statusTmuxLine } from './core/statusline.ts';
 import { MANAGER_STATE_TEXT, MANAGER_WINDOW, managerAddress, managerAdvice, startManager, stopManager } from './core/manager.ts';
 import { BOARD_WINDOW, ensureWindow } from './core/windows.ts';
@@ -158,7 +160,7 @@ export function defaultDeps(): CliDeps {
     loadConfig: () => loadGlobalConfig(),
     confirm: process.stdin.isTTY ? askOnTerminal : undefined,
     readClipboard: () => readClipboard(new RealRunner()),
-    watchCommand: () => selfCommand('watch'),
+    watchCommand: () => selfCommand('watch --supervise'),
     statusLineCommand: () => selfCommand('status --tmux-line'),
     boardCommand: () => selfCommand('board'),
     selfArgv,
@@ -293,6 +295,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     }
   };
 
+  const configWarnings = new Set<string>();
   const contextFor = (dryRun: boolean, { migrate = true, silent = false } = {}): Context => {
     let config: GlobalConfig;
     try {
@@ -302,6 +305,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       const state = readConfigState(path.join(configDir(), 'config-state.json'));
       if (e instanceof AgentctlError && state && !state.ok) throw new AgentctlError(e.message, `${e.hint ? `${e.hint} ` : ''}The ${state.by} keeps the previous settings meanwhile (since ${state.at}).`);
       throw e;
+    }
+    for (const warning of config.warnings ?? []) {
+      if (configWarnings.has(warning)) continue;
+      configWarnings.add(warning);
+      deps.stderr(`warning: ${warning}\n`);
     }
     // TASK.md and setup.log used to live in the cache folder, where agents could delete them: move them to state_dir.
     const output = silent ? () => {} : line;
@@ -519,6 +527,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         applyCohortFlag(raws, opts.cohort);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
         if (!opts.dryRun && specs.some(spec => !spec.host && !spec.placement) && !(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
+        for (const spec of specs) if (!spec.host) {
+          const baseWarnings = await linkBaseWarnings(ctx.runner, spec.links, spec.repos);
+          if (opts.clip) spec.linkWarnings = [...(spec.linkWarnings ?? []), ...baseWarnings];
+          else if (!opts.json) for (const warning of baseWarnings) line(`WARNING ${spec.task}: ${warning}`);
+        }
         // The state of the plan of each provider the tasks run on, and the hint when the other one has room (it only says so: nothing is switched).
         const pathWarnings = specs.flatMap(spec => reportPathWarnings(ctx.config, spec).map(warning => `WARNING ${spec.task}: ${warning}`));
         const classWarnings = specs.flatMap(spec => (spec.warnings ?? []).map(warning => `WARNING ${spec.task}: ${warning}`));
@@ -1349,11 +1362,12 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('--verbose', 'full details, paginated with --offset/--limit')
     .option('--offset <n>', 'page offset', '0')
     .option('--limit <n>', 'page size (1–100)', '10')
+    .option('--purge-trash', 'preview previously trashed agentctl items; --apply confirms their removal')
     .option('--include-cache', 'owner-confirmed: also delete old, unreferenced task cache entries')
     .option('--keep <tasks...>', 'keep worktrees and cache for these task IDs in this GC run')
     .option('--keep-cache <tasks...>', 'keep all cache entries for these task IDs')
-    .addOption(new Option('--force-dirty <tasks...>', 'allow deleting dirty/unpushed worktrees for these task IDs').conflicts('forceDirtyAll'))
-    .option('--force-dirty-all', 'allow deleting dirty/unpushed worktrees in the selection; --apply always asks y/N')
+    .addOption(new Option('--force-dirty <tasks...>', 'include worktrees with uncommitted changes or unpushed commits in these task IDs').conflicts('forceDirtyAll'))
+    .option('--force-dirty-all', 'include worktrees with uncommitted changes or unpushed commits in the selection (apply requires y/N)')
     .option('--force-links', 'CLI only: allow removing a worktree referenced by links (other protections stay)')
     .option('--apply', 'do it (after showing the list and asking y/N); without it nothing is changed')
     .option('--older-than <age>', 'age of the files next to the reports before they go: 12h, 7d, 2w (default 7d)')
@@ -1362,13 +1376,13 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .option('-y, --yes', 'with --apply: do not ask')
     .option('--json', 'machine-readable output (the plan, or the result with --apply)')
     .action(
-      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; forceDirty?: string[]; forceDirtyAll?: boolean; includeCache?: boolean; keepCache?: string[]; keep?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
+      guarded(async (opts: { preview?: boolean; dryRun?: boolean; verbose?: boolean; offset: string; limit: string; forceLinks?: boolean; purgeTrash?: boolean; forceDirty?: string[]; forceDirtyAll?: boolean; includeCache?: boolean; keepCache?: string[]; keep?: string[]; apply?: boolean; olderThan?: string; branches?: boolean; cohort?: string; yes?: boolean; json?: boolean }) => {
         const ctx = contextFor(false, { migrate: false });
         if (opts.apply && (opts.preview || opts.dryRun)) throw new AgentctlError("--apply cannot be combined with --preview or --dry-run");
         const view = { detail: Boolean(opts.verbose), offset: Number(opts.offset), limit: Number(opts.limit) };
         if (!Number.isInteger(view.offset) || view.offset < 0 || !Number.isInteger(view.limit) || view.limit < 1 || view.limit > 100) throw new AgentctlError("offset must be >=0 and limit must be 1–100");
         const taskIds = (values?: string[]) => values?.flatMap(value => value.split(',').map(id => id.trim()).filter(Boolean));
-        const plan = await planGc(ctx, { olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirtyAll || taskIds(opts.forceDirty), includeCache: opts.includeCache, keepCache: taskIds(opts.keepCache), keep: taskIds(opts.keep) });
+        const plan = await planGc(ctx, { purgeTrash: opts.purgeTrash, olderThan: opts.olderThan, branches: opts.branches, cohort: opts.cohort, forceLinks: opts.forceLinks, forceDirty: opts.forceDirtyAll || taskIds(opts.forceDirty), includeCache: opts.includeCache, keepCache: taskIds(opts.keepCache), keep: taskIds(opts.keep) });
         if (!opts.apply) {
           if (opts.json) return line(JSON.stringify(gcView(plan, view), null, 2));
           for (const l of renderGc(plan, view)) line(l);
@@ -1376,6 +1390,7 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         }
         if (plan.items.length === 0) return opts.json ? line(JSON.stringify({ plan, done: [], failed: [], freedBytes: 0 }, null, 2)) : void renderGc(plan).forEach(line);
         const summary = renderGc(plan);
+        if (opts.purgeTrash) for (const item of plan.items) summary.push(`  ${item.target} (${item.detail})`);
         if (opts.forceDirtyAll) {
           summary.push('Worktree risk counts for the full selection:');
           for (const item of plan.items.filter(i => i.kind === 'worktree' && i.dirtyFiles !== undefined)) {
@@ -1503,13 +1518,64 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     );
 
   program
+    .command('config')
+    .description('Inspect configuration compatibility.')
+    .command('downgrade-check')
+    .description('List configuration incompatible with 0.26 and remove expired timed limit overrides.')
+    .requiredOption('--to <version>', '0.26.x, 0.26.0 or 0.26.1')
+    .action(guarded(async (opts: {to: string}) => {
+      const {downgradeCheck} = await import('./core/config-compat.ts');
+      const result = await downgradeCheck(contextFor(false, {migrate: false}), opts.to);
+      line(result.incompatible.length ? `Config keys rejected by ${opts.to}: ${result.incompatible.join(', ')}` : `Config keys are compatible with ${opts.to}.`);
+      if (result.pruned.length) line(`Removed expired overrides: ${result.pruned.join(', ')}`);
+      if (result.reservations.length) line(`0.26 ignores expiry for ${result.reservations.join(', ')}. Release timed reservations before switching.`);
+    }));
+
+  program
+    .command('upgrade-health', {hidden: true})
+    .description('Check a newly restarted stable watcher from agentctl-update.')
+    .requiredOption('--expect <version>', 'expected candidate version')
+    .requiredOption('--since <ms>', 'earliest valid watch launch time in Unix milliseconds')
+    .action(guarded(async (opts: { expect: string; since: string }) => {
+      const since = Number(opts.since);
+      if (!Number.isSafeInteger(since) || since <= 0) throw new AgentctlError('Invalid watch launch timestamp');
+      const { verifyUpgrade } = await import('./core/upgrade-health.ts');
+      // A blocked watch or read cannot keep the stable updater waiting indefinitely.
+      const timeout = setTimeout(() => {
+        deps.stderr('Upgrade health check exceeded 3 minutes.\n');
+        process.exit(1);
+      }, Math.max(0, since + 180_000 - Date.now()));
+      try {
+        const diagnosis = await verifyUpgrade(contextFor(false, {migrate: false, silent: true}), opts.expect, since);
+        line(JSON.stringify(diagnosis));
+      } finally { clearTimeout(timeout); }
+    }));
+
+  program
+    .command('canary')
+    .description('Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux.')
+    .requiredOption('--from <home>', 'source AGENTCTL_HOME')
+    .option('--minutes <minutes>', 'minimum number of minutes to observe', '30')
+    .action(guarded(async (opts: { from: string; minutes: string }) => {
+      const minutes = Number(opts.minutes);
+      if (!Number.isFinite(minutes) || minutes <= 0) throw new AgentctlError('--minutes must be positive');
+      const interrupt = deps.interruptSignal?.();
+      try {
+        const { shadowCanary } = await import('./core/canary-mirror.ts');
+        const result = await shadowCanary(opts.from, minutes, line, interrupt?.signal);
+        line(JSON.stringify(result, null, 2));
+      } finally { interrupt?.dispose(); }
+    }));
+
+  program
     .command('watch')
     .description('Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died.')
     .option('--tmux', `run it in window "${WATCH_WINDOW}" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session`)
     .option('--restart', 'with --tmux: restart the window identified by its stable role')
     .option('--no-status-line', 'with --tmux: leave the status bar of the session alone')
+    .addOption(new Option('--supervise', 'run the tmux watch supervisor').hideHelp())
     .action(
-      guarded(async (opts: { tmux?: boolean; statusLine?: boolean; restart?: boolean }) => {
+      guarded(async (opts: { tmux?: boolean; statusLine?: boolean; restart?: boolean; supervise?: boolean }) => {
         const ctx = contextFor(false);
         if (opts.tmux) {
           if (opts.restart) await ctx.tmux.killRole('watch');
@@ -1517,17 +1583,30 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
           return;
         }
         const interrupt = deps.interruptSignal?.();
+        const endHeartbeat = opts.supervise ? () => {} : watchWorkerHeartbeat();
         try {
+          if (opts.supervise) {
+            await superviseWatch(ctx, () => runWatchWorker(deps.selfArgv?.() ?? selfArgv(), interrupt?.signal), interrupt?.signal);
+            return;
+          }
           const note = await loggedRun(startLogPath(ctx.config, 'watch'), 'watch', async () => {
             const notifier = await makeNotifier(ctx);
             const self = deps.selfArgv?.();
-            await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx) });
+            await runWatch(ctx, notifier, { insideTmux: deps.insideTmux, ...(interrupt ? { signal: interrupt.signal } : {}), ...(self ? { self } : {}), configStore: new ConfigStore(deps.loadConfig, ctx.config), remakeNotifier: () => makeNotifier(ctx),
+              ...(process.env.AGENTCTL_WATCH_WORKER === '1' || process.env.AGENTCTL_WATCH_SUPERVISED === '1' ? {onStall: () => { throw new WatchRestart(); }} : {}) });
           });
           if (note && !interrupt?.signal.aborted) throw new AgentctlError(note);
         } catch (e) {
+          if (e instanceof WatchRestart) {
+            endHeartbeat();
+            if (ctx.runner instanceof RealRunner) process.exit(WATCH_RESTART_CODE);
+            exitCode = WATCH_RESTART_CODE;
+            return;
+          }
           await (await makeNotifier(ctx)).notify('agentctl', `watch failed: ${errorMessage(e).split('\n')[0]}; restart: agentctl watch --tmux --restart`).catch(() => undefined);
           throw e;
         } finally {
+          endHeartbeat();
           interrupt?.dispose();
         }
       }),

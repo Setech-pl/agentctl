@@ -4,8 +4,12 @@ import path from 'node:path';
 import { it } from 'node:test';
 import { Context } from '../src/core/context.ts';
 import { runDoctor } from '../src/core/doctor.ts';
-import { MCP_TOOLS, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
+import { collectDisk } from '../src/core/disk.ts';
+import { MCP_TOOLS, publishDegradedMcpSnapshot, publishMcpSnapshot } from '../src/core/mcp-tools.ts';
+import { snapshotRecords, TaskRecordIndex } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
+import { automaticProviderHold } from '../src/core/provider-hold.ts';
+import { saveEntry } from '../src/core/queue.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 
 const scratch = useScratch();
@@ -17,6 +21,155 @@ function deferred<T>() {
 
 const diskStats = (free: number) => ({ bavail: free, blocks: 1000, bsize: 1024 ** 3 });
 const snapshotFile = (ctx: Context) => path.join(ctx.config.stateDir, 'mcp-state-snapshot.json');
+
+it('REL0272-HEADER-PIPELINE: a slow early header does not delay reading the remaining inventory', async t => {
+  const config = makeConfig(scratch.sub('header-pipeline'));
+  for (let i = 0; i < 110; i++) seedTask(config, `PIPE-${String(i).padStart(3, '0')}`);
+  const entered = deferred<void>(), held = deferred<void>();
+  let openedLast = false;
+  t.mock.method(fs.promises, 'lstat', async (file: fs.PathLike) => fs.lstatSync(file, {bigint: true}));
+  t.mock.method(fs.promises, 'open', async (file: string) => {
+    const task = path.basename(path.dirname(file));
+    if (task === 'pipe-000') {
+      entered.resolve();
+      await held.promise;
+    }
+    if (task === 'pipe-109') openedLast = true;
+    const contents = fs.readFileSync(file);
+    let offset = 0;
+    return {async read(buffer: Buffer) {
+      const bytesRead = contents.copy(buffer, 0, offset);
+      offset += bytesRead;
+      return {bytesRead, buffer};
+    }, async close() {}};
+  });
+  const reading = snapshotRecords(config, true);
+  try {
+    await entered.promise;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.ok(openedLast, 'an early stalled header held an entire batch open');
+  } finally {
+    held.resolve();
+    assert.equal((await reading).current.length, 110);
+  }
+});
+
+it('REL0272-INDEX-ROOT-WRITES: snapshot and progress writes do not recheck unchanged active tasks', async t => {
+  const config = makeConfig(scratch.sub('index-root-writes'));
+  for (let i = 0; i < 4; i++) seedTask(config, `INDEX-${i}`);
+  const index = new TaskRecordIndex();
+  t.after(() => index.close());
+  const watch = fs.watch;
+  t.mock.method(fs, 'watch', (file: fs.PathLike) => watch(file));
+  const stat = fs.promises.stat;
+  let version = 1n;
+  t.mock.method(fs.promises, 'stat', async (file: fs.PathLike) => {
+    const meta = await stat(file, {bigint: true});
+    if (file === config.stateDir) meta.ctimeNs = version;
+    return meta;
+  });
+  assert.equal((await index.current(config, 0)).length, 4);
+  fs.writeFileSync(path.join(config.stateDir, 'watch-progress.json'), '{}');
+  version++;
+  const observed = t.mock.method(fs.promises, 'lstat');
+  assert.equal((await index.current(config, 1)).length, 4);
+  assert.equal(observed.mock.calls.filter(call => path.basename(path.dirname(String(call.arguments[0]))).startsWith('index-')).length, 0);
+  seedTask(config, 'NEW-INDEXED');
+  version++;
+  assert.ok((await index.current(config, 2)).some(task => task.task === 'NEW-INDEXED'));
+});
+
+it('REL0272-COLD-SNAPSHOT: an initial scan failure does not publish a rowless replacement', () => {
+  const config = makeConfig(scratch.sub('cold-degraded'));
+  const ctx = new Context(new DiskRunner({dryRun: false}), config, () => {});
+  publishDegradedMcpSnapshot(ctx, undefined, 'status collection');
+  assert.equal(fs.existsSync(snapshotFile(ctx)), false);
+});
+
+it('REL0272-INVENTORY-EIO: a directory read error preserves the last complete snapshot', async t => {
+  const config = makeConfig(scratch.sub('inventory-eio'));
+  seedTask(config, 'KEEP-GOOD-ROW', {closed: true});
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  const memory = new WatchMemory();
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  const tick = () => watchTick(ctx, memory, {notify: async () => {}});
+  await tick();
+  const good = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  assert.equal(good.rows[0]?.task, 'KEEP-GOOD-ROW');
+  await runner.sleep(61_000);
+  const readdir = fs.promises.readdir;
+  t.mock.method(fs.promises, 'readdir', async (file: fs.PathLike, options: Parameters<typeof readdir>[1]) => {
+    if (file === config.stateDir) throw Object.assign(Error('state directory I/O failure'), {code: 'EIO'});
+    return Reflect.apply(readdir, fs.promises, [file, options]);
+  });
+  await tick();
+  const degraded = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  assert.equal(degraded.degraded, 'status collection');
+  assert.equal(degraded.at, good.at);
+  assert.deepEqual(degraded.rows, good.rows);
+});
+
+it('REL0272-MAINTENANCE: a delayed usage observation does not delay publishing status', async t => {
+  const config = makeConfig(scratch.sub('slow-usage'));
+  seedTask(config, 'READY-TO-OBSERVE', {closed: true});
+  const ctx = new Context(new DiskRunner({dryRun: false, respond: new FakeTmux().respond}), config, () => {});
+  const finished = deferred<void>();
+  const memory = new WatchMemory(async (name, work) => {
+    if (name === 'usage') await finished.promise;
+    return work();
+  });
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  const tick = watchTick(ctx, memory, {notify: async () => {}}, {backgroundStarts: true});
+  try {
+    // This deadline breaks a deterministic circular dependency in the old serial scheduler.
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([tick, new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(Error('usage still blocks status publication')), 5000); })]);
+    } finally { clearTimeout(timeout); }
+    const snapshot = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+    assert.equal(snapshot.rows[0]?.task, 'READY-TO-OBSERVE');
+  } finally {
+    finished.resolve();
+    await tick;
+    await Promise.allSettled(memory.maintenance);
+  }
+});
+
+it('REL0272-DISK-ASYNC: watch can resolve worktree volume identity off the event loop', async t => {
+  const root = scratch.sub('async-disk');
+  const config = makeConfig(root);
+  const worktree = path.join(root, 'checkout');
+  fs.mkdirSync(worktree);
+  const record = seedTask(config, 'VOLUME-SAMPLE', {repos: [{path: root, worktree}]});
+  const ctx = new Context(new DiskRunner({dryRun: false}), config, () => {});
+  const stat = t.mock.method(fs, 'statSync');
+  const report = await collectDisk(ctx, undefined, {records: [record], asyncPaths: true});
+  assert.equal(report.worktreeCount, 1);
+  assert.ok(report.volumes.some(volume => volume.device !== null && volume.availableBytes !== null));
+  assert.ok(!stat.mock.calls.some(call => call.arguments[0] === worktree));
+});
+
+it('REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age', async () => {
+  const config = makeConfig(scratch.sub('degraded-rows'));
+  seedTask(config, 'LAST-GOOD', {closed: true});
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  await publishMcpSnapshot(ctx);
+  const good = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  await runner.sleep(13_000);
+  publishDegradedMcpSnapshot(ctx, good.capacity.disk, 'status collection');
+  const degraded = JSON.parse(fs.readFileSync(snapshotFile(ctx), 'utf8'));
+  assert.deepEqual(degraded.rows, good.rows);
+  assert.equal(degraded.at, good.at);
+  assert.equal(degraded.degraded, 'status collection');
+  const deps = {context: () => ctx, notify: async () => {}};
+  const response = await MCP_TOOLS.find(tool => tool.name === 'status')!.run(deps, {format: 'json', all: true});
+  const status = JSON.parse(response.text);
+  assert.equal(status.tasks[0]?.task, 'LAST-GOOD');
+  assert.equal(status.snapshot_age_s, 13);
+  assert.match(status.snapshot_note, /status collection/);
+});
 
 it('SNAP0247: a hung disk notification times out while watch publishes and continues ticking', async t => {
   const config = makeConfig(scratch.sub('disk-watch'), 'watch: {interval: 2}\n');
@@ -117,4 +270,53 @@ it('SNAP0247: a stuck statfs falls back to df and keeps worktree sizes independe
     assert.equal(signal.worktreeBytes, null);
     assert.equal(signal.measuring, true);
   } finally { stat.resolve(diskStats(1)); await pending; }
+});
+
+it('REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot', async () => {
+  const config = makeConfig(scratch.sub('snapshot-hold'), 'limits: {claude: 2}\n');
+  const tmux = new FakeTmux();
+  const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  const repo = scratch.sub('snapshot-hold/app');
+  await saveEntry(ctx, {seq: 1, order: 1, task: 'HOLD-WAIT', status: 'queued', priority: 'normal', agent: 'claude', model: 'opus', effort: 'high', after: [],
+    queuedAt: new Date(runner.now()).toISOString(), spec: `---\ntask: HOLD-WAIT\nagent: claude\nrepos:\n  - {path: ${repo}, worktree: ${repo}-hold}\n---\nPrompt.\n`});
+  await publishMcpSnapshot(ctx);
+  // Watch maintenance (limited recovery) detects a quota error after the snapshot was published.
+  await automaticProviderHold(ctx, 'claude', 'ROW-4:1', 'provider quota/rate-limit error');
+  const deps = {context: () => ctx, notify: async () => {}};
+  const read = async (name: string) => (await MCP_TOOLS.find(tool => tool.name === name)!.run(deps, {format: 'json'})).text;
+  const limits = await read('limits');
+  assert.doesNotMatch(limits, /fallback|budget exhausted/i);
+  const claude = JSON.parse(limits).providers.find((p: {agent: string}) => p.agent === 'claude');
+  assert.equal(claude.free, 0);
+  assert.equal(claude.providerHold?.source, 'automatic');
+  const queue = await read('queue_list');
+  assert.doesNotMatch(queue, /fallback|budget exhausted/i);
+  assert.match(JSON.parse(queue).find((q: {task: string}) => q.task === 'HOLD-WAIT').startCondition, /claude: wstrzymane/);
+});
+
+it('REL0272-STATUS-AGE: status serves a healthy 25 s old snapshot (loaded tick plus interval) instead of the fallback', async () => {
+  const config = makeConfig(scratch.sub('status-age'), 'watch: {interval: 5}\n');
+  const runner = new DiskRunner({dryRun: false, respond: new FakeTmux().respond});
+  const ctx = new Context(runner, config, () => {});
+  await publishMcpSnapshot(ctx);
+  await runner.sleep(25_000);
+  const text = (await MCP_TOOLS.find(tool => tool.name === 'status')!.run({context: () => ctx, notify: async () => {}}, {format: 'json'})).text;
+  assert.doesNotMatch(text, /fallback|budget exhausted/i);
+  assert.ok(Array.isArray(JSON.parse(text).tasks));
+});
+
+it('W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval', async () => {
+  const config = makeConfig(scratch.sub('recent-admission-snapshot'), 'watch: {interval: 2}\n');
+  const tmux = new FakeTmux();
+  const runner = new DiskRunner({dryRun: false, respond: tmux.respond});
+  const ctx = new Context(runner, config, () => {});
+  await publishMcpSnapshot(ctx);
+  await runner.sleep(20_000);
+  const deps = {context: () => ctx, notify: async () => {}};
+  for (const name of ['queue_list', 'limits', 'status']) {
+    const result = await MCP_TOOLS.find(tool => tool.name === name)!.run(deps, {});
+    assert.match(result.text, /Watch snapshot age: 20.0 s/, name);
+    assert.doesNotMatch(result.text, /fallback/i, name);
+  }
 });

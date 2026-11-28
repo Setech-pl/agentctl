@@ -9,6 +9,7 @@ import { PATTERN_FLAGS } from './config.ts';
 import type { AgentName, AgentSettings } from './config.ts';
 import type { Context } from './context.ts';
 import { withFileLock } from './file-lock.ts';
+import { commandStageRemaining } from './command-stage.ts';
 import { kimiSettledView, kimiWelcomeShown } from './ready.ts';
 import { classifyScreen, inputVisible, startupDialogShown } from './state.ts';
 import { codexQueueKey, areaKey, fieldArea, fieldText, inspectField, pasteImage, readsAs } from './input-field.ts';
@@ -468,6 +469,8 @@ async function deliverOnce(ctx: Context, window: string): Promise<'sent' | 'pend
       await setHeaderFields(ctx.runner, file, { prompt_delivery: 'needs-attention', prompt_error: 'Composer is not structurally ready; initial prompt was not pasted and remains in TASK.md' });
       return 'needs-attention';
     }
+    // Keep the pending prompt durable for the next tick if this admission turn lacks time for paste and Enter.
+    if (commandStageRemaining() < 12_000) return 'pending';
     record.deliveryWasBusy = busyFollowup;
     record.deliveryStartedAt = new Date(ctx.runner.now()).toISOString();
     record.deliveryOutputBaseline = outputFingerprint(before.stdout, settings.deliveryPattern);

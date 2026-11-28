@@ -1,3 +1,4 @@
+import { parseAge } from './archive.ts';
 import { parseChatQuotas } from './chat-quotas.ts';
 import type { ChatQuotas } from './chat-quotas.ts';
 import { effectiveLimitConfig, parseLimitSettings } from './limit-profiles.ts';
@@ -29,6 +30,19 @@ export const AGENT_NAMES = PROVIDER_IDS;
 export type AgentName = ProviderId;
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type Effort = (typeof EFFORTS)[number];
+
+export const AUTO_GC_CATEGORIES = ['closed_clean_worktrees', 'stale_node_modules', 'own_trash', 'closed_task_cache'] as const;
+export type AutoGcCategory = (typeof AUTO_GC_CATEGORIES)[number];
+export interface AutoGcSettings {
+  enabled: boolean;
+  dryRun: boolean;
+  triggerFreeGb: number;
+  targetFreeGb: number;
+  olderThan: string;
+  categories: AutoGcCategory[];
+  maxPerRunGb: number;
+  cohortsExclude: string[];
+}
 
 export interface Link {
   from: string;
@@ -176,9 +190,11 @@ export interface GlobalConfig extends Layer {
   /** Token usage and plan limits: warning thresholds, the hold of the queue, the tmux status line, where the agents keep their logs. */
   usage: UsageSettings;
   guideLang: 'en' | 'pl';
-  disk: { minFreeStartGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number };
+  disk: { minFreeStartGb: number; minFreeStateGb: number; worktreeSharePercent: number; warnGb: number; criticalGb: number; workers: number; measurementTimeoutS: number; autoGc: AutoGcSettings };
   git: { timeoutS: number };
-  gc: { afterIntegration: 'off' | 'propose' };
+  startLockStaleS: number;
+  setupTimeoutS: number;
+  gc: { afterIntegration: 'off' | 'propose'; deleteMode: 'delete' | 'trash' };
   capacity: { loadThreshold?: number; snapshot: boolean; staleMinutes: number; sampleLimit: number; thresholds: number[]; codexRefresh: boolean; claudeUsageProbe: boolean; claudeUsageProbeIntervalMinutes: number; kimiUsageProbe?: boolean; kimiUsageProbeModel?: string };
   /** Set by a long-running process (watch, MCP) when the file on disk does not load and the previous settings stay in force. */
   reloadWarning?: string;
@@ -242,6 +258,8 @@ export interface BoardSelection {
 export interface QueueSettings {
   /** `false`: `watch` never starts a queued task (entries can still be added and listed). */
   enabled: boolean;
+  /** Hold automatic admission above capacity.load_threshold. */
+  holdOnLoad: boolean;
   /** Most queued tasks that `watch` has in the middle of starting (worktree, setup, waiting for the agent) at the same time. */
   parallelStarts: number;
   maxParallelSetups: number;
@@ -284,6 +302,7 @@ export interface CollisionSettings {
 }
 
 export interface McpSettings {
+  gcScope: 'owner' | 'own-cohort' | 'all';
   maxResponseKb: number;
   client?: string;
   /** Write tools the chat may call; empty (the default): the server only reads. */
@@ -389,7 +408,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'close', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'launch', 'wall', 'hosts', 'placement', 'perf', 'quotas'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'start_lock_stale_s', 'launch', 'wall', 'hosts', 'placement', 'perf', 'quotas'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy', 'change_policy', 'profiles', 'schedule', 'active_profile', 'timed_overrides'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -400,8 +419,8 @@ export const NTFY_KEYS = ['server', 'topic', 'token', 'events', 'priority', 'inc
 export const AWAY_KEYS = ['auto_idle'];
 export const MANAGER_KEYS = ['project', 'name', 'model', 'effort', 'guide', 'autostart'];
 export const BOARD_KEYS = ['pulled_collapse_after', 'pulled_auto_close_after', 'auto_hide_pulled_dead', 'mouse', 'return_key', 'selected_color', 'selection', 'model_versions', 'list_width', 'window_title', 'cohorts_recent'];
-export const MCP_KEYS = ['allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
-export const QUEUE_KEYS = ['enabled', 'parallel_starts', 'max_parallel_setups'];
+export const MCP_KEYS = ['gc_scope', 'allow', 'allow_rm_worktree', 'client', 'max_response_kb'];
+export const QUEUE_KEYS = ['enabled', 'hold_on_load', 'parallel_starts', 'max_parallel_setups'];
 export const CANCEL_KEYS = ['grace'];
 export const USAGE_KEYS = ['warn', 'critical', 'queue_hold', 'status_line', 'claude_tap', ...PROVIDER_IDS.map(id => `${id}_dir`)];
 export const COLLISION_KEYS = ['enabled', 'interval', 'notify', 'ignore'];
@@ -573,7 +592,7 @@ function parseLayer(obj: Record<string, unknown>, where: string, p: Problems): L
   if (report) layer.report = report;
   if (reports.length > 1) layer.reportAlt = reports.slice(1);
   if (isObject(obj.setup)) {
-    checkKeys(obj.setup, ['commands', 'node_modules'], `${where}.setup`, p);
+    checkKeys(obj.setup, where === 'config' ? ['commands', 'node_modules', 'timeout_s'] : ['commands', 'node_modules'], `${where}.setup`, p);
     if (obj.setup.commands !== undefined) layer.setup = parseSetup(obj.setup.commands, `${where}.setup.commands`, p);
     layer.nodeModules = parseEnumValue(obj.setup.node_modules, ['clone', 'off'] as const, `${where}.setup.node_modules`, p);
   } else if (obj.setup !== undefined && obj.setup !== null) layer.setup = parseSetup(obj.setup, `${where}.setup`, p);
@@ -935,7 +954,7 @@ function parseBoard(v: unknown, p: Problems): BoardSettings {
  * of agentctl names tools this one does not know). The offending entry is ignored and said so in `warnings`.
  */
 function parseMcp(v: unknown): McpSettings {
-  const mcp: McpSettings = { maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
+  const mcp: McpSettings = { gcScope: 'all', maxResponseKb: 8, allow: [], allowRmWorktree: false, warnings: [] };
   if (v === undefined || v === null) return mcp;
   if (!isObject(v)) {
     mcp.warnings.push(`config.mcp must be a mapping like {allow: [${MCP_WRITE_TOOLS.join(', ')}]}: ignored, writing is off`);
@@ -943,6 +962,7 @@ function parseMcp(v: unknown): McpSettings {
   }
   const q = new Problems();
   checkKeys(v, MCP_KEYS, 'config.mcp', q);
+  if (v.gc_scope !== undefined) mcp.gcScope = parseEnumValue(v.gc_scope, ['owner', 'own-cohort', 'all'] as const, 'config.mcp.gc_scope', q) ?? 'owner';
   if (v.client !== undefined) { if (typeof v.client === 'string' && v.client.trim()) mcp.client = v.client.trim(); else q.add('config.mcp.client must be nonempty text'); }
   if (v.max_response_kb !== undefined) {
     if (typeof v.max_response_kb === 'number' && Number.isFinite(v.max_response_kb) && v.max_response_kb >= 1 && v.max_response_kb <= 1024) mcp.maxResponseKb = v.max_response_kb;
@@ -964,7 +984,7 @@ function parseMcp(v: unknown): McpSettings {
 }
 
 function parseQueue(v: unknown, p: Problems): QueueSettings {
-  const queue: QueueSettings = { enabled: true, parallelStarts: 2, maxParallelSetups: 2 };
+  const queue: QueueSettings = { enabled: true, holdOnLoad: false, parallelStarts: 2, maxParallelSetups: 2 };
   if (v === undefined || v === null) return queue;
   if (!isObject(v)) {
     p.add('config.queue must be a mapping like {enabled: true, parallel_starts: 2}');
@@ -974,6 +994,10 @@ function parseQueue(v: unknown, p: Problems): QueueSettings {
   if (v.enabled !== undefined) {
     if (typeof v.enabled === 'boolean') queue.enabled = v.enabled;
     else p.add('config.queue.enabled must be true or false');
+  }
+  if (v.hold_on_load !== undefined) {
+    if (typeof v.hold_on_load === 'boolean') queue.holdOnLoad = v.hold_on_load;
+    else p.add('config.queue.hold_on_load must be true or false');
   }
   if (v.parallel_starts !== undefined) {
     if (typeof v.parallel_starts === 'number' && Number.isInteger(v.parallel_starts) && v.parallel_starts > 0) queue.parallelStarts = v.parallel_starts;
@@ -1083,6 +1107,38 @@ function readYamlFile(file: string): unknown {
 /** Directory of the global config; AGENTCTL_HOME overrides ~/.agentctl. */
 export function configDir(env: NodeJS.ProcessEnv = process.env): string {
   return env.AGENTCTL_HOME ? resolvePath(env.AGENTCTL_HOME) : path.join(os.homedir(), '.agentctl');
+}
+
+function parseAutoGc(raw: unknown, disk: { warnGb: number; minFreeStartGb: number }, p: Problems): AutoGcSettings {
+  const where = 'config.disk.auto_gc';
+  const value = isObject(raw) ? raw : {};
+  if (raw !== undefined && !isObject(raw)) p.add(`${where} must be a mapping`);
+  checkKeys(value, ['enabled', 'dry_run', 'trigger_free_gb', 'target_free_gb', 'older_than', 'categories', 'max_per_run_gb', 'cohorts_exclude'], where, p);
+  const bool = (key: string) => {
+    const v = value[key];
+    if (v !== undefined && typeof v !== 'boolean') p.add(`${where}.${key} must be a boolean`);
+    return v === true;
+  };
+  const number = (key: string, fallback: number) => {
+    const v = value[key];
+    if (v === undefined) return fallback;
+    if (typeof v === 'number' && Number.isFinite(v * 1024 ** 3) && v > 0) return v;
+    p.add(`${where}.${key} must be positive`);
+    return fallback;
+  };
+  const triggerFreeGb = number('trigger_free_gb', disk.warnGb);
+  const targetFreeGb = number('target_free_gb', Math.max(triggerFreeGb, disk.warnGb, disk.minFreeStartGb));
+  if (targetFreeGb < triggerFreeGb) p.add(`${where}.target_free_gb must be at least trigger_free_gb`);
+  const olderThan = value.older_than === undefined ? '2d' : typeof value.older_than === 'string' ? value.older_than : '';
+  try { if (!Number.isFinite(parseAge(olderThan))) throw new Error(); }
+  catch { p.add(`${where}.older_than must be a positive duration, for example 2d`); }
+  const categories = value.categories === undefined ? [...AUTO_GC_CATEGORIES] :
+    parseStringList(value.categories, `${where}.categories`, p);
+  if (categories.some(category => !(AUTO_GC_CATEGORIES as readonly string[]).includes(category))) p.add(`${where}.categories must contain only ${AUTO_GC_CATEGORIES.join(', ')}`);
+  if (new Set(categories).size !== categories.length) p.add(`${where}.categories must be distinct`);
+  return { enabled: bool('enabled'), dryRun: bool('dry_run'), triggerFreeGb, targetFreeGb, olderThan,
+    categories: categories as AutoGcCategory[], maxPerRunGb: number('max_per_run_gb', 50),
+    cohortsExclude: parseStringList(value.cohorts_exclude, `${where}.cohorts_exclude`, p) };
 }
 
 export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), text?: string): GlobalConfig {
@@ -1326,22 +1382,23 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     if (typeof raw.report.settle_s === 'number' && Number.isFinite(raw.report.settle_s) && raw.report.settle_s >= 0) reportSettleS = raw.report.settle_s;
     else p.add('config.report.settle_s must be a nonnegative number');
   }
-  const disk = { minFreeStartGb: 30, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
+  const diskCounters = { minFreeStartGb: 30, minFreeStateGb: 5, worktreeSharePercent: 20, warnGb: 50, criticalGb: 20, workers: 2, measurementTimeoutS: 600 };
   const git = { timeoutS: 600 };
   for (const [section, target, fields] of [
-    ['disk', disk, { min_free_start_gb: 'minFreeStartGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
+    ['disk', diskCounters, { min_free_start_gb: 'minFreeStartGb', min_free_state_gb: 'minFreeStateGb', worktree_share_percent: 'worktreeSharePercent', warn_gb: 'warnGb', critical_gb: 'criticalGb', workers: 'workers', measurement_timeout_s: 'measurementTimeoutS' }],
     ['git', git, { timeout_s: 'timeoutS' }],
   ] as const) {
     const value = raw[section];
     if (value === undefined) continue;
     if (!isObject(value)) { p.add(`config.${section} must be a mapping`); continue; }
-    checkKeys(value, Object.keys(fields), `config.${section}`, p);
+    checkKeys(value, [...Object.keys(fields), ...(section === 'disk' ? ['auto_gc'] : [])], `config.${section}`, p);
     for (const [key, field] of Object.entries(fields)) {
       if (value[key] === undefined) continue;
       if (typeof value[key] !== 'number' || !Number.isFinite(value[key]) || value[key] <= 0) p.add(`config.${section}.${key} must be positive`);
       else (target as unknown as Record<string, number>)[field] = value[key];
     }
   }
+  const disk = { ...diskCounters, autoGc: parseAutoGc(isObject(raw.disk) ? raw.disk.auto_gc : undefined, diskCounters, p) };
   if (disk.worktreeSharePercent > 100) p.add('config.disk.worktree_share_percent must not exceed 100');
   if (!Number.isInteger(disk.workers) || disk.workers < 1 || disk.workers > 8) p.add('config.disk.workers must be an integer from 1 to 8');
   if (disk.criticalGb > disk.warnGb) p.add('config.disk.critical_gb must not exceed warn_gb');
@@ -1364,12 +1421,21 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
   const perf = parsePerf(raw.perf, p);
   const quotas = parseChatQuotas(raw.quotas, p);
   const limitSettings = parseLimitSettings(raw.limits, providers, limits, quotas, p);
-  const gc: GlobalConfig['gc'] = { afterIntegration: 'propose' };
+  const positiveSeconds = (value: unknown, key: string, fallback: number): number => {
+    if (value === undefined) return fallback;
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
+    p.add(`config.${key} must be positive`);
+    return fallback;
+  };
+  const startLockStaleS = positiveSeconds(raw.start_lock_stale_s, 'start_lock_stale_s', 180);
+  const setupTimeoutS = positiveSeconds(isObject(raw.setup) ? raw.setup.timeout_s : undefined, 'setup.timeout_s', 900);
+  const gc: GlobalConfig['gc'] = { afterIntegration: 'propose', deleteMode: 'delete' };
   if (raw.gc !== undefined) {
     if (!isObject(raw.gc)) p.add('config.gc must be a mapping');
     else {
-      checkKeys(raw.gc, ['after_integration'], 'config.gc', p);
+      checkKeys(raw.gc, ['after_integration', 'delete_mode'], 'config.gc', p);
       gc.afterIntegration = parseEnumValue(raw.gc.after_integration, ['off', 'propose'] as const, 'config.gc.after_integration', p) ?? gc.afterIntegration;
+      gc.deleteMode = parseEnumValue(raw.gc.delete_mode, ['delete', 'trash'] as const, 'config.gc.delete_mode', p) ?? gc.deleteMode;
     }
   }
   p.throwIfAny(`Invalid config ${file}:`, 'Fix the listed keys; see the README section "Configuration".');
@@ -1379,7 +1445,7 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, wall, hosts, ...(localHost ? { localHost } : {}), placement, perf, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS, setupTimeoutS, wall, hosts, ...(localHost ? { localHost } : {}), placement, perf, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return effectiveLimitConfig(config, now);

@@ -72,6 +72,10 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`pull`](#agentctl-pull) | Copy the task report to the clipboard and print its path (without a report: last 40 lines of the window). --ready: all new reports at once. |
 | [`close`](#agentctl-close) | Kill the task windows; --rm-worktree also removes their git worktrees (branches are kept). Shows the list and asks y/N first. |
 | [`cancel`](#agentctl-cancel) | Abandon tasks: a task at work is interrupted, given cancel.grace seconds to stop, and its window is closed; a task in the queue is taken out of it. They become cancelled (not closed). The worktree and the branch stay unless --rm-worktree (worktree only, never the branch). Shows the list and asks y/N first. |
+| [`config`](#agentctl-config) | Inspect configuration compatibility. |
+| [`config downgrade-check`](#agentctl-config-downgrade-check) | List configuration incompatible with 0.26 and remove expired timed limit overrides. |
+| [`upgrade-health`](#agentctl-upgrade-health) | Check a newly restarted stable watcher from agentctl-update. |
+| [`canary`](#agentctl-canary) | Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux. |
 | [`watch`](#agentctl-watch) | Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died. |
 | [`board`](#agentctl-board) | Full-screen overview of the tasks: state, progress, a live preview of the selected window, and keys to switch to it, message, interrupt, pull and close. |
 | [`report`](#agentctl-report) | Where the report of a task is: the canonical path (the first "report:" entry) and, when the agent wrote it elsewhere, the source it was copied from. Without --from it also shows what the search finds now (the last lines of the window, the "report:" list); with --from \<path> that file becomes the source and is copied to the canonical path (not over a report the agent wrote, unless --force). |
@@ -1280,11 +1284,12 @@ agentctl gc [options]
 | `--verbose` | full details, paginated with --offset/--limit |  |
 | `--offset <n>` | page offset | default `0` |
 | `--limit <n>` | page size (1–100) | default `10` |
+| `--purge-trash` | preview previously trashed agentctl items; --apply confirms their removal |  |
 | `--include-cache` | owner-confirmed: also delete old, unreferenced task cache entries |  |
 | `--keep <tasks...>` | keep worktrees and cache for these task IDs in this GC run |  |
 | `--keep-cache <tasks...>` | keep all cache entries for these task IDs |  |
-| `--force-dirty <tasks...>` | allow deleting dirty/unpushed worktrees for these task IDs |  |
-| `--force-dirty-all` | allow deleting dirty/unpushed worktrees in the selection; --apply always asks y/N |  |
+| `--force-dirty <tasks...>` | include worktrees with uncommitted changes or unpushed commits in these task IDs |  |
+| `--force-dirty-all` | include worktrees with uncommitted changes or unpushed commits in the selection (apply requires y/N) |  |
 | `--force-links` | CLI only: allow removing a worktree referenced by links (other protections stay) |  |
 | `--apply` | do it (after showing the list and asking y/N); without it nothing is changed |  |
 | `--older-than <age>` | age of the files next to the reports before they go: 12h, 7d, 2w (default 7d) |  |
@@ -1478,6 +1483,72 @@ agentctl cancel TASK-43                             # a queued task: taken out o
 agentctl cancel --cohort sprint-1 --reason "scrapped"   # the whole cohort: list, y/N
 ```
 
+## agentctl config
+
+Inspect configuration compatibility.
+
+Subcommands: `config downgrade-check`.
+
+```
+agentctl config [options] [command]
+```
+
+## agentctl config downgrade-check
+
+List configuration incompatible with 0.26 and remove expired timed limit overrides.
+
+```
+agentctl config downgrade-check [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--to <version>` | 0.26.x, 0.26.0 or 0.26.1 | required |
+
+Examples:
+
+```sh
+agentctl config downgrade-check --to 0.26.x
+```
+
+## agentctl upgrade-health
+
+Check a newly restarted stable watcher from agentctl-update.
+
+```
+agentctl upgrade-health [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--expect <version>` | expected candidate version | required |
+| `--since <ms>` | earliest valid watch launch time in Unix milliseconds | required |
+
+Examples:
+
+```sh
+agentctl upgrade-health --expect 0.27.2 --since "$watch_start_ms"  # invoked by agentctl-update
+```
+
+## agentctl canary
+
+Run the candidate watch against a sanitized, read-only snapshot with fake providers and tmux.
+
+```
+agentctl canary [options]
+```
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--from <home>` | source AGENTCTL_HOME | required |
+| `--minutes <minutes>` | minimum number of minutes to observe | default `30` |
+
+Examples:
+
+```sh
+agentctl canary --from "$PROD_AGENTCTL_HOME" --minutes 30
+```
+
 ## agentctl watch
 
 Foreground loop: notifies (macOS notification / notify-send) when a task has a report ready, asks something, hit its usage limit, waits too long, needs folder trust or died.
@@ -1491,6 +1562,7 @@ agentctl watch [options]
 | `--tmux` | run it in window "watch" of the agentctl session (created if missing) instead of here; also shows the task counts in the status bar of that session |  |
 | `--restart` | with --tmux: restart the window identified by its stable role |  |
 | `--no-status-line` | with --tmux: leave the status bar of the session alone |  |
+| `--supervise` | run the tmux watch supervisor |  |
 
 Examples:
 

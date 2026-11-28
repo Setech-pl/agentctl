@@ -1,7 +1,8 @@
+import { BoardDisk, BoardLimits } from './header.ts';
 import { providerHolds } from '../core/provider-hold.ts';
 import type { RefreshClock } from './refresh-scheduler.ts';
 import { RefreshScheduler } from './refresh-scheduler.ts';
-import { collectDisk, diskLine, refreshDiskFreeSpace } from '../core/disk.ts';
+import { collectDisk, refreshDiskFreeSpace } from '../core/disk.ts';
 import { watchSnapshotTime, watchSnapshotWarning, watchStepWarning } from '../core/watch-snapshot.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -220,7 +221,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
       if (diagnosticTimer !== undefined) timers.clear(diagnosticTimer);
       diagnosticTimer = undefined;
       const now = ctx.runner.now(), at = watchSnapshotTime(ctx.config);
-      const warning = watchStepWarning(ctx.config) ?? (at === undefined ? undefined : watchSnapshotWarning(at, now));
+      const warning = watchStepWarning(ctx.config, now) ?? (at === undefined ? undefined : watchSnapshotWarning(at, now));
       const label = warning ?? (at === undefined ? '' : `Stan watch sprzed ${Math.max(0, Math.floor((now - at) / 1000))} s`);
       if (label !== diagnostics) {
         diagnostics = label;
@@ -369,7 +370,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
   const panel = usagePanel(state.plans, ctx.config.usage, Date.now(), providerHolds(ctx.config, Date.now()), ctx.config);
   const mline = managerLine(state, ctx.config.manager.autostart || ctx.config.manager.project !== null);
   const limitBanner = state.limitPending ? h(Text, { color: 'yellow', bold: true, wrap: 'truncate-end' }, `Zmiany limitów do decyzji: ${state.limitPending} (L)`) : null;
-  const rowsForBody = Math.max(3, state.height - 4 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0) - (limitBanner ? 1 : 0));
+  const rowsForBody = Math.max(3, state.height - 5 - panel.length - (mline ? 1 : 0) - (state.disk ? 1 : 0) - (watchAge ? 1 : 0) - (limitBanner ? 1 : 0));
   const previewRoom = Math.max(1, rowsForBody - (state.preview?.model ? 3 : 1));
   useInput((input, key) => {
     const result = handleKey(current.current, input, key, previewRoom);
@@ -388,12 +389,8 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
     state.hosts && state.hosts.length > 0 ? h(Text, { wrap: 'truncate-end', ...(state.hosts.some((host) => host.state !== 'reachable') ? { color: 'yellow' } : { dimColor: true }) }, ` · hosts: ${state.hosts.map((host) => `${host.name} ${host.state}${host.gpu ? ` (${host.gpu})` : ''}${host.diskFreeGb !== undefined ? ` free ${host.diskFreeGb}G` : ''}`).join(' · ')} (H)`) : null,
     away ? h(Text, { wrap: 'truncate-end', ...(away.dim ? { dimColor: true } : { color: 'cyan', bold: true }) }, ` · ${away.text}`) : null,
   );
-  const diskBox = state.disk ? (() => {
-    const { level } = state.disk;
-    const label = `Disk: ${level}`;
-    const color = level === 'critical' ? 'red' : level === 'warn' ? 'yellow' : level === 'ok' ? 'green' : undefined;
-    return h(Text, { wrap: 'truncate-end' }, h(Text, { color }, label), diskLine(state.disk).slice(label.length));
-  })() : null;
+  const diskBox = state.disk ? h(BoardDisk, {disk: state.disk}) : null;
+  const limitsBox = h(BoardLimits, {config: ctx.config});
   const watchBox = watchAge ? h(Text, { ...(watchAge.stale ? {color: 'yellow'} : {dimColor: true}), wrap: 'truncate-end' }, watchAge.text) : null;
   const managerBox = mline ? (mline.selected
     ? h(Selection, { content: mline.text, width: layout.listWidth, style: listStyle })
@@ -441,7 +438,7 @@ export function Board(props: { ctx: Context; insideTmux: boolean; self?: SelfArg
           h(TaskList, { state, width: layout.listWidth, capacity: rowsForBody - 1, icons: ctx.config.watch.windowIcons, selection: listStyle, versions: ctx.config.board.modelVersions }),
           layout.showPreview ? h(Preview, { state, width: layout.previewWidth, room: previewRoom }) : null,
         );
-  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, limitBanner, fullScreen ? null : diskBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
+  return h(Box, { flexDirection: 'column', width: state.width, height: state.height }, header, limitBanner, fullScreen ? null : diskBox, fullScreen ? null : limitsBox, fullScreen ? null : watchBox, fullScreen ? null : managerBox, fullScreen ? null : panelBox, h(Box, { flexGrow: 1, flexDirection: 'column' }, body), h(Footer, { state, hint: navigationHint(ctx.config.board.returnKey) }));
 }
 
 /** Show the board until the user quits; resolves when it is gone. Needs a terminal. */

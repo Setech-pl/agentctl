@@ -41,11 +41,11 @@ it('every P-number and named identifier in the 0.18.x/0.19.x CHANGELOG is a cata
   for (const id of Object.keys(NOT_BUGS)) assert.ok(!BUGS.some(b => b.id === id), `${id} is both a bug and a non-bug`);
 });
 
-it('no scenario passes on the release before its fix; the rest are measured or explained in CATALOG.md', () => {
+it('no scenario passes on its pre-fix baseline', () => {
   for (const bug of BUGS) {
     const record = proof[bug.id];
     if (record) assert.notEqual(record.outcome, 'PASSES', `${bug.id} passes on ${record.rev}: it does not reproduce the bug`);
-    if (record) assert.equal(record.rev, PREVIOUS_RELEASE[bug.fixedIn], `${bug.id}: proof was taken on ${record.rev}`);
+    if (record) assert.equal(record.rev, bug.proofAgainst ?? PREVIOUS_RELEASE[bug.fixedIn], `${bug.id}: proof was taken on ${record.rev}`);
   }
 });
 

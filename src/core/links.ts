@@ -1,10 +1,9 @@
-import { spawnSync } from 'node:child_process';
 import type { ResolvedRepo } from './spec.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadProjectConfig } from './config.ts';
 import type { Link, GlobalConfig } from './config.ts';
-import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
+import { listTaskRecords, listArchivedRecords, type RecordScan } from './taskstore.ts';
 import { fillPlaceholders, resolvePath } from './util.ts';
 import type { Runner } from './runner.ts';
 import { AgentctlError, Problems } from './util.ts';
@@ -205,40 +204,54 @@ export function projectDefaultLinkPolicy(links: Link[], config: GlobalConfig, re
 }
 
 /** Compare only repositories sharing Git's common directory; never compare unrelated SHAs. */
-export function linkBaseWarnings(links: Link[], repos: ResolvedRepo[]): string[] {
-  const git = (cwd: string, ...args: string[]): string | undefined => {
-    const r = spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000 });
-    return r.status === 0 ? r.stdout.trim() : undefined;
+export async function linkBaseWarnings(runner: Runner, links: Link[], repos: ResolvedRepo[]): Promise<string[]> {
+  const git = async (cwd: string, ...args: string[]): Promise<string | undefined> => {
+    const r = await runner.exec('git', ['-C', cwd, ...args], { readOnly: true, timeoutMs: 5000 });
+    return r.code === 0 ? r.stdout.trim() || undefined : undefined;
   };
-  return links.flatMap(({ from, to }) => {
+  const warnings: string[] = [];
+  for (const { from, to } of links) {
     let dir = to.endsWith('/*') ? path.dirname(to) : to;
     while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
-    if (!fs.statSync(dir).isDirectory()) dir = path.dirname(dir);
-    const common = git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir');
-    if (!common) return [];
-    const repo = repos.find(r => r.base && git(r.path, 'rev-parse', '--path-format=absolute', '--git-common-dir') === common);
-    if (!repo?.base) return [];
-    const base = git(repo.path, 'rev-parse', '--verify', `${repo.base}^{commit}`);
-    const head = git(dir, 'rev-parse', 'HEAD');
-    if (!base || !head) return [`link ${from} -> ${to}: cannot compare target with task base ${repo.base}`];
-    const ancestor = git(repo.path, 'merge-base', head, base);
-    return ancestor === base ? [] : [`link ${from} -> ${to}: target worktree is older than task base ${repo.base} or diverged (merge-base ${ancestor ?? 'none'}); use {worktree:${path.basename(repo.path)}} or update the target`];
-  });
+    if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) dir = path.dirname(dir);
+    const common = await git(dir, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+    if (!common) continue;
+    for (const repo of repos) {
+      if (!repo.base || await git(repo.path, 'rev-parse', '--path-format=absolute', '--git-common-dir') !== common) continue;
+      const [base, head] = await Promise.all([
+        git(repo.path, 'rev-parse', '--verify', `${repo.base}^{commit}`), git(dir, 'rev-parse', 'HEAD'),
+      ]);
+      if (!base || !head) warnings.push(`link ${from} -> ${to}: cannot compare target with task base ${repo.base}`);
+      else {
+        const ancestor = await git(repo.path, 'merge-base', head, base);
+        if (ancestor !== base) warnings.push(`link ${from} -> ${to}: target worktree is older than task base ${repo.base} or diverged (merge-base ${ancestor ?? 'none'}); use {worktree:${path.basename(repo.path)}} or update the target`);
+      }
+      break;
+    }
+  }
+  return warnings;
 }
 
 export function projectLinks(repo: string, task = '', cache = repo): Link[] {
-  return (loadProjectConfig(repo)?.links ?? []).filter(link => !/\{(?:worktree:|task:[^}]*,repo:)/.test(link.to)).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
+  return expandProjectLinks(loadProjectConfig(repo)?.links ?? [], repo, task, cache);
+}
+
+function expandProjectLinks(links: readonly Link[], repo: string, task: string, cache: string): Link[] {
+  return links.filter(link => !/\{(?:worktree:|task:[^}]*,repo:)/.test(link.to)).map(link => ({ ...link, to: resolvePath(fillPlaceholders(link.to, { task, cache }), repo) }));
 }
 
 /** Known projects come from current and archived task records; active tasks can also supply spec-only links. */
-export function knownLinkReferences(config: GlobalConfig): { target: string; source: string }[] {
-  const active = listTaskRecords(config).filter(r => !r.closed && !r.cancelled);
-  const records = [...listTaskRecords(config), ...listArchivedRecords(config)];
+export function knownLinkReferences(config: GlobalConfig, inventory?: RecordScan): { target: string; source: string }[] {
+  const current = inventory?.current ?? listTaskRecords(config);
+  const records = inventory?.all ?? [...current, ...listArchivedRecords(config)];
+  const active = current.filter(r => !r.closed && !r.cancelled);
   const refs = active.flatMap(r => r.links.map(l => ({ target: l.to, source: `active task ${r.task}` })));
   for (const repo of new Set(records.flatMap(r => r.repos.map(repo => repo.path)))) {
     try {
+      const links = loadProjectConfig(repo)?.links ?? [];
+      if (!links.length) continue;
       for (const record of records.filter(r => r.repos.some(x => x.path === repo))) {
-        refs.push(...projectLinks(repo, record.task, config.cache).map(l => ({ target: l.to, source: `${repo}/.agentctl.yaml` })));
+        refs.push(...expandProjectLinks(links, repo, record.task, config.cache).map(l => ({ target: l.to, source: `${repo}/.agentctl.yaml` })));
       }
     } catch (error) {
       // An unreadable known config cannot prove that a candidate is unused.

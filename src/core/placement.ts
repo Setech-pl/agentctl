@@ -32,7 +32,8 @@ export function choosePlacement(config: GlobalConfig, order: PlacementOrder, liv
   const auto = requested === 'auto';
   if (!auto && requested === 'local' && !config.localHost && !raw.header.reuse_worktree) {
     const available = hostAvailability(config, 'local', undefined, now);
-    const machine = config.capacity.loadThreshold === undefined ? undefined : collectMachine(config);
+    // High load only alerts unless the owner opts in to holding starts on it (queue.hold_on_load).
+    const machine = !config.queue.holdOnLoad || config.capacity.loadThreshold === undefined ? undefined : collectMachine(config);
     if (available || machine?.overloaded) return { hold: available ?? `obciążenie (load1 ${machine!.loadAverage[0]!.toFixed(1)} > ${machine!.threshold}) [local]` };
     const disk = diskStartHold(config, resolveSpec(raw, { config, owner: order.owner }).repos);
     return disk ? { hold: disk } : { reason: '[local] host domyślny' };
@@ -92,7 +93,7 @@ export function choosePlacement(config: GlobalConfig, order: PlacementOrder, liv
       const threshold = policy?.loadThreshold ?? config.capacity.loadThreshold ?? 3 * (sample.cpus ?? 1);
       if (sample.load === undefined || sample.load > threshold) { reasons.push(`[${name}] load1 ${sample.load ?? '?'} (limit ${threshold})`); continue; }
     }
-    if (name === 'local' && config.capacity.loadThreshold !== undefined && collectMachine(config).overloaded) {
+    if (name === 'local' && config.queue.holdOnLoad && config.capacity.loadThreshold !== undefined && collectMachine(config).overloaded) {
       reasons.push('[local] obciążenie przekracza limit');
       continue;
     }

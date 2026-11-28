@@ -16,6 +16,7 @@ export type StartPhase = 'worktree' | 'setup' | 'launching';
 
 export interface SetupProgress {
   task: string;
+  pid?: number;
   phase: StartPhase;
   /** ISO time the start began. */
   startedAt: string;
@@ -38,7 +39,7 @@ export async function writeSetupProgress(ctx: Context, window: string, progress:
   if (ctx.runner.dryRun) return;
   try {
     await ctx.runner.mkdir(taskDir(ctx.config, window));
-    await ctx.runner.writeFile(setupProgressFile(ctx.config, window), `${JSON.stringify(secretRedactor([ctx.config, process.env, progress.command])(progress))}\n`);
+    await ctx.runner.writeFile(setupProgressFile(ctx.config, window), `${JSON.stringify(secretRedactor([ctx.config, process.env, progress.command])({ ...progress, pid: process.pid }))}\n`);
   } catch { /* progress is for the eyes; it never stops the start */ }
 }
 

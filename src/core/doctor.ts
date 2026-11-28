@@ -7,7 +7,7 @@ import { provider, PROVIDER_IDS, isActive } from './providers/registry.ts';
 import { collectStatus } from './status.ts';
 import { inspectReport } from './report-state.ts';
 import { linkBaseWarnings, missingLinkTargets, projectLinks } from './links.ts';
-import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
+import { listTaskRecords, listArchivedRecords, snapshotRecords } from './taskstore.ts';
 import { collectDisk, diskLine } from './disk.ts';
 import { projectGuide } from './guide.ts';
 import { developmentEnvironment, installation } from './installation.ts';
@@ -127,7 +127,14 @@ export async function runDoctor(
   let currentRecords: ReturnType<typeof listTaskRecords> = [], archivedRecords: ReturnType<typeof listArchivedRecords> = [];
   try {
     config = loadConfig();
-    currentRecords = listTaskRecords(config); archivedRecords = listArchivedRecords(config);
+    if (cachedOnly) {
+      const inventory = await snapshotRecords(config, true);
+      currentRecords = inventory.current;
+      archivedRecords = inventory.archived;
+    } else {
+      currentRecords = listTaskRecords(config);
+      archivedRecords = listArchivedRecords(config);
+    }
     const disk = await collectDisk(new Context(runner, config, () => {}), undefined, { records: [...currentRecords, ...archivedRecords] });
     add('disk', disk.level === 'critical' ? 'fail' : disk.level === 'ok' ? 'ok' : 'warn', diskLine(disk));
     add('MCP permissions', 'ok', 'Existing queue permission still permits only queue insertion; queue:* explicitly enables the queue group. close/interrupt/queue_rm now require preview then confirm.');
@@ -293,13 +300,24 @@ export async function runDoctor(
     try {
       const commands = (await runner.exec('ps', ['-axo', 'command='], { readOnly: true })).stdout.split('\n');
       const legacyTokens = new Set(commands.filter(command => /\/Cellar\/node(?:@[^/]+)?\//.test(command) && command.includes('--task')).flatMap(command => command.replaceAll(/[^a-zA-Z0-9_-]+/g, ' ').split(' ')));
-      for (const record of currentRecords.filter(record => !record.closed && !record.cancelled)) {
-        if (legacyTokens.has(record.task)) add(`task node ${record.task}`, 'warn', 'versioned Node path in active callback argv; works until Node is upgraded; regenerate task wiring when convenient');
+      const stateDir = config.stateDir;
+      const active = currentRecords.filter(record => !record.closed && !record.cancelled);
+      const checkWiring = async (record: typeof active[number]): Promise<string[]> => {
+        const warnings = legacyTokens.has(record.task) ? ['versioned Node path in active callback argv'] : [];
         for (const wiringFile of ['claude-settings.json', 'glm-settings.json']) {
-          const file = path.join(config.stateDir, record.window, wiringFile);
-          if (fs.existsSync(file)) try {
-            if (/\/Cellar\/node(?:@[^/]+)?\//.test(fs.readFileSync(file, 'utf8'))) add(`task node ${record.task}`, 'warn', `versioned Node path in ${wiringFile}; works until Node is upgraded; regenerate task wiring when convenient`);
+          const file = path.join(stateDir, record.window, wiringFile);
+          try {
+            const content = cachedOnly ? await fs.promises.readFile(file, 'utf8') : fs.readFileSync(file, 'utf8');
+            if (/\/Cellar\/node(?:@[^/]+)?\//.test(content)) warnings.push('versioned Node path in ' + wiringFile);
           } catch { /* missing/unreadable managed wiring */ }
+        }
+        return warnings;
+      };
+      for (let i = 0; i < active.length; i += 48) {
+        const batch = active.slice(i, i + 48);
+        const warnings = await Promise.all(batch.map(checkWiring));
+        for (const [index, record] of batch.entries()) for (const warning of warnings[index]!) {
+          add('task node ' + record.task, 'warn', warning + '; works until Node is upgraded; regenerate task wiring when convenient');
         }
       }
     } catch (e) { add('task wiring', 'warn', errorMessage(e)); }
@@ -311,7 +329,7 @@ export async function runDoctor(
         if (reportRows.get(record.task)?.report !== 'yes') add(`report ${record.task}`, 'warn', `${report.ready ? 'incomplete for current turn' : report.reason}: ${record.report}${record.reportSource ? ` (previous copy: ${record.reportSource})` : ''}`);
         else if (!record.reportConfirmed && record.reportSource && path.normalize(record.reportSource) !== path.normalize(record.report)) add(`report ${record.task}`, 'warn', `raport pochodzi z kopii ${record.reportSource} – sprawdź`);
         if (record.closed || record.cancelled) continue;
-        for (const warning of [...missingLinkTargets(record.links), ...(cachedOnly ? [] : linkBaseWarnings(record.links, record.repos))]) add(`task links ${record.task}`, 'warn', warning);
+        for (const warning of [...missingLinkTargets(record.links), ...(cachedOnly ? [] : await linkBaseWarnings(runner, record.links, record.repos))]) add(`task links ${record.task}`, 'warn', warning);
 
       }
     } catch (e) { add('task diagnostics', 'warn', errorMessage(e)); }

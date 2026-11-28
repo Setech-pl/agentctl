@@ -101,42 +101,56 @@ export async function recoverInterruptedWorktrees(runner: Runner, repos: Resolve
 
 /** Never reuse an arbitrary directory after a failed start. A retry may reuse only a registered worktree. */
 export async function checkRetryWorktrees(runner: Runner, repos: ResolvedRepo[]): Promise<void> {
+  const reused: string[] = [];
+  const opts = { readOnly: true, timeoutMs: 5000 } as const;
   for (const repo of repos) {
     if (!fs.existsSync(repo.worktree)) continue;
-    const r = await runner.exec('git', ['-C', repo.path, 'worktree', 'list', '--porcelain'], { readOnly: true });
+    const r = await runner.exec('git', ['-C', repo.path, 'worktree', 'list', '--porcelain'], opts);
     const listed = r.code === 0 && r.stdout.split('\n').includes(`worktree ${path.resolve(repo.worktree)}`);
-    const head = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--show-toplevel'], { readOnly: true });
+    const head = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--show-toplevel'], opts);
     if (!listed || head.code !== 0 || path.resolve(head.stdout.trim()) !== path.resolve(repo.worktree)) {
       throw new AgentctlError(`unsafe start residue: ${repo.worktree}`, `Inspect this directory and its git worktree registration; preserve any work, then remove only this failed start's residue before queue retry.`);
     }
     const unsafe = (reason: string): never => { throw new AgentctlError(`unsafe start residue: ${repo.worktree}: ${reason}`, 'Checkout completeness is uncertain. Preserve this directory; inspect git status, HEAD/branch and index.lock, then repair the registered checkout or remove only this failed start residue and queue retry. No agent was started.'); };
     // MCP only re-registers the entry. The worker repeats this check, including tracked files, before reuse.
-    const status = cachedRequest() ? { code: 0, stdout: '' } : await runner.exec('git', ['-C', repo.worktree, 'status', '--porcelain', '--untracked-files=no'], { readOnly: true });
+    const status = cachedRequest() ? { code: 0, stdout: '' } : await runner.exec('git', ['-C', repo.worktree, 'status', '--porcelain', '--untracked-files=no'], opts);
     if (status.code !== 0 || status.stdout.trim()) unsafe('git status failed or tracked checkout is incomplete/modified');
-    const lock = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--git-path', 'index.lock'], { readOnly: true });
+    const lock = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--git-path', 'index.lock'], opts);
     if (lock.code !== 0 || !lock.stdout.trim()) unsafe('cannot locate index.lock');
     if (fs.existsSync(path.resolve(repo.worktree, lock.stdout.trim()))) unsafe('index.lock exists');
-    const actual = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--verify', 'HEAD'], { readOnly: true });
-    const expected = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', repo.branch ?? repo.base ?? 'HEAD'], { readOnly: true });
+    const actual = await runner.exec('git', ['-C', repo.worktree, 'rev-parse', '--verify', 'HEAD'], opts);
+    const expected = await runner.exec('git', ['-C', repo.path, 'rev-parse', '--verify', repo.branch ?? repo.base ?? 'HEAD'], opts);
     if (actual.code !== 0 || expected.code !== 0 || !actual.stdout.trim() || actual.stdout.trim() !== expected.stdout.trim()) unsafe('HEAD differs from expected branch/base');
-    const branch = await runner.exec('git', ['-C', repo.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], { readOnly: true });
+    const branch = await runner.exec('git', ['-C', repo.worktree, 'symbolic-ref', '--quiet', '--short', 'HEAD'], opts);
     if (repo.branch ? branch.code !== 0 || branch.stdout.trim() !== repo.branch : branch.code === 0) unsafe('branch/detached state differs from spec');
-    const processes = await runner.exec('ps', ['-axo', 'pid=,args='], { readOnly: true });
-    if (processes.code !== 0) unsafe('cannot inspect task processes');
-    for (const line of processes.stdout.split('\n')) {
-      const match = /^\s*(\d+)\s+(.+)$/.exec(line);
-      if (!match || !(/(?:^|[\s/])git(?:\s|$)/.test(match[2]!) || matchesProviderCommand(match[2]!, 'args'))) continue;
-      if (match[2]!.includes(repo.worktree)) unsafe('task/git process still running');
-      const cwd = await runner.exec(process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof', ['-a', '-p', match[1]!, '-d', 'cwd', '-Fn'], { readOnly: true });
-      if (cwd.code !== 0) {
-        const alive = await runner.exec('ps', ['-p', match[1]!, '-o', 'pid='], { readOnly: true });
-        if (alive.code !== 0 || !alive.stdout.trim()) continue; // The process exited between ps and lsof.
-        unsafe(`cannot verify cwd of agent/git process ${match[1]}`);
-      }
-      const dirs = cwd.stdout.split('\n').filter(l => l.startsWith('n')).map(l => path.resolve(l.slice(1)));
-      if (dirs.some(dir => dir === path.resolve(repo.worktree) || dir.startsWith(path.resolve(repo.worktree) + path.sep))) unsafe('task/git process still running in checkout');
-    }
-
+    reused.push(path.resolve(repo.worktree));
+  }
+  if (!reused.length) return;
+  const unsafe = (worktree: string, reason: string): never => { throw new AgentctlError(`unsafe start residue: ${worktree}: ${reason}`, 'Preserve the checkout and retry after the relevant agent/git processes have exited.'); };
+  const processes = await runner.exec('ps', ['-axo', 'pid=,args='], opts);
+  if (processes.code !== 0) unsafe(reused[0]!, 'cannot inspect task processes');
+  const pids = new Set<string>();
+  for (const line of processes.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(.+)$/.exec(line);
+    if (!match || !(/(?:^|[\s/])git(?:\s|$)/.test(match[2]!) || matchesProviderCommand(match[2]!, 'args'))) continue;
+    const checkout = reused.find(dir => match[2]!.includes(dir));
+    if (checkout) unsafe(checkout, 'task/git process still running');
+    pids.add(match[1]!);
+  }
+  if (!pids.size) return;
+  const probe = await runner.exec(process.platform === 'darwin' ? '/usr/sbin/lsof' : 'lsof', ['-a', '-p', [...pids].join(','), '-d', 'cwd', '-Fn'], opts);
+  let pid = '';
+  for (const line of probe.stdout.split('\n')) {
+    if (line.startsWith('p')) pid = line.slice(1);
+    if (!line.startsWith('n') || !pids.delete(pid)) continue;
+    const cwd = path.resolve(line.slice(1));
+    const checkout = reused.find(dir => cwd === dir || cwd.startsWith(`${dir}${path.sep}`));
+    if (checkout) unsafe(checkout, 'task/git process still running in checkout');
+  }
+  if (pids.size) {
+    const alive = await runner.exec('ps', ['-p', [...pids].join(','), '-o', 'pid='], opts);
+    const missing = alive.stdout.trim();
+    if (missing || alive.stderr || alive.code > 1) unsafe(reused[0]!, `cannot verify cwd of agent/git process ${missing || [...pids].join(',')}`);
   }
 }
 

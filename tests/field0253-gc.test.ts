@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { test } from 'node:test';
+import { applyGc, planGc } from '../src/core/gc.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import { readMcpRequests } from '../src/core/mcp-requests.ts';
 import { applyAcceptedWrites } from '../src/core/queue.ts';
@@ -87,4 +89,14 @@ test('FIELD0253-GC: the watcher plans 301 worktrees before issuing a bound GC to
   await applyAcceptedWrites(ctx, notifier, {});
   assert.equal(readMcpRequests(config).find(r => r.token === token)?.status, 'done');
   assert.equal(gitCalls.filter(args => args[2] === 'worktree' && args[3] === 'remove').length, 301);
+});
+
+test('REL0272-GC-APPLY-IO: removal revalidates task record versions without synchronous header reads', async t => {
+  const {ctx} = gcFixture('apply-io', 2, false);
+  const plan = await planGc(ctx, {cachedSizes: true});
+  const opened = t.mock.method(fs, 'openSync');
+  const result = await applyGc(ctx, plan);
+  assert.equal(result.done.filter(item => item.kind === 'worktree').length, 2);
+  assert.equal(result.failed.length, 0);
+  assert.equal(opened.mock.calls.filter(call => String(call.arguments[0]).endsWith('/TASK.md')).length, 0);
 });

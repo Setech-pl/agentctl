@@ -38,6 +38,13 @@ export interface TmuxOptions {
  * Windows are told apart by their task name, never by their literal tmux name: `watch` puts a state icon in front of it
  * ("⚙ nc-42"). Every operation looks the window up first and targets its tmux ID (or, without one, its current name).
  */
+/**
+ * stderr of a session-scoped tmux command whose session (or whole server) is gone: an empty inventory, not an error.
+ * tmux 3.4 (Ubuntu) says "can't find window: NAME" for a missing `=NAME` target and "no current target" once the server
+ * (exit-empty off) has no sessions left; other versions say "can't find session" (REL0272-TMUX-ABSENT).
+ */
+export const TMUX_SESSION_ABSENT = /no server running|failed to connect to server|can't find session|can't find window|no sessions|no current target|error connecting to.*No such file/i;
+
 export class Tmux {
   readonly runner: Runner;
   readonly session: string;
@@ -68,6 +75,29 @@ export class Tmux {
       dryResult: { code: 1 },
     });
     return r.code === 0;
+  }
+
+  /** A target reported by tmux itself even when the window inventory raced a rename or relink. */
+  async paneExists(window: string, id?: string): Promise<boolean> {
+    const target = id || this.target(window);
+    const r = await this.runner.exec('tmux', ['display-message', '-p', '-t', target, '#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_dead}'], {readOnly: true, timeoutMs: 1500});
+    const [session, windowId, name, paneId, dead] = r.stdout.trim().split('\t');
+    return r.code === 0 && session === this.session && (!id || windowId === id) && !!name && stripIcon(name, this.icons) === window && /^%\d+$/.test(paneId ?? '') && dead === '0';
+  }
+
+  /** A second session-scoped observation rechecks window and pane identities in one IPC round trip. */
+  async livePanes(): Promise<WindowInfo[]> {
+    const format = '#{session_name}\t#{window_id}\t#{window_name}\t#{pane_id}\t#{pane_dead}\t#{@agentctl-role}';
+    const r = await this.runner.exec('tmux', ['list-panes', '-s', '-t', `=${this.session}`, '-F', format], {readOnly: true, timeoutMs: 1500});
+    if (r.code !== 0 && !TMUX_SESSION_ABSENT.test(r.stderr)) {
+      throw Error(`Cannot verify tmux pane inventory: ${r.stderr.trim() || `exit ${r.code}`}`);
+    }
+    return r.stdout.split('\n').flatMap(line => {
+      const [session, id, name, pane, dead, role] = line.split('\t');
+      if (session !== this.session || !id || !name || !/^%\d+$/.test(pane ?? '') || dead !== '0') return [];
+      const plain = role && this.taskRoles && role !== 'task' && /^[a-z0-9][a-z0-9_-]*$/.test(role) ? role : stripIcon(name, this.icons);
+      return [{id, name, plain, ...(role ? {role} : {})}];
+    });
   }
 
   /** The windows of the agentctl session (empty when the session does not exist). */
@@ -161,9 +191,9 @@ export class Tmux {
   }
 
   /** Type a command line into the window's shell and press Enter. */
-  async typeCommand(window: string, commandLine: string): Promise<void> {
-    await this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), '-l', '--', commandLine]);
-    await this.pressEnter(window);
+  async typeCommand(window: string, commandLine: string): Promise<ExecResult> {
+    const pasted = await this.runner.exec('tmux', ['send-keys', '-t', await this.targetFor(window), '-l', '--', commandLine]);
+    return pasted.code === 0 ? this.pressEnter(window) : pasted;
   }
 
   /** Send one named key (e.g. Escape) to the window. */

@@ -208,6 +208,27 @@
         ]
       }
     },
+    "deferred": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "cell": {
+            "type": "string",
+            "minLength": 1
+          },
+          "where": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "cell",
+          "where"
+        ],
+        "additionalProperties": false
+      }
+    },
     "preview": {
       "type": "string",
       "format": "uri"
@@ -230,5 +251,8 @@
     "checks",
     "notes"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x_": {}
+  }
 }

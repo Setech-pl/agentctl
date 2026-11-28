@@ -51,14 +51,22 @@ export class HostRuntime {
   connection(name: string): Connection {
     let c = this.connections.get(name);
     if (!c) {
-      try { c = JSON.parse(fs.readFileSync(this.file(name), 'utf8')); } catch { /* first sample */ }
+      try { const text = fs.readFileSync(this.file(name), 'utf8'); c = JSON.parse(text); this.persisted.set(name, text); } catch { /* first sample */ }
       if (!c || !Array.isArray(c.windows) || !Number.isFinite(c.retryAt)) c = { unreachable: false, failures: 0, retryAt: 0, detail: '', windows: [] };
       this.connections.set(name, c);
     }
     if (!this.config.hosts[name]) { c.unreachable = true; c.detail = 'host removed from config; restore its hosts: entry'; }
     return c;
   }
-  private async persist(name: string): Promise<void> { if (!this.runner.dryRun && !observing()) await this.runner.writeFile(this.file(name), JSON.stringify(this.connection(name))); }
+  /** What each host file holds on disk, so an unchanged state is not rewritten (and fsynced) on every windows() call. */
+  private readonly persisted = new Map<string, string>();
+  private async persist(name: string): Promise<void> {
+    if (this.runner.dryRun || observing()) return;
+    const text = JSON.stringify(this.connection(name));
+    if (this.persisted.get(name) === text) return;
+    await this.runner.writeFile(this.file(name), text);
+    this.persisted.set(name, text);
+  }
   forHost(name: string): HostRunner {
     const host = this.config.hosts[name];
     if (!host) throw new HostUnreachable(name, 'host removed from config; restore its hosts: entry');
@@ -83,9 +91,9 @@ export class HostRuntime {
     (this.connection(name).screens ??= {})[window] = { ...screen, stdout: screen.stdout.slice(-256 * 1024) };
     await this.persist(name);
   }
-  async windows(cachedOnly = false): Promise<WindowInfo[]> {
+  async windows(cachedOnly = false, current?: readonly TaskRecord[]): Promise<WindowInfo[]> {
     if (!this.hasTrackedHosts()) return [];
-    const records = listTaskRecords(this.config).filter(r => r.host && !r.closed && !r.cancelled);
+    const records = (current ?? listTaskRecords(this.config)).filter(r => r.host && !r.closed && !r.cancelled);
     const names = [...new Set(records.map(r => r.host!))];
     return (await Promise.all(names.map(async name => {
       const c = this.connection(name);

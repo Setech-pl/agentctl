@@ -1,20 +1,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { WATCH_IO_THREADS } from '../src/core/watch-steps.ts';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { liveCacheRoot } from './live-cache.ts';
 import { cleanLiveCache, humanSize } from './gate-clean.ts';
-import { checkRuntime, homebrewNode26, node22Path, runtimesDir } from './runtime.ts';
+import { checkRuntime, node22Path, node26Label, node26Runtime, runtimesDir } from './runtime.ts';
 
 import { acquireLock } from './gate-lock.ts';
 export { acquireLock } from './gate-lock.ts';
 
-export type Tier = 'quick' | 'full' | 'release';
+export type Tier = 'quick' | 'full' | 'release' | 'prodshape';
 export interface Options { tier: Tier; base?: string; dryRun: boolean; allowDirty: boolean; skipLive: boolean; node26Only?: boolean }
 export function parseArgs(args: string[]): Options {
   const tier = args.shift();
-  if (!['quick', 'full', 'release'].includes(tier ?? '')) throw new Error('Usage: npm run gate -- <quick|full|release> [--base ref] [--dry-run] [--allow-dirty] [--skip-live] [--node26-only]');
+  if (!['quick', 'full', 'release', 'prodshape'].includes(tier ?? '')) throw new Error('Usage: npm run gate -- <quick|full|release|prodshape> [--base ref] [--dry-run] [--allow-dirty] [--skip-live] [--node26-only]');
   const opts: Options = { tier: tier as Tier, dryRun: false, allowDirty: false, skipLive: false };
   while (args.length) {
     const arg = args.shift();
@@ -30,21 +32,35 @@ export function parseArgs(args: string[]): Options {
   return opts;
 }
 /** The JSON array of `npm pack --json`; trailing npm notices (update available, changelog) on the merged stream are ignored. */
+/** The entries of `npm pack --json`: an array up to npm 11, an object keyed by package name from npm 12; notices may follow. */
 export function packJson(text: string): { filename: string }[] {
-  const start = text.indexOf('[');
-  const end = text.lastIndexOf(']');
-  if (start < 0 || end <= start) throw new Error('npm pack printed no JSON array');
-  return JSON.parse(text.slice(start, end + 1));
+  const start = text.search(/[[{]/);
+  if (start < 0) throw new Error('npm pack printed no JSON array');
+  let depth = 0, inString = false, end = -1;
+  for (let i = start; i < text.length && end < 0; i++) {
+    const c = text[i];
+    if (inString) { if (c === '\\') i++; else if (c === '"') inString = false; }
+    else if (c === '"') inString = true;
+    else if (c === '[' || c === '{') depth++;
+    else if ((c === ']' || c === '}') && --depth === 0) end = i;
+  }
+  if (end < 0) throw new Error('npm pack printed no complete JSON value');
+  const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+  const entries = (Array.isArray(parsed) ? parsed : Object.values(parsed as Record<string, unknown>)) as { filename: string }[];
+  if (!entries.length || entries.some(e => typeof e?.filename !== 'string')) throw new Error('npm pack printed no tarball filename');
+  return entries;
 }
 export function assertClean(opts: Options, dirty: boolean): void {
   if (opts.tier !== 'quick' && dirty && !opts.allowDirty) throw new Error(`${opts.tier} refuses a dirty tree; use --allow-dirty to record the exception`);
 }
 export function planTier(tier: Tier, tests: string[], live: string[], skipLive = false, node26Only = false): string[] {
-  // Every tier ends its checks with the regression catalog: a known, fixed bug that comes back fails the build.
+  // Every tier runs the regression catalog: a known, fixed bug that comes back fails the build.
   const regression = 'regression scenarios (tests/regression/CATALOG.md)';
   if (tier === 'quick') return ['typecheck', 'build', 'git diff --check', regression, `tests current: ${tests.join(' ') || '(none)'}`];
   if (tier === 'full') return [...(node26Only ? [] : ['tests Node 22.14.0 (full)']), 'tests Node 26 (full)', regression];
-  return ['build', 'pack', 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live)];
+  const prodshape = 'prodshape watch and MCP canary';
+  if (tier === 'prodshape') return [prodshape, regression];
+  return ['build', 'pack', prodshape, 'installed-tarball smoke Node 22.14.0', 'doctor 10-case matrix Node 22.14.0', 'installed-tarball smoke Node 26', 'doctor 10-case matrix Node 26', regression, ...(skipLive ? ['SKIP live entries'] : live)];
 }
 /** Static relative import closure plus exact test naming. Unknown inputs always widen to the full suite. */
 export function affectedTests(changed: string[], sources: Record<string, string>, tests: string[]): { tests: string[]; uncertain: boolean } {
@@ -74,16 +90,57 @@ export function affectedTests(changed: string[], sources: Record<string, string>
 export function heavyCommand(command: string, args: string[], platform = process.platform): [string, string[]] {
   return ['nice', ['-n', '10', ...(platform === 'darwin' ? ['taskpolicy', '-b'] : []), command, ...args]];
 }
-/** Keep collecting release evidence after check failures, then fail the gate with all of them recorded. */
-export async function runReleaseChecks(live: string[], runCheck: (name: string) => Promise<number>): Promise<string[]> {
+/** Keep collecting independent evidence after check failures. Doctor needs a successfully installed package. */
+export async function runReleaseChecks(live: string[], runCheck: (name: string) => Promise<number>, runtimes: string[] = []): Promise<string[]> {
   const failures: string[] = [];
-  for (const name of ['regression', ...live]) {
+  const check = async (name: string) => {
     const code = await runCheck(name);
     if (code !== 0) failures.push(`${name} (${code})`);
+    return code === 0;
+  };
+  // Run the timed workload before the longer independent smoke, regression and live suites.
+  if (live.includes('prodshape')) await check('prodshape');
+  for (const runtime of runtimes) {
+    if (await check(`smoke-${runtime}`)) await check(`doctor-${runtime}`);
   }
+  for (const name of ['regression', ...live.filter(name => name !== 'prodshape')]) await check(name);
   return failures;
 }
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+
+/** The historical default base of the affected-test plan; clones that never fetched it fall back to the newest reachable release tag. */
+export const DEFAULT_BASE_TAG = 'agentctl-0181-rc1';
+export function defaultBase(run: (...args: string[]) => string, warn: (message: string) => void): string {
+  try { return run('merge-base', 'HEAD', DEFAULT_BASE_TAG); } catch { /* tag missing in this clone */ }
+  // Highest version among the tags merged into HEAD (`git describe` would pick the nearest by topology, often an older one).
+  const tag = run('tag', '--merged', 'HEAD', '--list', 'v[0-9]*', '--sort=-v:refname').split('\n')[0]?.trim();
+  if (!tag) throw new Error(`base tag ${DEFAULT_BASE_TAG} is missing and no release tag (v*) is reachable from HEAD; pass --base <ref>`);
+  warn(`gate: warning: base tag ${DEFAULT_BASE_TAG} is missing; using the newest reachable release tag ${tag}`);
+  return run('rev-parse', '--verify', `${tag}^{commit}`);
+}
+interface ReleaseInputs { sha: string; fixtureDigest: string }
+
+/** Seal the inputs, including mode and ctime so a fixture edited and restored during a step invalidates the result. */
+export function releaseInputs(root = process.cwd()): ReleaseInputs {
+  const readGit = (...args: string[]) => execFileSync('git', args, {cwd: root, encoding: 'utf8'});
+  const sha = readGit('rev-parse', 'HEAD').trim();
+  const files = [...new Set(readGit('ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();
+  const hash = createHash('sha256');
+  for (const file of files) {
+    const target = path.join(root, file);
+    const stat = fs.lstatSync(target, {bigint: true, throwIfNoEntry: false});
+    hash.update(JSON.stringify([file, stat?.mode.toString(), stat?.ino.toString(), stat?.ctimeNs.toString()]));
+    if (stat?.isSymbolicLink()) hash.update(fs.readlinkSync(target));
+    else if (stat?.isFile()) hash.update(fs.readFileSync(target));
+  }
+  return {sha, fixtureDigest: hash.digest('hex')};
+}
+
+export function assertReleaseInputs(expected: ReleaseInputs, actual: ReleaseInputs, step: string): void {
+  if (expected.sha !== actual.sha) throw new Error(`release SHA changed at ${step}: ${expected.sha} → ${actual.sha}`);
+  if (expected.fixtureDigest !== actual.fixtureDigest) throw new Error(`release fixtures or source files changed at ${step}`);
+}
+
 function filesUnder(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => e.isDirectory() ? filesUnder(`${dir}/${e.name}`) : [`${dir}/${e.name}`]);
 }
@@ -104,12 +161,17 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const dirty = Boolean(git('status', '--porcelain'));
   const tests = filesUnder('tests').filter(f => f.endsWith('.test.ts')).sort();
   const live = filesUnder('scripts').filter(f => /\/live-.*\.ts$/.test(f)).sort();
-  const base = opts.base ? git('rev-parse', '--verify', opts.base) : git('merge-base', 'HEAD', 'agentctl-0181-rc1');
+  const base = opts.base ? git('rev-parse', '--verify', opts.base) : defaultBase((...a) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(), m => console.error(m));
   const changed = [...new Set([...git('diff', '--name-only', base, '--').split('\n'), ...git('ls-files', '--others', '--exclude-standard').split('\n')].filter(Boolean))];
   const sources = Object.fromEntries([...filesUnder('src'), ...filesUnder('tests')].filter(f => f.endsWith('.ts')).map(f => [f, fs.readFileSync(f, 'utf8')]));
   const affected = affectedTests(changed, sources, tests);
   const plan = planTier(opts.tier, affected.tests, live, opts.skipLive, opts.node26Only);
   const result: any = { sha, dirty, allowDirty: opts.allowDirty, tier: opts.tier, node26Only: Boolean(opts.node26Only), base, dryRun: opts.dryRun, uncertainMapping: affected.uncertain, plan, nodeVersions: {}, counts: { pass: 0, fail: 0, skip: 0 }, retriedFiles: [], steps: [], status: 'FAIL', durationMs: 0 };
+  const sealed = opts.tier === 'release' ? releaseInputs() : undefined;
+  if (sealed) {
+    if (sealed.sha !== sha) throw new Error('release HEAD changed while enumerating inputs');
+    result.inputs = sealed;
+  }
   const started = Date.now();
   const runId = `${started}-${process.pid}`;
   result.runId = runId;
@@ -124,6 +186,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const env: NodeJS.ProcessEnv & { TMPDIR: string; AGENTCTL_TEST_TMP: string } = { ...process.env, TMPDIR: path.join(work, 'tmp'), AGENTCTL_TEST_TMP: path.join(work, 'tests'), npm_config_cache: path.join(work, 'npm-cache'), NODE_COMPILE_CACHE: path.join(work, 'compile-cache'), XDG_CACHE_HOME: path.join(work, 'cache') };
   for (const key of ['AGENTCTL_REAL_CODEX', 'AGENTCTL_REAL_CLAUDE', 'AGENTCTL_REAL_KIMI', 'AGENTCTL_BASELINE_ROOT']) delete env[key as keyof typeof env];
   async function run(name: string, command: string, argv: string[], extra: NodeJS.ProcessEnv = {}, required = true): Promise<{ code: number; text: string }> {
+    if (sealed) assertReleaseInputs(sealed, releaseInputs(), `before ${name}`);
     const log = path.join(path.dirname(output), `${opts.tier}-${runId}-${result.steps.length}-${name.replace(/[^a-z0-9-]/gi, '-')}.log`);
     const [cmd, wrapped] = heavyCommand(command, argv);
     console.log(`gate: ${name}`);
@@ -143,6 +206,11 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }).finally(() => { stopChild = undefined; stream.end(); });
     if (interrupted) throw new Error('Gate interrupted');
     result.steps.push({ name, command: [cmd, ...wrapped], code, log, durationMs: Date.now() - stepStart });
+    if (sealed) {
+      const inputs = releaseInputs();
+      result.steps.at(-1).inputs = inputs;
+      assertReleaseInputs(sealed, inputs, `after ${name}`);
+    }
     if (required && code !== 0) { result.counts.fail++; throw new Error(`${name} failed (${code}); see ${log}`); }
     return { code, text };
   }
@@ -170,9 +238,18 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     // Initial failures remain visible in counts; a successful retry is explicitly recorded.
     if (first.code !== 0 && (!failed.length || retryFailed)) throw new Error(`Tests failed on ${label}`);
   }
+  const runProdshape = async (node: string) => {
+    const evidence = path.join(path.dirname(output), `${opts.tier}-${runId}-prodshape.json`);
+    const result = await run('prodshape', node, ['--experimental-strip-types', '--no-warnings', 'scripts/prodshape.ts'], {
+      AGENTCTL_PRODSHAPE_WORK: work,
+      AGENTCTL_PRODSHAPE_EVIDENCE: evidence,
+      UV_THREADPOOL_SIZE: process.env.UV_THREADPOOL_SIZE ?? WATCH_IO_THREADS,
+    }, false);
+    return result.code;
+  };
   try {
     assertClean(opts, dirty);
-    if (opts.dryRun) { result.status = 'PASS'; console.log(JSON.stringify({ ...result, runtimes: [node22Path(), 'Homebrew Node 26'], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
+    if (opts.dryRun) { result.status = 'PASS'; console.log(JSON.stringify({ ...result, runtimes: [node22Path(), node26Label()], loadPolicy: 'nice -n 10; macOS taskpolicy -b; no load waiting', lock: path.join(runtimesDir(), '.gate.lock') }, null, 2)); result.status = 'PASS'; return; }
     fs.mkdirSync(env.TMPDIR, { recursive: true }); fs.mkdirSync(env.AGENTCTL_TEST_TMP, { recursive: true });
     if (opts.tier !== 'quick') release = await acquireLock(path.join(runtimesDir(), '.gate.lock'), undefined, async () => {
       if (interrupted) throw new Error('Gate interrupted while waiting for lock');
@@ -186,9 +263,15 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       await run('diff-check', 'git', ['diff', '--check']);
       await run('regression', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']);
       await testSuite(process.execPath, 'current', affected.tests);
+    } else if (opts.tier === 'prodshape') {
+      result.nodeVersions.current = checkRuntime(process.execPath, `${process.versions.node}`);
+      const failed = await runReleaseChecks(['prodshape'], async name => name === 'prodshape' ? runProdshape(process.execPath)
+        : (await run('regression', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts'], {}, false)).code);
+      result.counts.fail += failed.length;
+      if (failed.length) throw new Error(`Prodshape checks failed: ${failed.join(', ')}`);
     } else {
       if (!opts.node26Only) await run('runtime-node22', process.execPath, ['--experimental-strip-types', '--no-warnings', 'scripts/runtime.ts', work]);
-      const node22 = node22Path(), node26 = homebrewNode26();
+      const node22 = node22Path(), node26 = node26Runtime();
       result.nodeVersions = { ...(!opts.node26Only ? { node22: checkRuntime(node22, '22.14.0') } : {}), node26: checkRuntime(node26, '26.') };
       if (opts.tier === 'full') { if (!opts.node26Only) await testSuite(node22, 'node22', tests); await testSuite(node26, 'node26', tests); await run('regression', node26, ['--experimental-strip-types', '--no-warnings', 'scripts/regression.ts']); }
       else {
@@ -204,23 +287,29 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
         }
         const packed = await run('pack', node26, [npm, 'pack', staging, '--ignore-scripts', '--json', '--pack-destination', work], { npm_config_update_notifier: 'false' });
         const tarball = path.join(work, packJson(packed.text)[0]!.filename);
-        for (const [label, node] of [['node22', node22], ['node26', node26]]) {
-          const runtimeEnv = { AGENTCTL_SMOKE_NODE: label, AGENTCTL_SMOKE_TARBALL: tarball, AGENTCTL_NODE22: node22, AGENTCTL_NODE26: node26, AGENTCTL_NPM26: npm, PATH: `${path.dirname(node)}:${env.PATH}` };
-          await run(`smoke-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/smoke-package.ts'], runtimeEnv);
-          result.counts.pass += 12;
-          await run(`doctor-${label}`, node!, ['--experimental-strip-types', '--no-warnings', 'scripts/doctor-matrix.ts'], runtimeEnv);
-          result.counts.pass += 10;
-        }
         if (opts.skipLive) result.counts.skip += live.length;
-        const failures = await runReleaseChecks(opts.skipLive ? [] : live, async name => {
+        const failures = await runReleaseChecks([...(opts.skipLive ? [] : live), 'prodshape'], async name => {
+          if (name === 'prodshape') return runProdshape(node26);
+          const matrix = /^(smoke|doctor)-(node22|node26)$/.exec(name);
+          if (matrix) {
+            const [, kind, label] = matrix;
+            const node = label === 'node22' ? node22 : node26;
+            const runtimeEnv = { AGENTCTL_SMOKE_NODE: label, AGENTCTL_SMOKE_TARBALL: tarball, AGENTCTL_SMOKE_NPM_CACHE: env.npm_config_cache, AGENTCTL_NODE22: node22, AGENTCTL_NODE26: node26, AGENTCTL_NPM26: npm, PATH: `${path.dirname(node)}:${env.PATH}` };
+            const file = kind === 'smoke' ? 'scripts/smoke-package.ts' : 'scripts/doctor-matrix.ts';
+            const step = await run(name, node, ['--experimental-strip-types', '--no-warnings', file], runtimeEnv, false);
+            if (step.code === 0) result.counts.pass += kind === 'smoke' ? 12 : 10;
+            else if (kind === 'smoke') result.counts.skip += 10;
+            return step.code;
+          }
           const file = name === 'regression' ? 'scripts/regression.ts' : name;
           const step = await run(name, node26, ['--experimental-strip-types', '--no-warnings', file], {}, false);
           return step.code;
-        });
+        }, ['node22', 'node26']);
         result.counts.fail += failures.length;
         if (failures.length) throw new Error(`Release checks failed: ${failures.join(', ')}; see step logs in ${path.dirname(output)}`);
       }
     }
+    if (sealed) assertReleaseInputs(sealed, releaseInputs(), 'final result');
     result.status = 'PASS';
   } catch (error) { result.error = String(error); throw error; }
   finally {

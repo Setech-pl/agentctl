@@ -23,6 +23,7 @@ export type OutputVerdict = typeof VERDICTS[number];
 const refText = z.string().min(1).refine(v => !/\[[^\]]+\]|^<[^>]+>$|^(?:TODO|TBD)$/i.test(v), 'placeholder value is not a published reference');
 const ref = z.object({ repo: refText, branch: refText, sha: refText.regex(/^[a-f0-9]{7,40}$/i, 'expected a git SHA; quote the SHA if YAML cannot preserve it') }).strict();
 const integrateRef = ref.extend({ base: refText.optional(), note: z.string().optional() });
+const deferredGate = z.object({ cell: z.string().min(1), where: z.string().min(1) }).strict();
 const decision = z.string().min(1);
 const action = z.object({ title: z.string().min(1), shell: z.string().min(1) }).strict();
 export const CHECK_RESULTS = ['PASS', 'FAIL', 'WARN', 'SKIP'] as const;
@@ -40,14 +41,14 @@ export const outputsSchema = z.object({
   decisions: z.array(decision).default([]),
   actions: z.array(action).default([]),
   persist: z.array(z.string()).optional(), artifacts: z.array(z.union([z.string(), z.object({path: z.string()}).passthrough()])).optional(), refs: z.array(z.union([z.string(), z.object({path: z.string()}).passthrough()])).optional(),
-  checks: z.array(checkInput).default([]), preview: z.url().optional(), notes: z.array(z.string()).default([]),
+  checks: z.array(checkInput).default([]), deferred: z.array(deferredGate).optional(), preview: z.url().optional(), notes: z.array(z.string()).default([]),
 }).strict();
 export interface Outputs {
   version: 1; verdict: OutputVerdict;
   commits: z.infer<typeof ref>[]; integrate: z.infer<typeof integrateRef>[];
   decisions: string[]; actions: z.infer<typeof action>[]; checks: Check[];
   persist?: string[]; artifacts?: (string | {path: string})[]; refs?: (string | {path: string})[];
-  preview?: string; notes: string[];
+  deferred?: z.infer<typeof deferredGate>[]; preview?: string; notes: string[];
 }
 /** `outputs_valid`: everything was accepted. `outputs_partial`: `outputs` holds the valid part of a block that had bad entries (listed in `outputs_errors`). */
 export interface OutputData { outputs_warnings?: string[]; outputs: Outputs | null; outputs_valid: boolean; outputs_errors: string[]; outputs_partial?: boolean; /** The report is not finished yet (no report-end / not settled): the block is not judged. */ outputs_pending?: boolean }
@@ -82,7 +83,7 @@ function takeList<T>(raw: unknown, section: string, item: z.ZodType<T>, errors: 
 }
 
 /** `wall_posts` is not part of Outputs: agentctl publishes it on the WALL once per attempt (journalOutputs), and its problems are findings of that event. */
-const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts', 'persist', 'artifacts', 'refs'];
+const OUTPUT_KEYS = ['version', 'verdict', 'commits', 'integrate', 'decisions', 'actions', 'checks', 'preview', 'notes', 'wall_posts', 'persist', 'artifacts', 'refs', 'deferred'];
 
 /** The verdict words a review report may declare; they map onto the output verdicts (GO = PASS, GO-WITH-CHANGES = PARTIAL, NO-GO = FAIL). */
 const REVIEW_VERDICT_ALIAS: Record<string, OutputVerdict> = { GO: 'PASS', 'GO-WITH-CHANGES': 'PARTIAL', 'NO-GO': 'FAIL' };
@@ -195,7 +196,7 @@ export function parseOutputs(text: string, opts: { review?: boolean } = {}): Out
   const verdict = z.enum(VERDICTS).safeParse(declared);
   if (!verdict.success) errors.push(`verdict: expected one of ${VERDICTS.join(', ')}`);
   if (errors.length) return { outputs: null, outputs_valid: false, outputs_errors: errors, outputs_partial: false };
-  for (const key of Object.keys(d)) if (!OUTPUT_KEYS.includes(key)) errors.push(`${key}: unknown field (ignored)`);
+  for (const key of Object.keys(d)) if (!OUTPUT_KEYS.includes(key) && !key.startsWith('x_')) errors.push(`${key}: unknown field (ignored)`);
   const commits = takeList(d.commits, 'commits', ref, errors), integrate = takeList(d.integrate, 'integrate', integrateRef, errors);
   const decisions = takeList(d.decisions, 'decisions', decision, errors), actions = takeList(d.actions, 'actions', action, errors);
   const checks = takeList(d.checks, 'checks', checkInput, errors).map(normalizeCheck);
@@ -203,7 +204,8 @@ export function parseOutputs(text: string, opts: { review?: boolean } = {}): Out
   if (d.preview !== undefined && d.preview !== null) { const u = z.url().safeParse(d.preview); if (u.success) preview = u.data; else errors.push('preview: expected a URL (ignored)'); }
   const notes = takeList(d.notes, 'notes', z.string(), errors);
   const preserved = Object.fromEntries(['persist', 'artifacts', 'refs'].filter(k => d[k] !== undefined).map(k => [k, takeList(d[k], k, k === 'persist' ? z.string() : z.union([z.string(), z.object({path: z.string()}).passthrough()]), errors)]));
-  const outputs: Outputs = { ...preserved, version: 1, verdict: verdict.data!, commits, integrate, decisions, actions, checks, ...(preview ? { preview } : {}), notes };
+  const deferred = d.deferred === undefined ? undefined : takeList(d.deferred, 'deferred', deferredGate, errors);
+  const outputs: Outputs = { ...preserved, ...(deferred ? { deferred } : {}), version: 1, verdict: verdict.data!, commits, integrate, decisions, actions, checks, ...(preview ? { preview } : {}), notes };
   return { outputs, outputs_valid: errors.length === 0, outputs_errors: errors, outputs_partial: errors.length > 0 };
 }
 
@@ -309,13 +311,14 @@ export function normalizeDependencyVerdict(value: string): OutputVerdict | undef
 }
 export function dependencyVerdict(text: string, review = false): OutputVerdict | undefined {
   const line = firstReportLine(text);
-  const found = /^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS\s+with\s+findings|GO-WITH-CHANGES|NO-GO|PASS|PARTIAL|FAIL|BLOCKED|GO)(?=$|[\s*—–.:;,])/i.exec(line)?.[1];
+  const found = /^\s*(?:#{1,6}\s*)?(?:\*\*)?(?:Werdykt|Verdict):\s*(?:\*\*)?(PASS\s+with\s+findings|GO-WITH-CHANGES|NO-GO|PASS|PARTIAL|FAIL|BLOCKED|GO)(?=$|[\s*—–.:;,(\[])/i.exec(line)?.[1];
   return found ? normalizeDependencyVerdict(found) : review ? reviewVerdict(text) && reviewVerdictAsOutput(reviewVerdict(text)!.first) : undefined;
 }
 
 const OUTPUT_PROTOCOL_LINES = [
   'Before report-end write exactly one fenced ```agentctl-outputs YAML block (schema version: 1).',
   'Fields: version: 1; verdict: PASS|PARTIAL|FAIL|BLOCKED; commits: [{repo, branch, sha}]; integrate: [{repo, branch, sha, note?}]; decisions: [text]; actions: [{title, shell}]; checks: [{name, result: PASS|FAIL|WARN|SKIP, note?}]; preview: URL (optional); notes: [text].',
+  'Optional deferred: [{cell, where}] records gate cells deferred to another machine. Extension fields starting with x_ are ignored.',
   'Write each check as a mapping, for example `- {name: "unit tests", result: PASS}`. A one-key mapping (`- unit tests: PASS`), a plain text and a lower-case result (`pass`) are also accepted and normalized by agentctl; they are not format errors, do not report them as such.',
   '`repo` is the name of the repository: the last part of its path (for example `sandbox` for ~/code/sandbox). The repository path or the path of your worktree are accepted too. Example: `commits: [{repo: sandbox, branch: dev-u1, sha: 3db6b8d}]`. A reviewer writes the repo of the code it reviews the same way.',
   'Use existing branches and commit SHAs in the task repositories. Use empty lists for no items; omit unknown preview. These are reported facts and proposed actions; agentctl never executes actions or merges.',
@@ -335,9 +338,9 @@ export const REVIEW_OUTPUT_PROTOCOL = [
  * Outputs are judged only on a finished report of the current attempt: the explicit report-end plus the settle time. Before that the agent is
  * still writing, and "missing block" would be a false alarm. Tasks from before the protocol keep the old rule.
  */
-export function outputsPending(config: Pick<Context['config'], 'reportSettleS'>, record: Pick<TaskRecord, 'outputsProtocol'>, report: { sentinel?: boolean; mtime?: number }, nowMs: number): boolean {
+export function outputsPending(config: Pick<Context['config'], 'reportSettleS'>, record: Pick<TaskRecord, 'outputsProtocol'>, report: { sentinel?: boolean; structured?: boolean; mtime?: number }, nowMs: number): boolean {
   if (!record.outputsProtocol) return false;
-  if (!report.sentinel) return true;
+  if (!report.sentinel && !report.structured) return true;
   return config.reportSettleS > 0 && report.mtime !== undefined && nowMs - report.mtime < config.reportSettleS * 1000;
 }
 
@@ -345,7 +348,7 @@ export function outputsPending(config: Pick<Context['config'], 'reportSettleS'>,
 export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { readOnly?: boolean } = {}): Promise<void> {
   if (ctx.runner.dryRun) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
-  if (!report.ready || !report.signature || (record.attemptId && !report.sentinel)) return;
+  if (!report.ready || !report.signature || (record.attemptId && !report.sentinel && !report.structured)) return;
   if (!opts.readOnly) await cleanWorktreeCache(ctx, record);
   const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
   if (outputsPending(ctx.config, record, report, ctx.runner.now())) return;
@@ -353,6 +356,13 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
   await withFileLock(`${file}.lock`, async () => {
     let seen: string[] = [];
     try { seen = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first report */ }
+    const text = readReportText(ctx.config, record, record.report);
+    if ((report.sentinel || record.outputsProtocol) && !dependencyVerdict(text, !!record.reviewOf)) {
+      const message = `${record.task}: ambiguous or missing first-line verdict`;
+      if (!readJournal(ctx.config, -1).some(e => e.kind === 'ambiguous-verdict' && e.task === record.task && e.reportHash === report.signature)) {
+        await recordJournal(ctx, {kind: 'ambiguous-verdict', task: record.task, reportHash: report.signature, reportAttempt: identity, text: message});
+      }
+    }
     if (seen.includes(identity)) return;
     const data = await readOutputs(ctx, record);
     // A closed task from before the protocol was never asked for the block: its absence is not a warning (a block it has is still journaled).

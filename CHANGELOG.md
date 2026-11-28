@@ -7,6 +7,52 @@ All notable changes to this project are documented here. The format follows [Kee
 - Mac and PC dispatch now supports automatic SSH placement, per-host health and capacity, owner reservations and fetch-only branch sync. / Dyspozytor Mac + PC automatycznie wybiera host po SSH, sprawdza jego stan i limity, respektuje rezerwacje właściciela i synchronizuje gałęzie przez fetch.
 - `class: perf` reserves a worker and transfers bounded builds and measurement results. / `class: perf` rezerwuje host i przesyła buildy oraz wyniki pomiarów z limitem rozmiaru.
 
+- Watch treats a vanished agentctl tmux session as empty on tmux 3.4 ("can't find window", "no current target") instead of failing status collection every tick; also for remote host GC. / Watch traktuje zniknięcie sesji tmux agentctl w tmux 3.4 ("can't find window", "no current target") jako pustą listę zamiast błędu odczytu stanu w każdym przebiegu; dotyczy też GC hostów zdalnych.
+- Watch again flags a configured report candidate (a `report:` pattern match) for open tasks such as needs-input, without a discovery walk for every row. / Watch ponownie oznacza kandydata raportu ze wzorca `report:` dla otwartych zadań, np. needs-input, bez przeszukiwania katalogów dla każdego wiersza.
+- MCP status serves a complete watch snapshot up to 60 s old (like limits and queue_list), with its age, instead of the slow fallback when a loaded watch cycle exceeds two intervals. / MCP status zwraca pełny snapshot watch do 60 s (jak limits i queue_list) wraz z jego wiekiem zamiast wolnego odczytu zastępczego, gdy obciążony cykl watch przekracza dwa interwały.
+- MCP limits and queue_list stay on the fresh watch snapshot when a provider hold or reservation changes after the tick; the parts that depend on them are derived again from the snapshot. / MCP limits i queue_list korzystają ze świeżego snapshotu watch także po zmianie blokady dostawcy lub rezerwacji po przebiegu; zależne od nich części są wyliczane ponownie ze snapshotu.
+- An unreachable remote host's state file is written only when its state changes, not on every window inventory. / Plik stanu nieosiągalnego hosta zdalnego jest zapisywany tylko przy zmianie stanu, a nie przy każdym odczycie okien.
+- Watch state writes and log appends fsync off the event loop, so a long admission round no longer stalls status and delivery under I/O pressure. / Zapisy stanu i dziennika watch wykonują fsync poza pętlą zdarzeń, więc długie przyjmowanie kolejki nie wstrzymuje już statusu i dostarczania przy obciążonym dysku.
+- The release gate reads `npm pack --json` from npm 12, which keys the result by package name. / Bramka wydania odczytuje `npm pack --json` z npm 12, który zwraca obiekt według nazwy pakietu.
+- `npm run gate` full/release run on Linux: Node 22.14.0 is provisioned for the host platform (verified against SHASUMS256) and Node 26 is the gate's own Node outside macOS, where Homebrew is not required. / `npm run gate` full/release działa na Linuksie: Node 22.14.0 jest pobierany dla platformy hosta (z weryfikacją SHASUMS256), a poza macOS Node 26 to Node uruchamiający bramkę, bez Homebrew.
+- `npm run gate` falls back to the newest reachable release tag, with a warning, when the default base tag `agentctl-0181-rc1` is missing in the clone. / `npm run gate` przy braku domyślnego tagu bazowego `agentctl-0181-rc1` używa najnowszego osiągalnego tagu wydania i wypisuje ostrzeżenie.
+- Live test harness runs on Linux hosts whose /usr/bin holds a real claude or codex: the sandbox PATH uses a masked copy of the system directories instead of refusing. / Środowisko testów live działa na Linuksie z prawdziwym claude lub codex w /usr/bin: PATH piaskownicy używa kopii katalogów systemowych bez agentów zamiast odmowy.
+- Cached file reads no longer trust a file changed within the last 100 ms. On Linux a same-size rewrite in one clock tick could reuse the inode, so a queue entry kept its old status. / Odczyty z pamięci podręcznej nie ufają plikom zmienionym w ostatnich 100 ms. Na Linuksie zapis tej samej długości w jednym takcie zegara mógł dostać ten sam i-węzeł, przez co wpis kolejki zachowywał stary status.
+- Watch preserves the last complete snapshot when its task inventory cannot be read. / Watch zachowuje ostatni pełny snapshot, gdy odczyt katalogu zadań kończy się błędem.
+- Watch checks unchanged queue entries by file version and continues reading task headers while one file is delayed. Writing watch progress no longer rechecks every active task. / Watch sprawdza niezmienione wpisy kolejki po wersji pliku i czyta kolejne nagłówki podczas opóźnionego odczytu. Zapis postępu nie powoduje ponownego sprawdzania aktywnych zadań.
+- Watch publishes complete rows before launching maintenance and shares its task inventory with usage sampling. The first tick still includes loading the initial inventory. / Watch publikuje pełne wiersze przed pracami pomocniczymi i używa wspólnego indeksu do odczytu zużycia. Pierwszy przebieg obejmuje początkowy odczyt indeksu.
+- Confirmed GC revalidates task headers asynchronously and keeps cohort summaries in the event stream. Trash purge carries measured results by volume. / Potwierdzone GC sprawdza nagłówki asynchronicznie i zachowuje podsumowania kohort w zdarzeniach. Opróżnianie kosza zwraca pomiary według woluminu.
+
+- Watch refreshes its index after a confirmed cancellation. Cached doctor and GC previews reuse asynchronous task inventories. / Watch odświeża indeks po potwierdzonym anulowaniu. Podglądy GC i skrócony doctor współdzielą asynchroniczny odczyt zadań.
+
+- Watch reuses indexed headers for launch and status, checks plan readings separately from token accounting, and runs admission independently of status. Legacy launches wait for a named resume without a duplicate window-loss alert. / Watch współdzieli indeks nagłówków, oddziela odczyt limitów od zliczania tokenów i uruchamia kolejkę niezależnie od odczytu stanu. Przerwane starty starszej wersji czekają na jawne wznowienie bez powielonego alertu o oknie.
+- MCP continues large responses by encoding one bounded fragment at a time. / MCP koduje każdą kolejną część dużej odpowiedzi osobno, zgodnie z limitem.
+- Journal writes append asynchronously and preserve the state of previous complete lines. / Dziennik dopisuje zdarzenia asynchronicznie i zachowuje wcześniejsze pełne wpisy.
+- Watch batches hold events and keeps diagnostic heartbeat writes off stage boundaries. / Watch zapisuje zdarzenia wstrzymania grupowo i ogranicza zapisy diagnostyczne między etapami.
+- Integration GC removes a worktree under its own Git timeout. Prompt delivery keeps the pending prompt queued when the admission deadline is close. / GC po integracji usuwa worktree z limitem Git. Dostarczanie odkłada wiadomość, gdy zbliża się koniec czasu operacji.
+- Admission locks retain the legacy PID format during upgrades and downgrades. / Blokady startu zachowują format PID podczas aktualizacji i powrotu do starszej wersji.
+- Accepted starts run slow validation outside the admission lock, and lock waiters can wait for the full short holder budget. / Przyjęte starty wykonują wolne sprawdzenia poza blokadą, a operacje mogą przeczekać pełny limit krótkiego uchwytu.
+- Watch shares task and disk inventories across stages and retains the last complete rows and their original timestamp after a collection failure. / Watch współdzieli odczyty zadań i dysków, a po błędzie zachowuje ostatnie pełne wiersze z ich oryginalną datą.
+- A setup retry checks all reused checkouts with one bounded process census. / Ponowienie setupu sprawdza wszystkie używane worktree jednym odczytem procesów z limitem czasu.
+- High load raises alerts. Queue admission holds only with `queue.hold_on_load: true` and an explicit `capacity.load_threshold`. / Wysokie obciążenie zgłasza alert. Kolejka wstrzymuje starty po ustawieniu `queue.hold_on_load: true` i jawnego `capacity.load_threshold`.
+- Launch retries run outside the watch tick with bounded commands. Legacy interrupted launches wait for a named resume. / Watch ponawia start w tle z limitami czasu, a stare przerwane starty czekają na jawne wznowienie zadania.
+- Watch rejects old MCP limit writes. Quit and reopen Claude with ⌘Q after updating. `agentctl config downgrade-check --to 0.26.x` checks manual rollback compatibility and prunes expired overrides. / Watch blokuje zmiany limitów ze starego MCP. Po aktualizacji zamknij Claude przez ⌘Q. Polecenie sprawdza konfigurację przed ręcznym powrotem i usuwa wygasłe limity czasowe.
+
+- Stable clone upgrades verify the installed version, watch progress, queue admission, MCP reads and the board. A failed check restores the previous runtime and configuration by default and posts an owner WALL info.
+
+- `agentctl canary --from <home> --minutes 30` replays a sanitized state inventory in a private fake-provider sandbox.
+
+- Release includes a production-shape gate with a fake-agent watcher under CPU and filesystem contention, an admission deadline, MCP read budgets, and queue/close/GC confirmation checks. Disk and provider limits are visible in the board header.
+- A missed nominal watch interval keeps full queue and limit data available from a recent complete snapshot.
+- Local GC leaves Git’s uncommitted-file protection in force for explicitly selected worktrees. / Lokalne GC zachowuje ochronę niezatwierdzonych plików Git również dla worktree wskazanych jawnie.
+- Watch checks idle delivery queues without taking the shared start lock. / Watch sprawdza puste kolejki wiadomości bez zajmowania wspólnej blokady startu.
+
+- Release gate results seal the candidate SHA and source/fixture contents at every step, and fail if those inputs change.
+
+- **WALL agentctl-102 (W102-VOLUME):** Admission checks each worktree volume and a configurable 5 GiB floor for state, and queue previews name the worktree volumes.
+
+- **WALL agentctl-110 (W110-A–I):** Promote stalled watch stages and restart a wedged watcher, verify missing tmux windows, recognize complete idle reports, explain terminal dependencies and ambiguous verdicts, and retry provider version-check failures. Report outputs accept deferred cells and namespaced extensions. Chat quotas can be cleared, and expired plan percentages are excluded.
+
 - Early task exits keep the CLI exit code, pane tail and log path. Watch retries once in the original worktree. Dead tasks can be resumed under the same ID and waiting dependencies show the cause. / Po wczesnym zakończeniu zadania zostają kod wyjścia, końcówka ekranu i ścieżka logu. Watch ponawia start w tym samym worktree. Martwe zadanie można wznowić pod tym samym ID, a zadania zależne pokazują przyczynę oczekiwania.
 - Exact task IDs take precedence across CLI and MCP, including closed tasks and queue entries. `task_spec` also returns queued-only specifications. / Dokładny identyfikator ma pierwszeństwo w CLI i MCP, także dla zamkniętych zadań i wpisów w kolejce. `task_spec` pokazuje też specyfikacje zadań czekających w kolejce.
 - Status, events, capacity, limits and the board share task accounting. Expired readings display their age. Named chats see their effective quota and global headroom. / Status, zdarzenia, pojemność, limity i tablica liczą zadania wspólnie. Nieaktualne odczyty pokazują swój wiek. Nazwany czat widzi własną kwotę i wolne miejsca globalne.
@@ -38,6 +84,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
 
+## [0.27.2] - 2026-11-25
+
+- Production-shape release checks, shadow replay, and stable-update rollback. [Release notes](docs/release-notes/0.27.2.en.md) · [Informacje o wydaniu](docs/release-notes/0.27.2.pl.md).
+
 ## [0.27.1] - 2026-11-24
 
 Field fixes for launch recovery and operator reads / Poprawki wznowień i widoków operacyjnych. [Release notes (EN)](docs/release-notes/0.27.1.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.1.pl.md).
@@ -45,6 +95,20 @@ Field fixes for launch recovery and operator reads / Poprawki wznowień i widok�
 ## [0.27.0] - 2026-11-22
 
 Owner-controlled limits and proportional chat quotas / Limity właściciela i proporcjonalne kwoty czatów. [Release notes (EN)](docs/release-notes/0.27.0.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.0.pl.md).
+
+## [0.26.2] - 2026-11-26
+
+- Retry the prepared start commit under contention, recover expired start locks, and keep prompt delivery and long Git removal outside admission. / Ponawiaj zapis przygotowanego startu, odzyskuj wygasłe blokady i wykonuj dostarczenie promptu oraz długie usuwanie Git poza blokadą.
+- Require ownership evidence for legacy Trash, journal named dirty-worktree overrides, and accept known 0.27.x config keys on rollback. / Wymagaj dowodu własności starszych pozycji kosza, zapisuj zgodę na usunięcie zmienionych worktree i akceptuj znane klucze 0.27.x po powrocie do tej wersji.
+- Add opt-in automatic disk reclamation, per-volume measurements for MCP Trash purge and owner-defined MCP GC scope. / Dodaj włączane przez właściciela automatyczne GC, pomiary odzysku z kosza według woluminu oraz zakres GC dla MCP.
+
+[Release notes (EN)](docs/release-notes/0.26.2.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.26.2.pl.md).
+
+## [0.26.1] - 2026-11-25
+
+- HOTFIX0263-START/LOCK: Bound checkout and setup, reclaim stale start locks and release setup slots. / Limity czasu checkoutu i setupu, odzyskiwanie nieaktywnych blokad startu i zwalnianie miejsc setupu.
+- HOTFIX0263-WATCH: Supervise tmux watch and recover interrupted starts and MCP writes. / Nadzór watch w tmux i odzyskiwanie przerwanych startów oraz zapisów MCP.
+- HOTFIX0263-DISK/TRASH: Delete directly by default, measure actual reclaimed space and support a scoped Trash purge. / Domyślnie usuwaj bezpośrednio, mierz odzyskane miejsce i ogranicz opróżnianie kosza do wskazanych elementów.
 
 ## [0.26.0] - 2026-11-22
 

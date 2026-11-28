@@ -1,25 +1,29 @@
+import { defaultDeps } from '../src/cli.ts';
+import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { it, type TestContext } from 'node:test';
+import { packageVersion } from '../src/core/version.ts';
 import { closeTask } from '../src/core/close.ts';
 import { loadGlobalConfig } from '../src/core/config.ts';
 import { Context } from '../src/core/context.ts';
 import { collectDisk, diskStartHold } from '../src/core/disk.ts';
 import { applyGc, planGc } from '../src/core/gc.ts';
-import { readJournal } from '../src/core/journal.ts';
+import { readJournal, recordJournal } from '../src/core/journal.ts';
 import { readTaskRecord, taskDir } from '../src/core/taskstore.ts';
 import { newTasks } from '../src/core/new.ts';
-import { applyAcceptedWrites, describeQueue, QueueMemory, queueTick, readQueue, registerDirectStart, retryEntry, unblockEntry } from '../src/core/queue.ts';
+import { applyAcceptedWrites, describeQueue, describeQueueAdd, QueueMemory, queueTick, readQueue, registerDirectStart, retryEntry, unblockEntry } from '../src/core/queue.ts';
 import { RealRunner, type ExecOptions } from '../src/core/runner.ts';
 import { resolveSpec, splitSpecs } from '../src/core/spec.ts';
 import { DiskRunner, FakeTmux, fakeWatcher, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
 import { collectStatus } from '../src/core/status.ts';
 import { WatchMemory, watchTick } from '../src/core/watch.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
-import { readMcpRequests } from '../src/core/mcp-requests.ts';
+import { mcpRequestDir, readMcpRequests, recordMcpRequest } from '../src/core/mcp-requests.ts';
 import { readThread, readWall } from '../src/core/wall.ts';
 
 const scratch = useScratch();
@@ -30,7 +34,9 @@ function git(root: string, ...args: string[]): string {
 }
 
 function world(name: string, yaml: (root: string) => string = () => '', payload?: Buffer) {
-  const root = scratch.sub(name), repo = scratch.sub(`${name}/repo`), trash = scratch.sub(`${name}/fixture-trash`);
+  const root = scratch.sub(name), repo = scratch.sub(`${name}/repo`);
+  const trash = process.platform === 'darwin' ? path.join(os.homedir(), '.Trash') : path.join(os.homedir(), '.local/share/Trash/files');
+  fs.mkdirSync(trash, { recursive: true });
   git(repo, 'init', '-b', 'main');
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.cache/\ndist*/\nprofile/\n');
   fs.mkdirSync(path.join(repo, 'dist-tracked'));
@@ -72,8 +78,9 @@ function world(name: string, yaml: (root: string) => string = () => '', payload?
       if (cmd === 'osascript' || cmd === 'gio') {
         const target = args.at(-1)!;
         moves.push(target);
-        fs.renameSync(target, path.join(trash, `${moves.length}-${path.basename(target)}`));
-        return { code: 0, stdout: '', stderr: '' };
+        const destination = path.join(trash, `${moves.length}-${path.basename(target)}`);
+        fs.renameSync(target, destination);
+        return { code: 0, stdout: pathToFileURL(destination).href, stderr: '' };
       }
       if (cmd.endsWith('lsof')) return { code: 1, stdout: '', stderr: '' };
       if (cmd === 'ps') return { code: 0, stdout: '', stderr: '' };
@@ -88,7 +95,7 @@ function world(name: string, yaml: (root: string) => string = () => '', payload?
     return { raw, spec: resolveSpec(raw, { config }) };
   };
   const notifier = { clickable: false, notify: async (_title: string, message: string) => { notifications.push(message); } };
-  return { root, repo, config, ctx, runner, tmux, spec, notifier, installs, copies, moves, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
+  return { root, repo, config, ctx, runner, tmux, spec, notifier, installs, copies, moves, trash, notifications, failCopy: () => { failClone = true; }, interceptGit: (f: typeof interceptGit) => { interceptGit = f; } };
 }
 
 it('FLOW-READONLY: a stopped author lends its worktree with agent-scoped commit and push hooks', async () => {
@@ -255,9 +262,15 @@ it('FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm
   const again = await gc.run(deps, { request_id: id });
   const newToken = /preview_token: (\S+)/.exec(again.text)?.[1];
   assert.ok(newToken);
+  let removalUnderAdmissionLock: boolean | undefined;
+  w.interceptGit(args => {
+    if (args[2] === 'worktree' && args[3] === 'remove') removalUnderAdmissionLock = fs.existsSync(path.join(w.config.stateDir, 'start.lock'));
+    return undefined;
+  });
   assert.match((await gc.run(deps, { preview_token: newToken, confirm: true })).text, /^Accepted/);
   await applyAcceptedWrites(w.ctx, w.notifier, {});
   assert.equal(readMcpRequests(w.config).find(request => request.token === newToken)?.status, 'done');
+  assert.equal(removalUnderAdmissionLock, false, 'worktree removal has its own Git budget');
   assert.equal(fs.existsSync(good), false);
   for (const kept of [cancelled, dirty, untracked, linked, pinned, unmerged, live]) assert.ok(fs.existsSync(kept), kept);
 });
@@ -275,7 +288,7 @@ it('FLOW-GC: off skips movements and propose detects a merge commit on master', 
   await watchTick(w.ctx, new WatchMemory(), w.notifier);
   assert.deepEqual(readMcpRequests(w.config), []);
   assert.ok(fs.existsSync(worktree));
-  w.ctx.setConfig({ ...w.config, gc: { afterIntegration: 'propose' } });
+  w.ctx.setConfig({ ...w.config, gc: { ...w.config.gc, afterIntegration: 'propose' } });
   await watchTick(w.ctx, new WatchMemory(), w.notifier);
   assert.deepEqual(readMcpRequests(w.config), [], 're-enabling establishes a new baseline');
   git(worktree, 'commit', '--allow-empty', '-m', 'next feature');
@@ -394,8 +407,8 @@ it('DISK0248-NM: same lockfile installs once, creates independent copies and exp
   assert.equal(w.moves.length, 0);
   const applied = await applyGc(w.ctx, preview);
   assert.equal(applied.failed.length, 0);
-  assert.equal(w.moves.length, 2);
-  assert.equal(applied.freedBytes, 0, 'Trash retains allocated bytes');
+  assert.equal(w.moves.length, 0);
+  assert.ok(entries.every(entry => !fs.existsSync(entry.target)));
   assert.equal(fs.readFileSync(file(b), 'utf8'), 'original');
 });
 
@@ -416,7 +429,7 @@ it('close cleanup config rejects paths outside the worktree', () => {
   assert.throws(() => loadGlobalConfig(path.dirname(w.config.path)), /invalid|cleanup/i);
 });
 
-it('DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untracked, linked and report paths', async () => {
+it('DISK0248-CLOSE: close removes ignored outputs, leaving tracked, untracked, linked and report paths', async () => {
   const w = world('close');
   Object.assign(w.config, { closeCleanup: ['.cache', 'dist*', 'profile/*', '*-dirty'] });
   const spec = w.spec('TRASH').spec;
@@ -431,12 +444,12 @@ it('DISK0248-CLOSE: close sends ignored outputs to Trash, leaving tracked, untra
   seedTask(w.config, spec.task, { repos: spec.repos, report: path.join(wt, 'profile/report/item') });
   await closeTask(w.ctx, spec.task);
   const expected = ['.cache', 'dist-ok', 'profile/run'].map(name => path.join(wt, name));
-  assert.deepEqual([...w.moves].sort(), [...expected].sort());
+  assert.deepEqual(w.moves, []);
+  assert.ok(expected.every(target => !fs.existsSync(target)));
   for (const name of ['dist-tracked/tracked.txt', 'plain-dirty/item', 'dist-link', 'profile/report/item']) assert.ok(fs.existsSync(path.join(wt, name)), name);
   const cleanup = readJournal(w.config).find(event => event.cleanup)?.cleanup;
   assert.deepEqual(cleanup?.moved.map(item => item.path).sort(), [...expected].sort());
-  assert.equal(cleanup?.bytes, cleanup?.moved.reduce((total, item) => total + item.bytes, 0));
-  assert.ok(cleanup!.bytes > 0);
+  assert.equal(cleanup?.bytes, 0, 'unchanged fixture volume counter');
 });
 
 function fakeMount(t: TestContext, mount: string) {
@@ -519,4 +532,384 @@ it('DISK0248-LOCK: interrupted checkout clears only its initializing locks and p
   await memory.idle();
   assert.ok(fs.existsSync(path.join(wt, '.git')));
   assert.ok(fs.existsSync(path.join(unrelated, 'locked')));
+});
+
+it('W102-VOLUME: external checkout uses its own floor and close/GC keep data safe across volumes', async t => {
+  const w = world('second-volume', () => 'disk: {min_free_start_gb: 30}\n');
+  const mount = path.join(w.root, 'crucial');
+  fs.mkdirSync(mount);
+  fakeMount(t, mount);
+  const value = w.spec('EXTERNAL', true).spec;
+  const repo = value.repos[0]!;
+  repo.worktree = path.join(mount, 'external');
+  repo.worktreeMount = mount;
+  let localFree = 8, externalFree = 40;
+  const free = (target: string) => ({bavail: target.startsWith(mount) ? externalFree : localFree, bsize: 1024 ** 3});
+  t.mock.method(fs, 'statfsSync', free);
+  t.mock.method(fs.promises, 'statfs', async (target: string) => free(target));
+  assert.equal(diskStartHold(w.config, value.repos), undefined, 'only the state floor applies on the internal volume');
+  assert.match(describeQueueAdd(w.ctx, [value], [], []).join('\n'), /worktree volumes: .*crucial/);
+  externalFree = 9;
+  assert.match(diskStartHold(w.config, value.repos) ?? '', /9 GB < 30 GB.*crucial/);
+  externalFree = 40;
+  localFree = 4;
+  assert.match(diskStartHold(w.config, value.repos) ?? '', /4 GB < 5 GB.*state volume/);
+  localFree = 8;
+  await newTasks(w.ctx, [value], {noAgent: true});
+  seedTask(w.config, value.task, {repos: value.repos});
+  await closeTask(w.ctx, value.task);
+  await w.runner.sleep(120_000);
+  fs.writeFileSync(path.join(repo.worktree, 'only-copy'), 'retain');
+  const plan = await planGc(w.ctx, {olderThan: '1m'});
+  await applyGc(w.ctx, plan);
+  assert.equal(fs.readFileSync(path.join(repo.worktree, 'only-copy'), 'utf8'), 'retain');
+  fs.unlinkSync(path.join(repo.worktree, 'only-copy'));
+  const clean = await planGc(w.ctx, {olderThan: '1m'});
+  const applied = await applyGc(w.ctx, clean);
+  assert.equal(fs.existsSync(repo.worktree), false, JSON.stringify({clean, applied}));
+  assert.ok(fs.existsSync(path.join(w.repo, '.git')));
+});
+
+it('HOTFIX0263-WATCH: stalled stage exits and the restarted watcher reconciles request and start', async () => {
+  const w = world('hotfix-watch');
+  const item = w.spec('INTERRUPTED');
+  await newTasks(w.ctx, [item.spec], { noAgent: true });
+  await registerDirectStart(w.ctx, [item], { noAgent: true, reuse: true });
+  const entry = readQueue(w.config)[0]!;
+  const { saveEntry } = await import('../src/core/queue.ts');
+  await saveEntry(w.ctx, { ...entry, status: 'starting', startingPid: 99_999_999 });
+  const { request } = await recordMcpRequest(w.ctx, { tool: 'send', args: {}, scope: null, key: 'old', label: 'interrupted' });
+  fs.writeFileSync(path.join(mcpRequestDir(w.config), `${request.id}.json`), JSON.stringify({ ...request, status: 'applying' }));
+
+  assert.match(defaultDeps().watchCommand(), /watch --supervise$/);
+  const { superviseWatch } = await import('../src/core/watch-supervisor.ts');
+  const controller = new AbortController();
+  const memory = new WatchMemory();
+  const log = path.join(w.root, 'watch-test.log');
+  const step = memory.steps.run(w.ctx, log, 'fixture', () => new Promise(() => {}), {
+    now: () => w.runner.now(), schedule(fn) { queueMicrotask(fn); return () => {}; },
+  });
+  await step;
+  let runs = 0;
+  await superviseWatch(w.ctx, async () => {
+    if (++runs === 1) {
+      for (let tick = 0; tick < 5; tick++) memory.steps.check(w.ctx, log);
+      await w.runner.sleep(600_000);
+      try { memory.steps.check(w.ctx, log); } catch (error) { return String(error); }
+      assert.fail('stalled watch did not exit');
+    }
+    const next = new QueueMemory();
+    await queueTick(w.ctx, next, w.notifier);
+    await next.idle();
+    controller.abort();
+    return 'stopped';
+  }, controller.signal);
+  assert.equal(runs, 2);
+  assert.match(fs.readFileSync(log, 'utf8'), /Watch exiting: stage "fixture" stalled/);
+  assert.deepEqual(readQueue(w.config), []);
+  assert.ok(fs.existsSync(path.join(item.spec.repos[0]!.worktree, '.git')));
+  assert.match(readMcpRequests(w.config)[0]?.error ?? '', /preview again/);
+  const events = readJournal(w.config);
+  assert.equal(events.filter(e => e.kind === 'watch-stalled').length, 1);
+  for (const kind of ['watch-resumed', 'mcp-failed', 'queue-retry', 'queue-start']) assert.ok(events.some(e => e.kind === kind), kind);
+});
+
+it('HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge previews legacy ownership', async () => {
+  const w = world('hotfix-trash', () => 'setup: { node_modules: clone }\nmcp: { allow: [gc] }\n');
+  // Set the mode in-memory so the same scenario can exercise the older release.
+  Object.assign(w.config.gc, { deleteMode: 'trash' });
+  await newTasks(w.ctx, [w.spec('DEP').spec], { noAgent: true });
+  await w.runner.sleep(60_000);
+  const personal = path.join(w.trash, 'personal');
+  fs.writeFileSync(personal, 'keep');
+  const applied = await applyGc(w.ctx, await planGc(w.ctx, { olderThan: '1m' }));
+  assert.deepEqual(applied.failed, []);
+  assert.equal(w.moves.length, 1);
+  assert.deepEqual(fs.readdirSync(w.trash), ['personal']);
+  assert.equal(fs.readFileSync(personal, 'utf8'), 'keep');
+
+  seedTask(w.config, 'LEGACY', { closed: true });
+  const legacy = path.join(w.trash, 'legacy');
+  fs.mkdirSync(legacy);
+  fs.copyFileSync(path.join(taskDir(w.config, 'legacy'), 'TASK.md'), path.join(legacy, 'TASK.md'));
+  const preview = await runCli(w.config, w.runner, ['gc', '--purge-trash', '--json']);
+  assert.equal(preview.code, 0, preview.stderr);
+  assert.match(preview.stdout, /legacy/);
+  assert.doesNotMatch(preview.stdout, /personal/);
+  assert.ok(fs.existsSync(legacy));
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {} };
+  const scope = await gc.run(deps, { purge_trash: true });
+  const token = /preview_token: ([\w-]+)/.exec(scope.text)?.[1];
+  assert.ok(token, scope.text);
+  const confirmed = await gc.run(deps, { confirm: true, preview_token: token });
+  assert.ok(!confirmed.isError, confirmed.text);
+  assert.equal(fs.existsSync(legacy), false);
+  assert.equal(fs.readFileSync(personal, 'utf8'), 'keep');
+  fs.unlinkSync(personal);
+});
+
+it('HOTFIX0264-F2: integration removal receives the Git timeout without the admission lock', async () => {
+  const w = world('integration-remove-timeout');
+  const worktree = path.join(w.root, 'integrated');
+  git(w.repo, 'worktree', 'add', '-b', 'integrated', worktree);
+  seedTask(w.config, 'INTEGRATED', { closed: true, owner: 'chat:nc', repos: [{ path: w.repo, worktree, branch: 'integrated' }] });
+  const head = git(w.repo, 'rev-parse', 'HEAD');
+  let remaining = 0;
+  let lockHeld = true;
+  const { commandStageRemaining } = await import('../src/core/command-stage.ts');
+  w.interceptGit(args => {
+    if (args.includes('remove')) {
+      remaining = commandStageRemaining();
+      lockHeld = fs.existsSync(path.join(w.config.stateDir, 'start.lock'));
+    }
+    return undefined;
+  });
+  const result = await applyGc(w.ctx, {
+    integration: { repo: fs.realpathSync(w.repo), branch: 'main', head, owner: 'chat:nc' },
+    items: [{ kind: 'worktree', task: 'INTEGRATED', target: fs.realpathSync(worktree), bytes: 0, detail: '', head }],
+    skipped: [], freeBytes: 0, olderThanMs: 0, unknownCacheDirs: 0,
+  });
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.done.length, 1);
+  assert.equal(remaining, Infinity);
+  assert.equal(lockHeld, false);
+});
+
+
+it('HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy has its own section', async () => {
+  const w = world('trash-markers');
+  for (const task of ['PERSONAL', 'MARKED']) {
+    seedTask(w.config, task, { closed: true });
+    fs.mkdirSync(path.join(w.trash, task.toLowerCase()));
+  }
+  const marked = path.join(w.trash, 'marked');
+  const marker = path.join(marked, 'TASK.md');
+  fs.copyFileSync(path.join(taskDir(w.config, 'marked'), 'TASK.md'), marker);
+  const legacyTree = path.join(w.trash, 'marked-worktree');
+  fs.mkdirSync(path.join(legacyTree, 'node_modules'), { recursive: true });
+  seedTask(w.config, 'MARKED-TREE', { closed: true, repos: [{ path: w.repo, worktree: path.join(w.root, 'marked-worktree') }] });
+  const otherTree = path.join(w.root, 'existing-worktree');
+  fs.mkdirSync(otherTree);
+  seedTask(w.config, 'EXISTING-TREE', { closed: true, repos: [{ path: w.repo, worktree: otherTree }] });
+  const personalModules = path.join(w.trash, 'node_modules');
+  fs.mkdirSync(personalModules);
+  await recordJournal(w.ctx, {
+    kind: 'close-cleanup', task: 'EXISTING-TREE', text: 'moved to Trash',
+    cleanup: { moved: [{ path: path.join(otherTree, 'node_modules'), bytes: 1 }], bytes: 1 },
+  });
+  const plan = await planGc(w.ctx, { purgeTrash: true });
+  assert.deepEqual(plan.items.map(item => item.target), [marked, legacyTree]);
+  const preview = await runCli(w.config, w.runner, ['gc', '--purge-trash']);
+  assert.match(preview.stdout, /Legacy Trash with ownership markers: 2/);
+  fs.unlinkSync(marker);
+  assert.deepEqual((await applyGc(w.ctx, plan)).done.map(item => item.target), [legacyTree]);
+  assert.ok(fs.existsSync(personalModules));
+  assert.ok(fs.existsSync(path.join(w.trash, 'personal')));
+  assert.ok(fs.existsSync(marked));
+});
+
+it('HOTFIX0264-F4: only a rollback ignores the explicitly supported newer config keys', () => {
+  const rollback = packageVersion().startsWith('0.26.');
+  const config = makeConfig(scratch.sub('forward-config'), rollback ? `
+launch: {grace_s: 90}
+placement: {default: auto}
+perf: {wait_max: 20m}
+limits: {claude: 4, change_policy: owner-approve, profiles: {day: {claude: 8}}, schedule: {}}
+hosts:
+  local: {load_threshold: 20}
+  pc: {ssh: owner@pc, work_dir: ~/work, repos: {app: ~/app}, providers: [claude], sync: fetch-back, availability: {yield: stop-new}}
+` : `
+launch: {grace_s: 90}
+limits: {claude: 4, change_policy: owner-approve, profiles: {day: {claude: 8}}}
+hosts:
+  pc: {ssh: owner@pc, work_dir: ~/work, repos: {app: ~/app}, providers: [claude]}
+`);
+  assert.equal(config.limits.claude, 4);
+  assert.equal(config.hosts.pc?.ssh, 'owner@pc');
+  assert.deepEqual(Object.keys(config.hosts), ['pc']);
+  if (rollback) {
+    assert.equal(config.warnings?.length, 1);
+    assert.match(config.warnings![0]!, /0\.27\.x.*limits\.profiles.*hosts\.local.*hosts\.pc\.availability/);
+  } else {
+    assert.equal(config.launch.graceS, 90);
+    assert.equal(config.limitSettings.profiles.day?.providers.claude, 8);
+  }
+  assert.throws(() => makeConfig(scratch.sub('forward-typo'), 'placemet: {}'), /unknown key/);
+  const legacy = makeConfig(scratch.sub('legacy-ssh-local'), 'hosts: {local: {ssh: owner@old, work_dir: ~/work, repos: {app: ~/app}, providers: [claude]}}');
+  assert.equal(legacy.hosts.local?.ssh, 'owner@old');
+  assert.equal(legacy.warnings, undefined);
+});
+
+it('MCP purge_trash previews and confirms receipts via watch with measured free blocks', async t => {
+  const w = world('mcp-trash-receipt', () => 'mcp: {allow: [gc]}\n');
+  const { moveToTrash } = await import('../src/core/trash.ts');
+  const source = path.join(w.root, 'owned');
+  fs.mkdirSync(source);
+  const receipt = await moveToTrash(w.ctx, source);
+  const personal = path.join(w.trash, 'personal-mcp');
+  fs.writeFileSync(personal, 'keep');
+  const statfs = fs.promises.statfs;
+  t.mock.method(fs.promises, 'statfs', async (dir: string) => {
+    const stat = await statfs(dir);
+    return { ...stat, bsize: 4096, bavail: fs.existsSync(receipt.target) ? 100 : 117 };
+  });
+  fakeWatcher(w.config);
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {} };
+  const accepted = await gc.run(deps, { purge_trash: true });
+  const id = /request_id: ([\w-]+)/.exec(accepted.text)?.[1];
+  assert.ok(id, accepted.text);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  const preview = await gc.run(deps, { request_id: id });
+  assert.match(preview.text, /owned/);
+  assert.doesNotMatch(preview.text, /personal/);
+  const token = /preview_token: ([\w-]+)/.exec(preview.text)?.[1];
+  assert.ok(token, preview.text);
+  assert.ok(fs.existsSync(receipt.target));
+  const confirm = await gc.run(deps, { preview_token: token, confirm: true });
+  assert.match(confirm.text, /^Accepted/);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  const request = readMcpRequests(w.config).find(entry => entry.token === token);
+  assert.equal(request?.status, 'done', request?.error ?? 'request not found');
+  const result = JSON.parse(request!.result!);
+  assert.equal(result.freedBytes, 17 * 4096);
+  assert.equal(result.freedByVolume[0].freedBytes, 17 * 4096);
+  assert.ok(fs.existsSync(personal));
+});
+
+it('auto_gc bounds a local run, reports blockers, preserves personal Trash and stops at target', async t => {
+  const w = world('auto-gc-volumes', () => `
+disk:
+  auto_gc:
+    enabled: true
+    trigger_free_gb: 30
+    target_free_gb: 35
+    older_than: 2d
+    categories: [closed_clean_worktrees, own_trash, closed_task_cache]
+    max_per_run_gb: 1
+    cohorts_exclude: [KEEP-COHORT]
+`);
+  const { runAutoGc } = await import('../src/core/auto-gc.ts');
+  const { moveToTrash } = await import('../src/core/trash.ts');
+  const dirty = path.join(w.root, 'dirty');
+  git(w.repo, 'worktree', 'add', '-b', 'dirty', dirty);
+  fs.writeFileSync(path.join(dirty, 'only-copy'), 'uncommitted');
+  seedTask(w.config, 'DIRTY', { closed: true, repos: [{ path: w.repo, worktree: dirty, branch: 'dirty', base: 'main' }] });
+  const artifact = (task: string, fields: Parameters<typeof seedTask>[2] = {}) => {
+    const dir = path.join(w.config.cache, task.toLowerCase());
+    fs.mkdirSync(dir, { recursive: true });
+    seedTask(w.config, task, { closed: true, report: path.join(dir, 'report.md'), ...fields });
+    const target = path.join(dir, 'artifact.bin');
+    fs.writeFileSync(target, 'old fixture');
+    return target;
+  };
+  const owned = artifact('OWNED'), later = artifact('LATER'), pinned = artifact('PINNED', { pin: true });
+  const excluded = artifact('EXCLUDED', { cohort: 'keep-cohort' }), protectedCache = artifact('PROTECTED', { keepCache: true });
+  const receipt = await moveToTrash(w.ctx, owned);
+  const personal = path.join(w.trash, 'personal-auto');
+  fs.writeFileSync(personal, 'keep');
+  await w.runner.sleep(3 * 86400_000);
+  const statfs = fs.promises.statfs;
+  const external = path.join(w.root, 'Crucial');
+  fs.mkdirSync(external);
+  const stat = fs.lstatSync(external);
+  const lstat = fs.lstatSync;
+  t.mock.method(fs, 'lstatSync', (target: fs.PathLike, options?: Parameters<typeof fs.lstatSync>[1]) =>
+    String(target) === external ? { ...stat, dev: stat.dev + 1 } : lstat(target, options));
+  t.mock.method(fs.promises, 'statfs', async (directory: string) => ({
+    ...await statfs(directory), bsize: 1024 ** 2,
+    bavail: (directory === external ? 80 : fs.existsSync(receipt.target) ? 20 : 36) * 1024,
+  }));
+  const volumes = [{ path: external, device: String(stat.dev + 1) }, { path: w.root, device: String(stat.dev) }];
+  await runAutoGc(w.ctx, volumes);
+  assert.ok(!fs.existsSync(receipt.target));
+  for (const target of [dirty, later, pinned, excluded, protectedCache, personal]) assert.ok(fs.existsSync(target), target);
+  const events = readJournal(w.config);
+  const event = events.find(entry => entry.kind === 'disk-auto-gc');
+  assert.match(event?.text ?? '', /odzyskano 16\.00 GiB/);
+  assert.match(event?.text ?? '', /dirty\/unpushed/);
+  assert.equal(events.filter(entry => entry.wall?.subject === 'Automatyczne GC — wynik').length, 1);
+});
+
+it('a local disk hold schedules auto_gc with the held reason, and dry run posts only a plan', async t => {
+  const w = world('auto-gc-held', () => `
+disk:
+  min_free_start_gb: 30
+  auto_gc: {enabled: true, dry_run: true, trigger_free_gb: 10, target_free_gb: 40, categories: [closed_task_cache]}
+`);
+  const { freshTaskDiskStartHold } = await import('../src/core/disk.ts');
+  const dir = path.join(w.config.cache, 'done');
+  fs.mkdirSync(dir, { recursive: true });
+  seedTask(w.config, 'DONE', { closed: true, report: path.join(dir, 'report.md') });
+  const target = path.join(dir, 'old.bin');
+  fs.writeFileSync(target, 'old fixture');
+  await w.runner.sleep(3 * 86400_000);
+  const statfs = fs.promises.statfs;
+  t.mock.method(fs.promises, 'statfs', async (directory: string) => ({ ...await statfs(directory), bsize: 1024 ** 2, bavail: 20 * 1024 }));
+  let finish!: () => void;
+  const finished = new Promise<void>(resolve => { finish = resolve; });
+  const write = w.runner.writeFile.bind(w.runner);
+  t.mock.method(w.runner, 'writeFile', async (file: string, content: string) => {
+    await write(file, content);
+    if (file.endsWith('/auto-gc-state.json')) finish();
+  });
+  assert.match(await freshTaskDiskStartHold(w.ctx, undefined, [w.repo]) ?? '', /wstrzymane: dysk .*auto_gc/);
+  await finished;
+  assert.ok(fs.existsSync(target));
+  const event = readJournal(w.config).find(entry => entry.kind === 'disk-auto-gc');
+  assert.match(event?.text ?? '', /plan: 1 pozycji.*old\.bin/s);
+  assert.doesNotMatch(event?.text ?? '', /usunięto|odzyskano/);
+});
+
+it('mcp.gc_scope limits cohort writes and rechecks owner policy at deferred apply', async () => {
+  const w = world('mcp-gc-scope', () => `
+mcp: {allow: [gc], gc_scope: own-cohort}
+wall:
+  chats:
+    alpha: {clients: [alpha-client]}
+    beta: {clients: [beta-client]}
+`);
+  const artifact = (task: string, cohort: string, owner: string) => {
+    const dir = path.join(w.config.cache, task.toLowerCase());
+    fs.mkdirSync(dir, { recursive: true });
+    seedTask(w.config, task, { closed: true, cohort, owner, report: path.join(dir, 'report.md') });
+    const file = path.join(dir, 'artifact.bin');
+    fs.writeFileSync(file, 'old');
+    return file;
+  };
+  const alpha = artifact('ALPHA', 'alpha-set', 'chat:alpha');
+  const beta = artifact('BETA', 'beta-set', 'chat:beta');
+  await w.runner.sleep(8 * 86400_000);
+  const gc = MCP_TOOLS.find(tool => tool.name === 'gc')!;
+  const deps = { context: () => w.ctx, notify: async () => {}, clientId: 'alpha-client' };
+  assert.match((await gc.run(deps, { cohort: 'beta-set' })).text, /requires all/);
+  assert.match((await gc.run(deps, { as: 'chat:beta' })).text, /requires your configured chat identity/);
+  const first = await gc.run(deps, { include_cache: true });
+  assert.match(first.text, /ALPHA/);
+  assert.doesNotMatch(first.text.split('Skipped (uncommitted changes)')[0]!, /BETA/);
+  const token = /preview_token: ([\w-]+)/.exec(first.text)?.[1];
+  assert.ok(token, first.text);
+  const confirmed = await gc.run(deps, { preview_token: token, confirm: true });
+  assert.ok(!confirmed.isError, confirmed.text);
+  assert.ok(!fs.existsSync(alpha));
+  assert.ok(fs.existsSync(beta));
+
+  const config = w.ctx.config;
+  fakeWatcher(config);
+  fs.writeFileSync(path.join(config.stateDir, 'queue-worker.json'), JSON.stringify({ pid: process.pid, at: w.runner.now(), interval: config.watch.interval }));
+  w.ctx.setConfig({ ...config, mcp: { ...config.mcp, gcScope: 'all' } });
+  const accepted = await gc.run(deps, { cohort: 'beta-set', include_cache: true });
+  const id = /request_id: ([\w-]+)/.exec(accepted.text)?.[1];
+  assert.ok(id, accepted.text);
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  const second = await gc.run(deps, { request_id: id });
+  const secondToken = /preview_token: ([\w-]+)/.exec(second.text)?.[1];
+  assert.ok(secondToken, second.text);
+  assert.match((await gc.run(deps, { preview_token: secondToken, confirm: true })).text, /^Accepted/);
+  w.ctx.setConfig({ ...config, mcp: { ...config.mcp, gcScope: 'owner' } });
+  await applyAcceptedWrites(w.ctx, w.notifier, {});
+  assert.match(readMcpRequests(config).find(request => request.token === secondToken)?.error ?? '', /owner reserves GC writes/);
+  assert.ok(fs.existsSync(beta));
+  assert.match((await gc.run(deps, { purge_trash: true })).text, /owner reserves GC writes/);
 });

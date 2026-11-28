@@ -22,11 +22,13 @@ async function fixture(name: string, yaml = '') {
 it('F3: fresh low disk holds queued and direct starts, including the watcher claim', async t => {
   const f = await fixture('low');
   let free = 18;
-  t.mock.method(fs, 'statfsSync', () => ({bavail: free, bsize: 1024 ** 3, blocks: 1000}));
+  const statfs = () => ({bavail: free, bsize: 1024 ** 3, blocks: 1000});
+  t.mock.method(fs, 'statfsSync', statfs);
+  t.mock.method(fs.promises, 'statfs', async () => statfs());
   const entries = readQueue(f.config);
   await saveEntry(f.ctx, {...entries[0]!, direct: true});
   let views = describeQueue(f.config, readQueue(f.config), [], [], f.runner.now());
-  assert.ok(views.every(v => v.condition.text === 'wstrzymane: dysk 18 GB < 30 GB'));
+  assert.ok(views.every(v => /^wstrzymane: dysk 18 GB < 30 GB(?: \(.*\))?$/.test(v.condition.text)));
   const memory = new QueueMemory();
   assert.deepEqual(await queueTick(f.ctx, memory, {clickable: false, notify: async () => {}}), []);
   assert.ok(!f.runner.commands.some(c => c.includes('worktree add')));

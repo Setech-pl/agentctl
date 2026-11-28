@@ -1,3 +1,5 @@
+import { claimGcPath, pathsOverlap } from './start-paths.ts';
+import { GcSpace } from './gc-space.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -8,12 +10,11 @@ import type { GcItem, GcPlan, GcResult } from './gc.ts';
 import { knownLinkReferences, linkUsers } from './links.ts';
 import { saveGcProposal } from './mcp-requests.ts';
 import { commitAt, INTEGRATION_BRANCHES } from './review-freshness.ts';
-import { pendingStarts, withStartLock } from './start-lock.ts';
+import { pendingStarts } from './start-lock.ts';
 import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
 import { errorMessage } from './util.ts';
 import { canPost, OWNER_IDENTITY, postMessage, readableChannels } from './wall.ts';
 import { WALL_TOOL_CHANNEL } from './wall-config.ts';
-import { insidePath } from './worktree-volume.ts';
 
 export interface IntegrationGcScope {
   repo: string;
@@ -58,11 +59,11 @@ async function cleanIntegratedHead(ctx: Context, wt: string, base: string): Prom
 }
 
 /** Look for real symlinks (including ignored files) in addition to declared links. */
-async function protectLinkedWorktrees(roots: Set<string>, candidates: GcItem[]): Promise<GcItem[]> {
+export async function protectLinkedWorktrees(roots: Set<string>, candidates: GcItem[]): Promise<GcItem[]> {
   if (!candidates.length) return candidates;
   const targets = new Map(candidates.map(item => [location(item.target), item]));
   const protect = (from: string, to: string) => {
-    for (const root of targets.keys()) if (root !== from && insidePath(root, to)) targets.delete(root);
+    for (const root of targets.keys()) if (root !== from && pathsOverlap(root, to)) targets.delete(root);
   };
   for (const root of roots) {
     const pending = [root];
@@ -139,34 +140,38 @@ export async function recheckIntegrationGc(ctx: Context, preview: GcPlan): Promi
   return planIntegrationGc(ctx, preview.integration, preview);
 }
 
-export async function applyIntegrationGc(ctx: Context, plan: GcPlan): Promise<GcResult> {
+export async function applyIntegrationGc(ctx: Context, plan: GcPlan, space = new GcSpace()): Promise<GcResult> {
   const result: GcResult = { done: [], failed: [], freedBytes: 0 };
   const scope = plan.integration!;
   const current = await recheckIntegrationGc(ctx, plan);
   for (const item of plan.items) {
     try {
       if (!current.items.some(candidate => candidate.target === item.target && candidate.task === item.task && candidate.head === item.head)) throw Error('Integration GC scope changed; worktree kept');
-      await withStartLock(ctx, async () => {
+      const release = await claimGcPath(ctx, item.target, async () => {
         const all = records(ctx);
         const owner = all.find(record => record.task === item.task);
         const live = new Set([...await ctx.localTmux.listWindows(), ...pendingStarts(ctx.config).map(start => start.window)]);
         if ((!owner?.closed && !owner?.cancelled) || owner.pin || owner.owner !== scope.owner || live.has(owner.window) || !owner.repos.some(repo => location(repo.worktree) === item.target) ||
             all.some(record => record !== owner && (record.pin || live.has(record.window) || !record.closed && !record.cancelled) && record.repos.some(repo => location(repo.worktree) === item.target))) throw Error('Worktree is now active, pinned or no longer belongs to this GC plan');
+      });
+      try {
         const base = await commitAt(ctx, scope.repo, `refs/heads/${scope.branch}`);
         if (!base || !await ancestor(ctx, scope.repo, scope.head, base) || await cleanIntegratedHead(ctx, item.target, scope.head) !== item.head || linkUsers(item.target, knownLinkReferences(ctx.config)).length) throw Error('Worktree or integration ref changed; kept');
+        if (!ctx.runner.dryRun) await space.before(item.target);
         const removed = await ctx.runner.exec('git', ['-C', scope.repo, 'worktree', 'remove', item.target], { async: true, timeoutMs: ctx.config.git.timeoutS * 1000 });
         if (removed.code !== 0) throw Error(removed.stderr.trim() || `git exit ${removed.code}`);
-      });
+      } finally { release(); }
       removedMeasurement(item.target, ctx.runner.now());
       result.done.push(item);
-      result.freedBytes += item.bytes;
     } catch (error) { result.failed.push({ item, reason: errorMessage(error) }); }
   }
+  result.freedByVolume = await space.freedByVolume();
+  result.freedBytes = result.freedByVolume.reduce((bytes, volume) => bytes + (volume.freedBytes ?? 0), 0);
   return result;
 }
 
 /** The first sighting is a baseline. Only a forward movement of a known local ref can propose deletion. */
-export async function watchIntegrationGc(ctx: Context, signal?: AbortSignal): Promise<void> {
+export async function watchIntegrationGc(ctx: Context, signal?: AbortSignal, inventory?: import('./taskstore.ts').RecordScan): Promise<void> {
   if (ctx.runner.dryRun || signal?.aborted) return;
   const config = ctx.config;
   const state = path.join(config.stateDir, 'integration-gc.json');
@@ -174,8 +179,9 @@ export async function watchIntegrationGc(ctx: Context, signal?: AbortSignal): Pr
     if (fs.existsSync(state)) fs.unlinkSync(state);
     return;
   }
-  const all = records(ctx);
-  const repositories = new Set(all.flatMap(record => record.repos.map(repo => location(repo.path))));
+  const all = inventory ? inventory.all.filter(record => !record.host) : records(ctx);
+  const candidates = new Set(all.flatMap(record => record.repos.map(repo => repo.path)));
+  const repositories = new Set([...candidates].map(location));
   if (!repositories.size) return;
   let seen: Record<string, string> = {};
   try { seen = JSON.parse(fs.readFileSync(state, 'utf8')); } catch { /* first observation */ }

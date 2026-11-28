@@ -4,7 +4,6 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFile } from './atomic-file.ts';
 import { withFileLock } from './file-lock.ts';
 import { sizeOf } from './fs-measure.ts';
-import { moveToTrash } from './trash.ts';
 import { recordJournal } from './journal.ts';
 import { assertWorktreeVolumes, insidePath, WorktreeVolumeError } from './worktree-volume.ts';
 import { findRecordAnywhere } from './taskstore.ts';
@@ -260,15 +259,24 @@ export function staleNodeModules(config: GlobalConfig, olderThanMs: number, now:
   });
 }
 
-export async function trashStaleNodeModules(ctx: Context, target: string, olderThanMs: number): Promise<number> {
+export function storeOwnsPath(config: GlobalConfig, target: string, repo?: string): boolean {
+  const parent = path.dirname(target);
+  if (path.dirname(parent) !== storeRoot(config) || !repoName.test(path.basename(parent)) || !entryName.test(path.basename(target))) return false;
+  if (!repo) return true;
+  try {
+    const origin = fs.realpathSync(repo);
+    return path.basename(parent) === `${path.basename(origin)}-${hash(origin).slice(0, 16)}`;
+  } catch { return false; }
+}
+
+export async function removeStaleNodeModules(ctx: Context, target: string, olderThanMs: number, remove: () => Promise<void>): Promise<void> {
   const root = storeRoot(ctx.config), parent = path.dirname(target);
   if (path.dirname(parent) !== root || !repoName.test(path.basename(parent)) || !entryName.test(path.basename(target)) || !dir(root) || !dir(parent)) throw Error('invalid node_modules store entry');
-  if (ctx.runner.dryRun) return 0;
+  if (ctx.runner.dryRun) return;
   return withFileLock(lease(target), async () => {
     if (!dir(target)) throw Error('node_modules store entry is missing or unsafe');
     const entry = readEntry(target);
     if (ctx.runner.now() - (entry?.usedAt ?? fs.lstatSync(target).mtimeMs) < olderThanMs) throw Error('node_modules store entry was used since preview');
-    await moveToTrash(ctx.runner, target);
-    return entry?.bytes ?? 0;
+    await remove();
   });
 }

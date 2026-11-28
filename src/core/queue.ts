@@ -2,21 +2,24 @@ import { HostUnreachable } from './host-runner.ts';
 import { choosePlacement } from './placement.ts';
 import { perfExpired, perfScheduleHold } from './perf-queue.ts';
 import { refreshHostHealth } from './disk.ts';
+import { linkBaseWarnings } from './links.ts';
 import { checkHostLimit } from './host-limits.ts';
+import { collectMachine } from './machine.ts';
 import { readReservations, reservationText } from './limits.ts';
 import type { Reservations } from './limits.ts';
 import { peakHold } from './peak.ts';
-import { freshTaskDiskStartHold, taskDiskStartHold, worktreeCostEstimates } from './disk.ts';
+import { freshTaskDiskStartHold, taskDiskStartHold, worktreeCostEstimates, worktreeVolumeLabel } from './disk.ts';
 import { expireProviderHolds, providerHolds } from './provider-hold.ts';
 import { readMcpRequests } from './mcp-requests.ts';
 import { heavyBudget, heavyPreviewUsed, heavyWait, isHeavy } from './heavy.ts';
 import { secretRedactor } from './secret-redaction.ts';
 import { activeProviders, perProvider, isActive } from './providers/registry.ts';
-import { releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
+import { commitStart, releaseStarts, reserveStarts, withStartLock } from './start-lock.ts';
 import { authorCheckoutBusy, authorTerminal, authorWaitReason, effectiveAfter, findAuthorRecord, repinReview, syncReviewLedger } from './review-gate.ts';
 import { queueFile as promptQueueFile } from './prompt-queue.ts';
 import { closeFailedStartWindow, keepFailedWindow, LaunchExited, saveStartFailureScreen, startFailureScreenFile } from './start-failure.ts';
 import { withFileLock } from './file-lock.ts';
+import { fileVersion } from './file-version.ts';
 import { reportPathWarnings } from './report-path.ts';
 import { missingLinkTargets, checkLinkTargets } from './links.ts';
 import type { OutputVerdict } from './outputs.ts';
@@ -32,7 +35,7 @@ import { chatOwner, chatQuotaWait, DEFAULT_OWNER, globalQuotaWait, nextQuotaTask
 import { overProviderLimit } from './checks.ts';
 import type { AgentModel } from './checks.ts';
 import { Alerts } from './alert.ts';
-import { recordJournal } from './journal.ts';
+import { recordJournal, recordJournalChanges } from './journal.ts';
 import { cancelledTasks, checkAfter, DEFAULT_AFTER_VERDICTS, findBlocked, blockedText, hasReport, unmetAfter, verdictPending, waitingText } from './depends.ts';
 import type { VerdictClock } from './depends.ts';
 import type { Blockers } from './depends.ts';
@@ -51,10 +54,10 @@ import type { StatusRow } from './status.ts';
 import { resolveSpec, splitSpecs } from './spec.ts';
 import { assertReviewBase, ReviewBlocked } from './review-freshness.ts';
 import type { RawSpec, ResolvedSpec, AutoReviewSource } from './spec.ts';
-import { archiveDir, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
+import { archiveDir, invalidateTaskRecord, parseTaskRecord, readTaskRecordById, findRecordAnywhere, listArchivedRecords, listTaskRecords, readTaskRecord, recordFromSpec, renderTaskMd, taskDir, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
-import { queueHolds, usageSummaryLines } from './usage-limits.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, plural, windowName } from './util.ts';
+import { queueHolds, refreshExpiredStartPlan, usageSummaryLines } from './usage-limits.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, windowName } from './util.ts';
 import { clearSetupProgress, readSetupProgress, startProgressText } from './setup-progress.ts';
 
 /*
@@ -172,26 +175,52 @@ function parseEntry(text: string): QueueEntry | undefined {
   };
 }
 
+interface CachedQueueEntry { version: string; entry: QueueEntry | undefined }
+let queueCache: { dir: string; files: Map<string, CachedQueueEntry> } | undefined;
+
 /** Every entry, in the order the queue serves them: waiting ones (high priority first, then by order), the ones being started, the failed ones last. */
 export function readQueue(config: Pick<GlobalConfig, 'path'>): QueueEntry[] {
+  const dir = queueDir(config);
   let names: string[];
   try {
-    names = fs.readdirSync(queueDir(config));
+    names = fs.readdirSync(dir);
   } catch {
     return [];
   }
+  const previous = queueCache?.dir === dir ? queueCache.files : undefined;
+  const files = new Map<string, CachedQueueEntry>();
+  const holds = readHoldNotices(config);
   const entries: QueueEntry[] = [];
   for (const name of names.sort()) {
     if (!name.endsWith('.json')) continue;
     try {
-      const entry = parseEntry(fs.readFileSync(path.join(queueDir(config), name), 'utf8'));
-      if (entry) entries.push(entry);
+      const file = path.join(dir, name);
+      const version = fileVersion(fs.statSync(file, {bigint: true}));
+      const cached = previous?.get(name);
+      const parsed = cached && cached.version === version ? cached.entry : parseEntry(fs.readFileSync(file, 'utf8'));
+      if (version !== undefined) files.set(name, {version, entry: parsed});
+      const entry = parsed && structuredClone(parsed);
+      if (entry) {
+        const hold = holds[holdNoticeKey(entry)];
+        entries.push(!entry.holdNotified && hold ? {...entry, holdNotified: true, holdReason: hold} : entry);
+      }
     } catch {
       // removed between the listing and the read
     }
   }
+  queueCache = {dir, files};
   const rank = (e: QueueEntry): number => (e.status === 'queued' || e.status === 'accepted' ? 0 : e.status === 'starting' ? 1 : 2);
   return entries.sort((a, b) => rank(a) - rank(b) || (a.status === 'queued' && b.status === 'queued' ? Number(b.priority === 'high') - Number(a.priority === 'high') : 0) || a.order - b.order || a.seq - b.seq);
+}
+
+const holdNoticeFile = (config: Pick<GlobalConfig, 'path'>): string => path.join(path.dirname(config.path), 'queue-hold-notices.json');
+const holdNoticeKey = (entry: QueueEntry): string => JSON.stringify([entry.seq, entry.task, entry.queuedAt, entry.attempts?.length ?? 0, entry.unvalidated === true]);
+function readHoldNotices(config: Pick<GlobalConfig, 'path'>): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(fs.readFileSync(holdNoticeFile(config), 'utf8'));
+    return isObject(value) ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {};
+  }
+  catch { return {}; }
 }
 
 /** The entries that wait for their turn, in turn order. */
@@ -252,6 +281,7 @@ export async function planQueueAdd(ctx: Context, raws: RawSpec[], opts: { agent?
   const entries = readQueue(config);
   const items = await validateQueueAdd(ctx, raws, opts.replace ? entries.filter(e => !raws.some(raw => raw.header.task === e.task)) : entries, opts);
   const specs = items.map((i) => i.spec);
+  for (const spec of specs) if (!spec.host) spec.linkWarnings = [...(spec.linkWarnings ?? []), ...await linkBaseWarnings(ctx.runner, spec.links, spec.repos)];
   const rows = await queueDependencyRows(ctx, [...entries, ...specs]);
   const warnings = [...await touchWarnings(ctx, specs, { cachedOnly: true }), ...specs.flatMap(s => reportPathWarnings(ctx.config, s).map(w => `${s.task}: ${w}`)), ...specs.flatMap(s => [...(s.linkWarnings ?? []), ...(s.warnings ?? []), ...missingLinkTargets(s.links, s.repos[0]?.worktree)].map(w => `${s.task}: ${w}`))];
   const capacity = config.capacity.snapshot && !ctx.runner.dryRun ? capacitySnapshot(await collectCapacity(ctx, { cachedOnly: true, ...(opts.diskBudgetMs === undefined ? {} : { diskBudgetMs: opts.diskBudgetMs }) }), specs.map((s) => s.agent)) : undefined;
@@ -301,8 +331,12 @@ export function describeQueueAdd(ctx: Context, specs: ResolvedSpec[], entries: Q
     lines.push(`${spec.task}  ${spec.agent}/${spec.model}/${spec.effort}  priority ${spec.priority}${spec.switchedBy ? ` (ordered ${spec.requested.agent} ${spec.requested.model}/${spec.requested.effort})` : ''}`);
     if (spec.owner) lines.push(`  owner:    ${spec.owner}`);
     lines.push(`  repos:    ${spec.repos.map((r) => r.path).join(', ')}`);
+    const volumes = spec.host ? [`[${spec.host}] ${config.hosts[spec.host]?.workDir ?? 'work_dir'}`] : [...new Set(spec.repos.map(worktreeVolumeLabel))];
+    if (volumes.length) lines.push(`  worktree volumes: ${volumes.join(', ')}`);
     if (spec.after.length > 0) {
       const unmet = unmetAfter(spec.after, rows, spec.afterVerdicts);
+      const blocked = findBlocked([{ ...spec, status: 'queued' }], rows, verdictClock(config, ctx.runner.now())).get(spec.task);
+      for (const reason of blocked?.verdicts ?? []) lines.push(`  WARNING: after ${reason.task}: ${reason.reason}`);
       lines.push(`  after:    ${spec.after.join(', ')}${unmet.length === 0 ? ' (all have a report already)' : ` – ${waitingText(unmet)}`}`);
     }
     const unmetNow = unmetAfter(spec.after, rows, spec.afterVerdicts);
@@ -415,6 +449,12 @@ export function durableQueueCondition(config: GlobalConfig, entry: QueueEntry, n
   if ((entry.status === 'queued' || entry.status === 'accepted') && now - Date.parse(entry.queuedAt) >= interval && config.queue.enabled && (lastTick === undefined || now - lastTick > 2 * interval)) return 'WSTRZYMANE: opóźnienie watch';
   if (entry.status === 'queued' && entry.holdReason) return `WSTRZYMANE: ${entry.holdReason}`;
   return entry.status === 'queued' ? 'registered' : entry.status;
+}
+
+function queueLoadHold(config: GlobalConfig): string | undefined {
+  if (!config.queue.holdOnLoad || config.capacity.loadThreshold === undefined) return undefined;
+  const machine = collectMachine(config);
+  return machine.overloaded ? `obciążenie (load1 ${machine.loadAverage[0]!.toFixed(1)} > ${machine.threshold})` : undefined;
 }
 
 function providerSlotWait(config: GlobalConfig, agent: AgentName, used: number, reservations: Reservations): string | undefined {
@@ -564,34 +604,42 @@ export async function validateAccepted(ctx: Context, notifier: Notifier, opts: Q
     batches.set(key, [...(batches.get(key) ?? []), entry]);
   }
   for (const batch of batches.values()) {
-    await withStartLock(ctx, async () => {
-      const all = readQueue(ctx.config);
-      const same = (a: QueueEntry, b: QueueEntry) => a.seq === b.seq && a.task === b.task;
-      const fresh = batch.map((e) => all.find((f) => same(e, f))).filter((e): e is QueueEntry => e?.status === 'accepted');
-      if (!fresh.length) return;
-      const others = all.filter((e) => !fresh.some((f) => same(e, f)));
-      const first = fresh[0]!;
-      try {
-        const raws = fresh.map((e) => splitSpecs(e.spec, `queue entry ${e.task}`)[0] as RawSpec);
-        const agent = first.agentOverride ? { agent: first.agentOverride } : {};
-        let items: QueueAddItem[];
-        if (first.direct && !raws.some(raw => raw.header.class === 'perf')) {
-          const knownAuthors = new Map(others.filter((e) => e.direct).map((e) => [e.task, { agent: e.agent, model: e.model }]));
-          // A confirmed start waits for a free window of its provider like every direct start; a full provider is not a reason to fail it.
-          const resolved = raws.map((raw) => resolveSpec(raw, { config: ctx.config, owner: first.owner }));
-          const specs = await planBatch(ctx, resolved, { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true, afterRows: await queueDependencyRows(ctx, resolved) });
-          for (const spec of specs) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
-          items = specs.map((spec, i) => ({ raw: raws[i] as RawSpec, spec }));
-        } else {
-          items = await validateQueueAdd(ctx, raws, others, { ...agent, owner: first.owner });
-          for (const { spec } of items) { const warnings = reportPathWarnings(ctx.config, spec); if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`); }
-        }
-        await commitQueueAdd(ctx, items, { ...agent, ...(first.reuse ? { reuse: true } : {}), ...(first.direct ? { direct: { noAgent: Boolean(first.noAgent) } } : {}), accepted: fresh });
-        await opts.log?.(`queue: ${fresh.map((e) => e.task).join(', ')} accepted spec validated`);
-      } catch (e) {
-        const error = e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e);
-        for (const entry of fresh) await rejectAccepted(ctx, entry, error, notifier, opts);
+    const config = ctx.config;
+    const all = readQueue(config);
+    const same = (a: QueueEntry, b: QueueEntry) => a.seq === b.seq && a.task === b.task && a.spec === b.spec && b.status === 'accepted';
+    if (!batch.every(entry => all.some(candidate => same(entry, candidate)))) continue;
+    const others = all.filter(entry => !batch.some(candidate => same(candidate, entry)));
+    const first = batch[0]!;
+    const agent = first.agentOverride ? { agent: first.agentOverride } : {};
+    let items: QueueAddItem[] | undefined;
+    let problem: string | undefined;
+    try {
+      const raws = batch.map(e => splitSpecs(e.spec, `queue entry ${e.task}`)[0] as RawSpec);
+      if (first.direct && !raws.some(raw => raw.header.class === 'perf')) {
+        const knownAuthors = new Map(others.filter(e => e.direct).map(e => [e.task, { agent: e.agent, model: e.model }]));
+        // A confirmed start waits for its selected provider. Its current capacity is checked at admission.
+        const resolved = raws.map(raw => resolveSpec(raw, {config, owner: first.owner}));
+        const specs = await planBatch(ctx, resolved, { ...agent, noSwitch: true, reuse: Boolean(first.reuse), knownAuthors, ignoreLimits: true, afterRows: await queueDependencyRows(ctx, resolved) });
+        items = specs.map((spec, i) => ({ raw: raws[i]!, spec }));
+      } else items = await validateQueueAdd(ctx, raws, others, { ...agent, owner: first.owner });
+      for (const {spec} of items) {
+        const warnings = reportPathWarnings(config, spec);
+        if (warnings.length) throw new AgentctlError(`${spec.task}: ${warnings.join('; ')}`);
       }
+    } catch (error) {
+      problem = error instanceof AgentctlError && error.hint ? `${error.message}\nHint: ${error.hint}` : errorMessage(error);
+    }
+    await withStartLock(ctx, async () => {
+      if (ctx.config !== config) return;
+      const latest = readQueue(config);
+      const fresh = batch.map(entry => latest.find(candidate => same(entry, candidate)));
+      if (!fresh.every((entry): entry is QueueEntry => entry !== undefined)) return;
+      if (problem !== undefined) {
+        for (const entry of fresh) await rejectAccepted(ctx, entry, problem, notifier, opts);
+        return;
+      }
+      await commitQueueAdd(ctx, items!, { ...agent, ...(first.reuse ? { reuse: true } : {}), ...(first.direct ? { direct: { noAgent: Boolean(first.noAgent) } } : {}), accepted: fresh });
+      await opts.log?.(`queue: ${fresh.map(e => e.task).join(', ')} accepted spec validated`);
     });
   }
 }
@@ -656,7 +704,9 @@ export async function writeCancelledRecord(ctx: Context, entry: QueueEntry, opts
   record.started = '';
   Object.assign(record, { cancelled: true, cancelledAt: opts.at ?? new Date(runner.now()).toISOString(), ...(opts.reason ? { cancelReason: opts.reason } : {}), cancelSource: opts.source ?? 'cli' });
   await runner.mkdir(taskDir(config, record.window));
-  await runner.writeFile(taskFile(config, record.window), renderTaskMd(record, prompt));
+  const file = taskFile(config, record.window);
+  await runner.writeFile(file, renderTaskMd(record, prompt));
+  if (!runner.dryRun) invalidateTaskRecord(file);
 }
 
 /**
@@ -884,6 +934,12 @@ function setupSlots(config: GlobalConfig, entries: QueueEntry[]): number {
 function entryWorktrees(config: GlobalConfig, entry: QueueEntry): ResolvedSpec['repos'] {
   try { return resolveSpec(splitSpecs(entry.spec)[0]!, {config}).repos; } catch { return []; }
 }
+
+async function entryDiskStartHold(ctx: Context, entry: QueueEntry): Promise<string | undefined> {
+  const worktrees = entryWorktrees(ctx.config, entry);
+  return entry.host ? taskDiskStartHold(ctx.config, entry.host, worktrees, ctx.runner.now()) : freshTaskDiskStartHold(ctx, undefined, worktrees);
+}
+
 
 const volumeBlockText = (mount: string, task: string) => `volume missing: ${mount} (po zamontowaniu: agentctl unblock ${task})`;
 
@@ -1121,12 +1177,18 @@ export function renderQueueList(views: QueueView[], nowMs: number): string[] {
 async function recordHeldOrders(ctx: Context, reasons: ReadonlyMap<number, string>): Promise<void> {
   if (!reasons.size) return;
   await withStartLock(ctx, async () => {
-    for (const fresh of readQueue(ctx.config)) {
+    const entries = readQueue(ctx.config);
+    const holds = Object.fromEntries(entries.flatMap(entry => entry.holdReason && (entry.status === 'queued' || entry.status === 'accepted') ? [[holdNoticeKey(entry), entry.holdReason]] : []));
+    const events: Parameters<typeof recordJournalChanges>[1] = [];
+    for (const fresh of entries) {
       const reason = reasons.get(fresh.seq);
       if (!reason || fresh.holdNotified || (fresh.status !== 'queued' && fresh.status !== 'accepted')) continue;
-      await recordJournal(ctx, { kind: 'queue-held', task: fresh.task, owner: fresh.owner, cohort: fresh.cohort, text: `WSTRZYMANE: ${reason}` });
-      await writeEntry(ctx, { ...fresh, holdNotified: true, holdReason: reason });
+      const identity = holdNoticeKey(fresh);
+      events.push({kind: 'queue-held', task: fresh.task, owner: fresh.owner, cohort: fresh.cohort, changeId: identity, text: `WSTRZYMANE: ${reason}`});
+      holds[identity] = reason;
     }
+    if (!events.length) return;
+    if (await recordJournalChanges(ctx, events)) await ctx.runner.writeFile(holdNoticeFile(ctx.config), `${JSON.stringify(holds)}\n`);
   });
 }
 
@@ -1156,6 +1218,8 @@ export class QueueMemory {
 export interface QueueTickOptions {
   self?: SelfArgv | undefined;
   signal?: AbortSignal | undefined;
+  /** Watch applies MCP writes in its own stage. */
+  acceptedWrites?: boolean;
   /** Status rows including closed and archived tasks (the watcher has them already). */
   rows?: StatusRow[];
   /** Where a start is reported to (the watch log). */
@@ -1186,6 +1250,31 @@ async function closeNeverReadyWindow(ctx: Context, task: string, opts: { force?:
   return false;
 }
 
+/** Restart the preparation only while the prompt is known to be untouched. */
+async function recoverInterruptedStart(ctx: Context, entry: QueueEntry): Promise<void> {
+  const { config } = ctx;
+  const window = windowName(entry.task);
+  const record = readTaskRecord(config, window);
+  const live = record && await liveStartedRecord(ctx, entry.task);
+  if (record && !live && !record.deliveryStartedAt && !['sending', 'confirming', 'sent'].includes(record.promptDelivery ?? '')) {
+    await closeNeverReadyWindow(ctx, entry.task, { force: true });
+    if ((await ctx.tmux.windows()).some(w => w.plain === window)) return;
+  }
+  if (live || record?.deliveryStartedAt || ['sending', 'confirming', 'sent'].includes(record?.promptDelivery ?? '')) {
+    await dropEntry(ctx, entry);
+    await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text: `${entry.task}: watch przejął stan po przerwanym starcie; zachowano dostarczenie promptu` });
+    return;
+  }
+  const { startingAt, startingPid, ...queued } = entry;
+  await withStartLock(ctx, async () => {
+    const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
+    if (fresh?.status !== 'starting' || fresh.startingPid !== startingPid || fresh.startingAt !== startingAt) return;
+    clearSetupProgress(config, entry.task);
+    await writeEntry(ctx, { ...queued, status: 'queued', reuse: true });
+  }, entry.task);
+  await recordJournal(ctx, { kind: 'queue-retry', task: entry.task, owner: entry.owner, text: `${entry.task}: start przerwany (PID ${startingPid ?? 'nieznany'}, od ${startingAt ?? 'nieznana'}); wraca do kolejki z ponownym użyciem worktree` });
+}
+
 /**
  * One look at the queue: start every waiting entry whose provider has a free window, in turn order. The starts run in the background
  * (a start waits for a human to answer the folder-trust dialog, and the queue must not stand still meanwhile), at most
@@ -1193,15 +1282,17 @@ async function closeNeverReadyWindow(ctx: Context, task: string, opts: { force?:
  */
 export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Notifier, opts: QueueTickOptions = {}): Promise<string[]> {
   const { config } = ctx;
+  if (opts.signal?.aborted) return [];
   await expireProviderHolds(ctx);
   const now = ctx.runner.now(), interval = config.watch.interval * 1000, lastTick = workerAt(config);
-  if (config.queue.enabled && (lastTick === undefined || now - lastTick > 2 * interval)) {
+  const loadHold = queueLoadHold(config);
+  if (config.queue.enabled && !loadHold && (lastTick === undefined || now - lastTick > 2 * interval)) {
     await recordHeldOrders(ctx, new Map(readQueue(config).filter(entry => (entry.status === 'queued' || entry.status === 'accepted') && !entry.holdNotified && now - Date.parse(entry.queuedAt) >= interval).map(entry => [entry.seq, 'opóźnienie watch'])));
   }
   await touchWorker(ctx);
   // Accepted MCP confirms are validated even while the queue is paused or disabled: the answer (queued, or failed with the reason) is due either way.
   await validateAccepted(ctx, notifier, opts);
-  await applyAcceptedWrites(ctx, notifier, opts);
+  if (opts.acceptedWrites !== false) await applyAcceptedWrites(ctx, notifier, opts);
   for (const entry of waiting(readQueue(config))) {
     if (entry.host || entry.placement || entry.volumeBlock) continue;
     const mount = missingWorktreeVolume(entryWorktrees(config, entry));
@@ -1222,13 +1313,13 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     await recordJournal(ctx, { kind: 'queue-start', task: entry.task, text: `${entry.task}: usunięto nieaktualny błąd startu z kolejki; okno zadania działa, watch obsługuje oczekujący prompt`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   }
   entries = readQueue(config);
-  const records = new Set([...listTaskRecords(config), ...listArchivedRecords(config)].map((r) => r.task));
   // A start that died with its watcher: the entry says "starting" and nothing here is doing it. Its task exists (the window is up,
   // the prompt may be missing) or not: either way it goes to "failed", where a human decides.
   for (const entry of entries) {
     if (entry.status !== 'starting' || memory.inflight.has(entry.task)) continue;
     if (entry.startingPid) { try { process.kill(entry.startingPid, 0); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue; } }
-    if (!entry.host && !entry.placement && !records.has(entry.task)) {
+    const record = readTaskRecordById(config, entry.task);
+    if (!entry.host && !entry.placement && !record) {
       const repos = entryWorktrees(config, entry);
       const mount = missingWorktreeVolume(repos) ?? await interruptedWorktreeVolume(ctx.runner, repos).catch(() => undefined);
       if (mount) {
@@ -1237,18 +1328,15 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
         continue;
       }
     }
-    if (records.has(entry.task)) {
-      // The record and the queue must not disagree: the entry goes away with the record in place, a leftover never-ready
-      // window is closed, and the task (worktree kept) lands in "to resume" like its siblings.
-      const closed = await closeNeverReadyWindow(ctx, entry.task, { force: true }).catch(() => false);
-      fs.rmSync(entryFile(config, entry), { force: true });
-      fs.rmSync(queueLogFile(config, entry), { force: true });
-      await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: the start was interrupted (the watcher stopped before it finished); ${closed ? 'the never-ready window was closed, t' : 't'}he worktree stays – to resume: agentctl resume ${entry.task}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
-    } else await failEntry(ctx, entry, 'the start was interrupted (the watcher stopped before it finished)', notifier, opts, false);
+    await recoverInterruptedStart(ctx, entry);
   }
   entries = readQueue(config);
   if (paused && !entries.some(e => e.direct)) {
     await recordHeldOrders(ctx, new Map(waiting(entries).filter(e => !e.holdNotified).map(entry => [entry.seq, 'queue paused (agentctl queue resume)'])));
+    return [];
+  }
+  if (loadHold) {
+    await recordHeldOrders(ctx, new Map(waiting(entries).filter(entry => !entry.holdNotified).map(entry => [entry.seq, loadHold])));
     return [];
   }
   if (entries.some(e => e.placement || e.perf || e.host && config.disk.minFreeStartGb > 0) || config.localHost) {
@@ -1266,13 +1354,20 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
   entries = readQueue(config);
   const began: string[] = [];
   const holds = queueHolds(config, ctx.runner.now());
+  const refreshed = new Set<AgentName>();
   const stillHeld = new Set<string>();
   const candidates: QueueEntry[] = [];
+  const heldProviders = providerHolds(config, ctx.runner.now());
+  let occupiedSetups = setupSlots(config, entries);
   const hasPlace = (entry: QueueEntry): boolean => !overProviderLimit(config.limits[entry.agent], used[entry.agent])
     && (Boolean(entry.placement) || !chatQuotaWait(config, entry, live));
   const start = async (entry: QueueEntry): Promise<void> => {
     const started = await beginStart(ctx, memory, notifier, entry, { ...opts, rows });
-    if (!started) return;
+    if (!started) {
+      if (memory.held.has(entry.task)) stillHeld.add(entry.task);
+      return;
+    }
+    occupiedSetups++;
     used[entry.agent]++;
     live.push({ window: windowName(entry.task), agent: entry.agent, host: started.host, owner: entry.owner, perf: entry.perf });
     began.push(entry.task);
@@ -1286,12 +1381,12 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
     if (entry.volumeBlock) continue;
     if (paused && !entry.direct) continue;
     if (entry.retryAt && Date.parse(entry.retryAt) > ctx.runner.now()) continue;
-    const author = directAuthorState(config, entry, readQueue(config));
+    const author = directAuthorState(config, entry, entries);
     if (author.failed) { await failEntry(ctx, entry, author.failed, notifier, opts, true); continue; }
     if (author.waiting) continue;
     if (memory.inflight.size >= config.queue.parallelStarts) break;
-    if (providerHolds(config, ctx.runner.now())[entry.agent]) continue;
-    if (setupSlots(config, readQueue(config)) >= config.queue.maxParallelSetups) continue;
+    if (heldProviders[entry.agent]) continue;
+    if (occupiedSetups >= config.queue.maxParallelSetups) continue;
     if (perfScheduleHold(entry, rows, ctx.runner.now()) || perfExpired(config, entry, ctx.runner.now())) continue;
     if (entry.perf && !entry.perfWaitSince && !unmetAfter(effectiveAfter(config, entry, rows, ctx.runner.now()), rows, entry.afterVerdicts).length && live.some(slot => slot.agent && slot.host === entry.host && !slot.reportReady)) {
       await withStartLock(ctx, async () => {
@@ -1299,7 +1394,7 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
         if (fresh && !fresh.perfWaitSince) await writeEntry(ctx, { ...fresh, perfWaitSince: new Date(ctx.runner.now()).toISOString() });
       });
     }
-    if (providerHolds(config, ctx.runner.now())[entry.agent] || entryPeakHold(config, entry, ctx.runner.now())) continue;
+    if (entryPeakHold(config, entry, ctx.runner.now())) continue;
     if (entry.reviewBlock?.retryOnUpdate) {
       try {
         const spec = resolveSpec(splitSpecs(entry.spec, `queue entry ${entry.task}`)[0]!, { config });
@@ -1328,6 +1423,10 @@ export async function queueTick(ctx: Context, memory: QueueMemory, notifier: Not
       stillHeld.add(entry.task);
       if (memory.held.get(entry.task) !== waitsFor) { memory.held.set(entry.task, waitsFor); await opts.log?.(`queue: ${entry.task} ${waitsFor}`); }
       continue;
+    }
+    if (hasPlace(entry) && !refreshed.has(entry.agent)) {
+      refreshed.add(entry.agent);
+      void refreshExpiredStartPlan(ctx, entry.agent).catch(error => ctx.info(errorMessage(error)));
     }
     const held = holds[entry.agent];
     if (held) {
@@ -1399,12 +1498,24 @@ export async function rebuildAutoReview(ctx: Context, entry: QueueEntry, opts: {
 
 async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier, initial: QueueEntry, opts: QueueTickOptions): Promise<QueueEntry | undefined> {
   const { config } = ctx;
+  // Sample the volume before taking the shared lock. newTasks rechecks before setup.
+  if (opts.signal?.aborted) return undefined;
+  // Automatic placement checks the disk of each candidate host itself.
+  const diskHold = initial.placement ? undefined : await entryDiskStartHold(ctx, initial);
+  if (diskHold) {
+    if (memory.held.get(initial.task) !== diskHold) {
+      memory.held.set(initial.task, diskHold);
+      await opts.log?.(`queue: ${initial.task} ${diskHold}`);
+    }
+    return undefined;
+  }
+  memory.held.delete(initial.task);
   let entry = initial;
   let reservation: string | undefined;
   const claim = async (fresh: QueueEntry): Promise<boolean> => {
     const now = ctx.runner.now();
     const entries = readQueue(config);
-    if (fresh.volumeBlock || entryPeakHold(config, fresh, now) || setupSlots(config, entries) >= config.queue.maxParallelSetups) return false;
+    if (fresh.volumeBlock || queueLoadHold(config) || entryPeakHold(config, fresh, now) || setupSlots(config, entries) >= config.queue.maxParallelSetups) return false;
     const slots = await liveWindows(ctx, undefined, undefined, true);
     if (heavyWait(config, isHeavy(fresh), heavyBudget(config, entries, slots).size)) return false;
     if (perfScheduleHold(fresh, opts.rows ?? [], now) || perfExpired(config, fresh, now)) return false;
@@ -1426,34 +1537,36 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
     entry = fresh;
     return true;
   };
-  const claimed = await withStartLock(ctx, async () => {
-    const fresh = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task);
-    if (!fresh || fresh.status !== 'queued' || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
-    const author = directAuthorState(config, fresh, readQueue(config));
+  const claimStart = () => withStartLock(ctx, async () => {
+    const current = readQueue(config);
+    const fresh = current.find(e => e.seq === entry.seq && e.task === entry.task);
+    if (!fresh || fresh.autoReview?.author !== initial.autoReview?.author || fresh.status !== 'queued' || fresh.spec !== initial.spec || providerHolds(config, ctx.runner.now())[fresh.agent]) return false;
+    const author = directAuthorState(config, fresh, current);
     if (author.failed) { await failEntry(ctx, fresh, author.failed, notifier, opts, true); return false; }
     if (author.waiting) return false;
     if (!fresh.autoReview) return claim(fresh);
-    // The review starts on the author's state as it is NOW: under the lock that send/enqueuePrompt takes, a follow-up cannot slip in between the check and the claim.
-    const authorWindow = findAuthorRecord(config, fresh.autoReview.author)?.window ?? windowName(fresh.autoReview.author);
-    return withFileLock(`${promptQueueFile(ctx, authorWindow)}.lock`, async () => {
-      try {
-        // The last read before the claim is the status: whatever the checks below took time for, the decision is on the state as it is now.
-        const busy = await authorCheckoutBusy(ctx, fresh.autoReview!.author);
-        const rows = await queueDependencyRows(ctx, [fresh]);
-        const terminal = authorTerminal(config, fresh.autoReview, rows, ctx.runner.now());
-        if (terminal) { await failEntry(ctx, fresh, terminal.text, notifier, opts, true); return false; }
-        if (unmetAfter(effectiveAfter(config, fresh, rows, ctx.runner.now()), rows, fresh.afterVerdicts).length > 0) return false;
-        const waits = authorWaitReason(config, fresh.autoReview, rows, ctx.runner.now()) ?? (busy ? `czeka na autora ${fresh.autoReview!.author}: ${busy}` : undefined);
-        if (waits) { await opts.log?.(`queue: ${fresh.task} ${waits}`); return false; }
-        return claim(await rebuildAutoReview(ctx, fresh, { write: true, ...(opts.log ? { log: opts.log } : {}) }));
-      } catch (e) {
-        await failEntry(ctx, fresh, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, false);
-        return false;
-      }
-    });
-  });
+    try {
+      // The last read before the claim is the status: whatever the checks below took time for, the decision is on the state as it is now.
+      const busy = await authorCheckoutBusy(ctx, fresh.autoReview!.author);
+      const rows = await queueDependencyRows(ctx, [fresh]);
+      const terminal = authorTerminal(config, fresh.autoReview, rows, ctx.runner.now());
+      if (terminal) { await failEntry(ctx, fresh, terminal.text, notifier, opts, true); return false; }
+      if (unmetAfter(effectiveAfter(config, fresh, rows, ctx.runner.now()), rows, fresh.afterVerdicts).length > 0) return false;
+      const waits = authorWaitReason(config, fresh.autoReview, rows, ctx.runner.now()) ?? (busy ? `czeka na autora ${fresh.autoReview!.author}: ${busy}` : undefined);
+      if (waits) { await opts.log?.(`queue: ${fresh.task} ${waits}`); return false; }
+      return claim(await rebuildAutoReview(ctx, fresh, { write: true, ...(opts.log ? { log: opts.log } : {}) }));
+    } catch (e) {
+      await failEntry(ctx, fresh, e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e), notifier, opts, false);
+      return false;
+    }
+  }, initial.task);
+  // Match send's lock order: the author FIFO must stay unchanged through the claim.
+  const author = initial.autoReview?.author;
+  const claimed = author
+    ? await withFileLock(`${promptQueueFile(ctx, findAuthorRecord(config, author)?.window ?? windowName(author))}.lock`, claimStart)
+    : await claimStart();
   if (!claimed) return undefined;
-  const starting: QueueEntry = { ...entry, status: 'starting', startingAt: new Date(ctx.runner.now()).toISOString() };
+  const starting: QueueEntry = readQueue(config).find(e => e.seq === entry.seq && e.task === entry.task)!;
   const log: string[] = [];
   const startCtx = new ContextClass(ctx.runner, config, (l) => void log.push(l));
   const run = async (): Promise<void> => {
@@ -1482,12 +1595,12 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         ...(opts.signal ? { signal: opts.signal } : {}),
       });
       // no_agent intentionally writes no TASK.md. Commit its successful preparation and dependent metadata under the admission lock.
-      await withStartLock(ctx, async () => {
+      await commitStart(ctx, async () => {
         if (entry.noAgent) for (const dependent of readQueue(config)) {
           if (dependent.noAgent && dependent.directAuthor === entry.task) await writeEntry(ctx, { ...dependent, authorPrepared: true });
         }
         fs.rmSync(entryFile(config, starting), { force: true });
-      });
+      }, entry.task, opts.signal);
       fs.rmSync(queueLogFile(config, starting), { force: true });
       await opts.log?.(`queue: ${entry.task} started`);
       const done = entry.noAgent ? `Przygotowano ${entry.task} (worktree, setup i linki, bez agenta)` : entry.direct ? `Uruchomiono ${entry.task} (MCP new, setup zakończony)` : `Uruchomiono ${entry.task} z kolejki`;
@@ -1499,13 +1612,17 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         await opts.log?.(`queue: ${entry.task}: ${e.message.split('\n')[0]}`);
         return;
       }
+      if (opts.signal?.aborted) {
+        if (await liveStartedRecord(ctx, entry.task)) await dropEntry(ctx, starting);
+        return;
+      }
       if (e instanceof HostUnreachable && entry.placement && !readTaskRecord(config, windowName(entry.task))) {
         await writeEntry(ctx, { ...entry, status: 'queued', host: undefined, retryAt: new Date(ctx.runner.now() + 30_000).toISOString(), error: e.message });
         return;
       }
       if (e instanceof WorktreeVolumeError) { await blockEntryVolume(ctx, entry, e.mount, notifier, opts.self); return; }
       if (e instanceof ReviewBlocked) { await blockEntryReview(ctx, entry, e); return; }
-      if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: dysk/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
+      if (/window limit for .* reached|czeka na kwotę|host .* limit reached|provider hold:|szczyt do|wstrzymane: (?:dysk|trwa GC)/.test(errorMessage(e))) { await writeEntry(ctx, { ...entry, status: 'queued' }); return; }
       // A never-ready window is untrusted state nobody watches: close it so it cannot hold a slot (the record and its worktree stay).
       const closedLeftover = await closeNeverReadyWindow(ctx, entry.task, { force: Boolean(opts.signal?.aborted) }).catch(() => false);
       if (await liveStartedRecord(ctx, entry.task)) {
@@ -1516,25 +1633,17 @@ async function beginStart(ctx: Context, memory: QueueMemory, notifier: Notifier,
         await recordJournal(ctx, { kind: 'queue-start', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
         return;
       }
-      if (opts.signal?.aborted && readTaskRecord(config, windowName(entry.task))) {
-        // The watcher itself stopped mid-wait: not a failure of the task. Record and queue must agree — drop the entry;
-        // with its window closed the task lands in "to resume", a window waiting for trust is served by the next watch.
-        fs.rmSync(entryFile(config, starting), { force: true });
-        fs.rmSync(queueLogFile(config, starting), { force: true });
-        await opts.log?.(`queue: ${entry.task} start interrupted (the watcher stopped) – the task is to resume`);
-        await recordJournal(ctx, { kind: 'queue-failed', task: entry.task, text: `${entry.task}: the start was interrupted (the watcher stopped before it finished); ${closedLeftover ? 'the never-ready window was closed, t' : 't'}he worktree stays – to resume: agentctl resume ${entry.task}`, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
-        return;
-      }
       await failEntry(ctx, starting, `${e instanceof AgentctlError && e.hint ? `${e.message}\nHint: ${e.hint}` : errorMessage(e)}${closedLeftover ? '\nThe window that never became ready was closed; the worktree stays. queue_retry starts a fresh window over it.' : keptWindowNote(ctx, entry.task)}`, notifier, opts, !opts.signal?.aborted, log).catch(() => undefined);
     } finally {
       try { if (reservation) await releaseStarts(ctx, [reservation]); }
       finally {
-        clearSetupProgress(config, entry.task);
         memory.inflight.delete(entry.task);
+        clearSetupProgress(config, entry.task);
       }
     }
   };
-  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, owner: entry.owner, perf: entry.perf, promise: run() });
+  const promise = run().catch(error => opts.log?.(`queue: ${entry.task}: ${errorMessage(error)}`)).then(() => undefined);
+  memory.inflight.set(entry.task, { agent: entry.agent, host: entry.host, owner: entry.owner, perf: entry.perf, promise });
   return entry;
 }
 
@@ -1559,7 +1668,8 @@ async function failEntry(ctx: Context, entry: QueueEntry, error: string, notifie
   await writeEntry(ctx, failed);
   await ctx.runner.writeFile(queueLogFile(config, failed), `${log.join('\n')}${log.length > 0 ? '\n' : ''}error: ${error}\n`);
   const safeError = (redactQueue({ ...entry, error }, config) as QueueEntry).error ?? 'n/d';
-  const text = retry ? `${entry.task}: start z kolejki – ${firstLine(safeError)}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${firstLine(safeError)}`;
+  const check = /^.+ CLI version check failed/.test(safeError) ? safeError : firstLine(safeError);
+  const text = retry ? `${entry.task}: start z kolejki – ${check}; ponowienie ${attempts.length}/3 o ${failed.retryAt}` : `${entry.task}: start z kolejki nie powiódł się – ${check}`;
   await opts.log?.(`queue: ${text}`);
   await recordJournal(ctx, { kind: retry ? 'queue-retry' : 'queue-failed', task: entry.task, owner: entry.owner, text, ...(entry.cohort ? { cohort: entry.cohort } : {}) });
   if (notify) await notifyPlain(ctx, notifier, entry.task, retry ? text : `${text} (agentctl queue retry ${entry.task})`, opts.self);
@@ -1573,6 +1683,7 @@ async function notifyPlain(ctx: Context, notifier: Notifier, task: string, text:
 
 /** Explicit OS/network failures only; spec/path/branch failures are permanent by default. */
 export function transientStartError(error: string): boolean {
+  if (/^(?:codex not found or not working|.+ CLI version check failed)/i.test(error)) return true;
   if (/ENOENT|not (?:exist|found)|invalid spec|branch.*(?:exists|conflict)|already checked out/i.test(error)) return false;
   return /\b(?:ETIMEDOUT|EAGAIN|ECONNRESET|ECONNREFUSED|ENETUNREACH|EAI_AGAIN)\b|lock.*(?:busy|temporar)|timed out waiting for .*lock|network.*(?:timeout|temporar)/i.test(error);
 }

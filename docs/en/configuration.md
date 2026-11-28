@@ -42,7 +42,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `setup.from_task` | task ID · none · s | `link-from` is an alias. Try a copy-on-write `node_modules` clone from a matching repository in this local task. |
 | `setup.node_modules` | `clone` or `off` · `off` · g p | Reuse compatible npm installs from `<AGENTCTL_HOME>/nm-store` on the same filesystem. The repository can override the global mode. |
 | `close` | mapping · `{}` · g p | Settings applied after closing a task. |
-| `close.cleanup` | list of relative paths or globs · `[]` · g p | Move matching ignored output to the OS Trash after closing the task. Globs match within one path component. A project list replaces the global one. |
+| `close.cleanup` | list of relative paths or globs · `[]` · g p | Delete matching Git-ignored output after closing the task, using `gc.delete_mode`. Globs match within one path component. A project list replaces the global one. |
 | `defaults` | mapping · `{}` · g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | active provider · none · g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string · `default` · g p | Model when the spec has none. `default` passes no model flag. |
@@ -156,7 +156,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `agents.<agent>.limit_patterns` | list of regexes · see below · g | The usage limit is used up (state `limited`). A message has to open its line, so a diff or a quoted sentence is not taken for one. |
 | `agents.<agent>.background_patterns` | list of regexes · see below · g | The agent waits for its own shells or monitors (state `background`). |
 | `capacity` | mapping · see below · g | Dispatcher capacity settings. |
-| `capacity.load_threshold` | positive number · 3 × logical CPUs for alerts · g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. An explicit threshold also holds queue admission. |
+| `capacity.load_threshold` | positive number · 3 × logical CPUs for alerts · g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. Queue admission uses the explicit threshold when `queue.hold_on_load: true` is set. |
 | `capacity.snapshot` | boolean · true · g | Add both providers' capacity to new and queue responses. |
 | `capacity.stale_minutes` | integer 1–10080 · 30 · g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
 | `capacity.sample_limit` | integer 2–10000 · 2048 · g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |
@@ -282,6 +282,7 @@ The selection covers the full width of the list pane, including the gaps between
 | `wall.ref_roots` | list · `[~/Projects/cache]` · g | A path in `refs` must be under one of these; nothing is read from it (refs only, no attachments). |
 | `queue.enabled` | boolean · `true` · g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
 | `queue.parallel_starts` | positive integer · `2` · g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
+| `queue.hold_on_load` | bool · `false` · g | When true, the queue holds above the explicit load threshold and reports the reason. |
 | `cancel.grace` | seconds (0 or more) · `5` · g | Time between the interrupt key and the closing of the window of a task that is cancelled while it works. `0`: the window is closed at once. |
 | `collisions.enabled` | boolean · `true` · g | `false`: no `COLLIDE` column, no marker on the board, no notification. `agentctl overlap` still works. |
 | `collisions.interval` | positive number · `300` · g | Seconds between two checks by `watch`. |
@@ -293,12 +294,40 @@ The selection covers the full width of the list pane, including the gaps between
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
 | `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |
 | `disk.measurement_timeout_s` | `600` | Maximum execution time of a tree measurement. A timed-out worker is terminated and frees its slot; reads retain the last known value and report a measurement error. |
-| `git` | mapping | Worktree checkout and setup limits. |
-| `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
+| `git` | mapping | Worktree checkout limits. |
+| `git.timeout_s` | `600` | Positive timeout in seconds for the Git checkout stage. |
+| `start_lock_stale_s` | `180` | Seconds before reclaiming a lock without an owner. A lock with an exited PID can be reclaimed immediately. |
+| `setup.timeout_s` | `900` | Total setup budget in seconds for each task. Use the global setup mapping to set it. The existing command list syntax still works. |
+| `gc.delete_mode` | `delete` | Delete eligible cache, stale node_modules and close cleanup directly. `trash` records the resulting OS Trash path and purges the recorded item. Git only forces removal for explicitly authorized dirty task IDs. |
 | `gc` | mapping | Integration cleanup settings. |
 | `gc.after_integration` | `propose` | `propose` prepares a request-ID GC plan on local `main`/`master` advances and routes a WALL message to each owning chat. `off` disables proposals. |
 | `mcp.client` | — | Optional stable suffix to clientInfo.name that intentionally shares a cursor between sessions. Tool parameter client overrides it. By default each session consumes independently from its initialization checkpoint; new sessions inherit the client high-water mark. |
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
+
+## Disk management
+
+Disk limits are in GiB. `disk.warn_gb` (50) and `disk.critical_gb` (20) classify available space per volume. `disk.min_free_start_gb` (30) holds local and queued starts below that threshold or when a fresh reading is unavailable. With automatic GC enabled, a measured local start hold also schedules a run and identifies it in the held reason.
+
+The owner enables automatic GC in `config.yaml`. Merge the following into the existing `disk` section. Set `dry_run: false` after reviewing the plan.
+
+~~~yaml
+disk:
+  auto_gc:
+    enabled: true
+    dry_run: true
+    trigger_free_gb: 50
+    target_free_gb: 60
+    older_than: 2d
+    categories: [closed_clean_worktrees, stale_node_modules, own_trash, closed_task_cache]
+    max_per_run_gb: 50
+    cohorts_exclude: []
+~~~
+
+Automatic GC defaults to off. The trigger defaults to `disk.warn_gb`, the target to the highest of the trigger, warning and start thresholds, and the budget to 50 GiB of estimated data per run. Watch checks the internal and configured external volumes independently. It processes categories in order, checks free blocks after each removal, and stops at the target, run budget, or exhaustion. Only verifiable agentctl data is eligible. Pinned, active, dirty, unpushed, linked, protected-branch and `keep_cache` data stays, as do reports and excluded cohorts. Before deleting, watch rechecks ownership, age and filesystem boundaries. Each changed plan or run result goes to the journal and the `agentctl` WALL channel.
+
+Preview Trash with `agentctl gc --purge-trash`, then use `--apply` to confirm. In MCP, call `gc` with `purge_trash: true`, get the preview token (poll by `request_id` when watch prepares the plan), and confirm the same token. Receipts identify the exact items. Legacy candidates have a separate section and require agentctl ownership markers. Actual reclaimed space is recorded from free blocks on each affected filesystem. The owner may authorize named dirty worktrees with `--force-dirty TASK` or MCP `force_dirty: [TASK]`; those overrides are journaled.
+
+MCP GC writes require `gc` in `mcp.allow`. Set `mcp.gc_scope` to `all` (default), `own-cohort` (the configured chat may apply plans only to cohorts it exclusively owns), or `owner` (GC writes through the owner CLI). With `own-cohort`, supply `as: "chat:<name>"` or use a client mapped in `wall.chats`. A confirmed plan is checked again when watch applies it.
 
 ## Example
 
@@ -403,6 +432,7 @@ Project default links to closed/cancelled/archived task worktrees are errors, in
 | Key | Default | Meaning |
 |---|---|---|
 | `disk.min_free_start_gb` | `30` | Minimum fresh free GiB before a queued start. |
+| `disk.min_free_state_gb` | `5` | Minimum fresh free GiB on each state and cache volume. |
 | `queue.max_parallel_setups` | `2` | Maximum concurrent worktree/setup phases. |
 | `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
 | `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |

@@ -61,12 +61,17 @@ it('A3: atomic watch snapshot serves bounded reads with stalled processes; only 
   const lock = tryFileLock(path.join(config.stateDir, 'start.lock'))!;
   try { const result = await MCP_TOOLS.find(t => t.name === 'set_limits')!.run(deps, {claude: 3, confirm: true}); assert.ok(!result.isError, result.text); } finally { lock(); }
   stalled = false; await runner.sleep(4001);
-  const result = await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {});
-  assert.match(result.text, /snapshot unavailable\/stale/i);
+  // REL0272-STATUS-AGE: a complete snapshot past two intervals still serves status (a loaded cycle), with its age.
+  const recent = await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {});
+  assert.doesNotMatch(recent.text, /snapshot unavailable\/stale/i);
+  assert.match(recent.text, /Watch snapshot age: 4\.0 s/);
   const doctor = await MCP_TOOLS.find(t => t.name === 'doctor')!.run(deps, {});
   assert.match(doctor.text, /snapshot unavailable\/stale/i);
   assert.match(doctor.text, /per-task report\/link checks skipped/);
   assert.equal((doctor.text.match(/snapshot_note/g) ?? []).length, 1, 'one note preserves bounded diagnostics');
+  await runner.sleep(56_000);
+  const result = await MCP_TOOLS.find(t => t.name === 'status')!.run(deps, {});
+  assert.match(result.text, /snapshot unavailable\/stale/i);
 });
 it('A3: GC preview is Accepted without slow checks and read back after watch', async () => {
   const config = makeConfig(scratch.sub('gc'), 'mcp: {allow: [gc]}\n'); fakeWatcher(config);

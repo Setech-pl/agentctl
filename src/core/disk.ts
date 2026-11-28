@@ -1,3 +1,4 @@
+import { kickAutoGc } from './auto-gc.ts';
 import { planRemoteGc } from './host-gc.ts';
 import { readHostsCache, writeHostsCache } from './hosts.ts';
 import { probeHosts, probeLocalHost } from './host-health.ts';
@@ -35,6 +36,7 @@ function existingAncestor(target: string): string {
   return current;
 }
 const FREE_SPACE_BUDGET_MS = 1000;
+const START_DISK_BUDGET_MS = 5000;
 type Statfs = typeof fs.promises.statfs;
 const pendingStats = new WeakMap<Statfs, Map<string, ReturnType<Statfs>>>();
 
@@ -74,7 +76,7 @@ async function freeSpace(ctx: Context, ancestor: string, statfs: Statfs, budgetM
 }
 
 /** Read cached sizes only. Watch owns measurement jobs; no read starts a walk or writes the size cache. */
-export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[] } = {}): Promise<DiskReport> {
+export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opts: { detail?: boolean; offset?: number; limit?: number; budgetMs?: number; records?: TaskRecord[]; asyncPaths?: boolean } = {}): Promise<DiskReport> {
   const records = (opts.records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host);
   const targets = new Map<string, string | undefined>([[ctx.config.cache, undefined], [ctx.config.stateDir, undefined]]);
   const store = nodeModulesStore(ctx.config);
@@ -87,27 +89,52 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
     try { const spec = resolveSpec(splitSpecs(entry.spec, 'disk queue inventory')[0]!, { config: ctx.config }); return spec.host ? [] : spec.repos; }
     catch { return []; }
   });
+  const repoPaths = new Set<string>();
   for (const repo of [...records.flatMap((r) => r.repos), ...queuedRepos]) {
     targets.set(repo.worktree, repo.worktreeMount ?? inferredWorktreeMount(repo.worktree));
+    repoPaths.add(repo.path);
+  }
+  for (const repoPath of repoPaths) {
     try {
-      const project = loadProjectConfig(repo.path);
+      const project = loadProjectConfig(repoPath);
       if (project?.worktreeRoot) {
         const root = resolvePath(project.worktreeRoot);
         targets.set(root, project.worktreeMount ? resolvePath(project.worktreeMount) : inferredWorktreeMount(root));
       }
     } catch { /* invalid project config does not hide other volumes */ }
   }
+  const mounted = new Map<string, boolean>();
+  const onVolume = (mount: string): boolean => {
+    if (!mounted.has(mount)) mounted.set(mount, volumeMounted(mount));
+    return mounted.get(mount)!;
+  };
   const volumes = new Map<string, DiskVolume>();
+  const devices = new Map<string, number>();
+  if (opts.asyncPaths) {
+    const mountedTargets = [...targets].filter(([, mount]) => !mount || onVolume(mount));
+    for (let i = 0; i < mountedTargets.length; i += 128) {
+      await Promise.all(mountedTargets.slice(i, i + 128).map(async ([target]) => {
+        try { devices.set(target, (await fs.promises.stat(target)).dev); } catch { /* use the nearest existing ancestor */ }
+      }));
+    }
+  }
   for (const [target, mount] of targets) {
-    if (mount && !volumeMounted(mount)) {
+    if (mount && !onVolume(mount)) {
       const key = `missing:${mount}`;
       if (volumes.has(key)) volumes.get(key)!.paths.push(target);
       else volumes.set(key, { mount, samplePath: target, paths: [target], device: null, availableBytes: null, totalBytes: null, level: 'unknown', error: 'volume missing' });
       continue;
     }
-    const ancestor = existingAncestor(target);
+    let ancestor = target;
     let device: string | null = null;
-    try { device = String(fs.statSync(ancestor).dev); } catch { /* n/d */ }
+    try {
+      const dev = opts.asyncPaths ? devices.get(target) : fs.statSync(target, {throwIfNoEntry: false})?.dev;
+      if (dev !== undefined) device = String(dev);
+      else {
+        ancestor = existingAncestor(path.dirname(target));
+        device = String(fs.statSync(ancestor).dev);
+      }
+    } catch { /* n/d */ }
     const key = device ?? target;
     if (volumes.has(key)) { const volume = volumes.get(key)!; volume.paths.push(target); if (mount) volume.mount ??= mount; continue; }
     volumes.set(key, { samplePath: ancestor, ...(mount ? { mount } : {}), device, paths: [target], availableBytes: null, totalBytes: null, level: 'unknown' });
@@ -134,7 +161,7 @@ export async function collectDisk(ctx: Context, statfs = fs.promises.statfs, opt
   const byDevice = new Map<string, number>();
   for (const measurement of values) {
     try {
-      const device = String(fs.statSync(measurement.target).dev);
+      const device = String(devices.get(measurement.target) ?? fs.statSync(measurement.target).dev);
       byDevice.set(device, (byDevice.get(device) ?? 0) + measurement.bytes);
     } catch { /* disappeared since measurement */ }
   }
@@ -200,8 +227,8 @@ export async function refreshDiskAfterGc(ctx: Context, freedBytes: number): Prom
   await recordJournal(ctx, { kind: 'gc-freed', text });
   return text;
 }
-async function persistDiskMeasurements(ctx: Context): Promise<void> {
-  const repos = [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos);
+async function persistDiskMeasurements(ctx: Context, records?: TaskRecord[]): Promise<void> {
+  const repos = (records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host).flatMap(r => r.repos);
   const worktrees = [...new Set(repos.map(r => r.worktree))];
   const entries = worktrees.flatMap(wt => { const m = lastMeasurement(wt); return m ? [{...m, repo: repos.find(r => r.worktree === wt)?.path}] : []; });
   await ctx.runner.writeFile(path.join(path.dirname(ctx.config.path), 'disk-sizes.json'), JSON.stringify({ version: 2, entries }));
@@ -209,34 +236,38 @@ async function persistDiskMeasurements(ctx: Context): Promise<void> {
 const refreshing = new Set<string>();
 const refreshed = new Map<string, number>();
 /** Incremental watch inventory: one stale worktree per tick, at most once per 5 seconds; workers run at nice 10. */
-export async function refreshDiskMeasurements(ctx: Context): Promise<void> {
+export async function refreshDiskMeasurements(ctx: Context, records?: TaskRecord[]): Promise<void> {
   const key = ctx.config.path, now = ctx.runner.now();
   if (ctx.runner.dryRun || refreshing.has(key) || now - (refreshed.get(key) ?? -Infinity) < 5000) return;
   refreshed.set(key, now);
   restoreDiskMeasurements(ctx);
-  const targets = [...new Set([...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)].filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
+  const targets = [...new Set((records ?? [...listTaskRecords(ctx.config), ...listArchivedRecords(ctx.config)]).filter(r => !r.host).flatMap(r => r.repos.map(r => r.worktree)))];
   const target = targets.sort((a, b) => (lastMeasurement(a)?.at ?? 0) - (lastMeasurement(b)?.at ?? 0)).find(wt => !cachedMeasurement(wt) || now - lastMeasurement(wt)!.at >= DISK_INTERVAL_MS);
   if (!target) return;
   configureMeasurements(ctx.config.disk);
   refreshing.add(key);
   try {
     const lease = requestMeasurement(target, { background: true, now: () => ctx.runner.now() });
-    try { await lease.promise; await persistDiskMeasurements(ctx); }
+    try { await lease.promise; await persistDiskMeasurements(ctx, records); }
     finally { lease.release(); }
   } finally { refreshing.delete(key); }
 }
 const sampled = new Map<string, number>();
-export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>): Promise<void> {
+export async function diskTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void>, records?: TaskRecord[], collect = () => collectDisk(ctx, undefined, {records}), signal?: AbortSignal): Promise<void> {
   const background = (label: string, work: Promise<void>) => {
     void work.catch(error => log?.(`${label}: ${error instanceof Error ? error.message : String(error)}`)).catch(() => undefined);
   };
   background('host health', refreshHostHealth(ctx));
-  background('worktree measurement', refreshDiskMeasurements(ctx));
+  background('worktree measurement', refreshDiskMeasurements(ctx, records));
   const file = path.join(path.dirname(ctx.config.path), 'disk-state.json');
   if (ctx.runner.dryRun || ctx.runner.now() - (sampled.get(file) ?? -Infinity) < DISK_INTERVAL_MS) return;
   sampled.set(file, ctx.runner.now());
   await withFileLock(`${file}.lock`, async () => {
-    const report = await collectDisk(ctx);
+    const report = await collect();
+    kickAutoGc(ctx, report.volumes.flatMap(volume =>
+      !volume.host && volume.device && volume.samplePath && volume.availableBytes !== null
+        ? [{ device: volume.device, path: volume.mount ?? volume.samplePath }] : []),
+    { ...(log ? { log } : {}), ...(signal ? { signal } : {}) });
     let previous: Record<string, DiskLevel> = {};
     try { previous = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* first reading */ }
     const next = { ...previous };
@@ -283,29 +314,72 @@ export async function refreshHostHealth(ctx: Context, forceSample = false): Prom
   }
   finally { hostRefreshing.delete(ctx.config.path); }
 }
+interface StartVolume { target: string; floor: number; label: string }
+
+function stateVolumes(config: Context['config']): StartVolume[] {
+  return [...new Set([config.stateDir, config.cache])].map(target => ({target, floor: config.disk.minFreeStateGb, label: `state volume ${target}`}));
+}
+
+function startVolumeHold(volumes: StartVolume[], statfs = fs.statfsSync): string | undefined {
+  const checked = new Set<number>();
+  // If paths share a device, the strictest floor is sufficient.
+  for (const {target, floor, label} of volumes.sort((a, b) => b.floor - a.floor)) {
+    if (!floor) continue;
+    try {
+      const ancestor = existingAncestor(target);
+      const device = fs.statSync(ancestor).dev;
+      if (checked.has(device)) continue;
+      checked.add(device);
+      const stat = statfs(ancestor);
+      const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
+      if (!Number.isFinite(gb)) throw Error('invalid free-space sample');
+      if (gb < floor) return `wstrzymane: dysk ${Math.floor(gb)} GB < ${floor} GB (${label})`;
+    } catch {
+      return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
+    }
+  }
+  return undefined;
+}
+
+export function worktreeVolumeLabel(repo: WorktreeVolume): string {
+  return repo.worktreeMount ?? inferredWorktreeMount(repo.worktree) ?? existingAncestor(repo.worktree);
+}
+
 /** Fresh cheap filesystem admission, independent of recursive worktree measurements. Unknown space fails closed. */
-export function diskStartHold(config: Context['config'], worktrees: (string | DiskWorktree)[] = [], statfs = fs.statfsSync): string | undefined {
+function localStartVolumes(config: Context['config'], worktrees: (string | DiskWorktree)[]): {missing?: string; volumes: StartVolume[]} {
   const repos = worktrees.map(worktree => typeof worktree === 'string' ? { worktree } : worktree);
   if (!repos.length && config.worktreeRoot) repos.push({ worktree: resolvePath(config.worktreeRoot), ...(config.worktreeMount ? { worktreeMount: resolvePath(config.worktreeMount) } : {}) });
   const missing = missingWorktreeVolume(repos);
-  if (missing) return `volume missing: ${missing}`;
-  const targets = new Set([config.cache, config.stateDir, ...repos.map(repo => repo.worktree)]);
-  if (config.nodeModules === 'clone' || repos.some(repo => repo.nodeModules === 'clone')) targets.add(path.dirname(config.path));
-  const devices = new Set<number>();
-  for (const target of targets) {
+  if (missing) return {missing, volumes: []};
+  const volumes = repos.map(repo => ({target: repo.worktree, floor: config.disk.minFreeStartGb, label: worktreeVolumeLabel(repo)}));
+  if (config.nodeModules === 'clone' || repos.some(repo => repo.nodeModules === 'clone')) {
+    const target = path.dirname(config.path);
+    volumes.push({target, floor: config.disk.minFreeStartGb, label: `node_modules store volume ${target}`});
+  }
+  return {volumes: [...volumes, ...stateVolumes(config)]};
+}
+
+export function diskStartHold(config: Context['config'], worktrees: (string | DiskWorktree)[] = [], statfs = fs.statfsSync): string | undefined {
+  const plan = localStartVolumes(config, worktrees);
+  return plan.missing ? `volume missing: ${plan.missing}` : startVolumeHold(plan.volumes, statfs);
+}
+
+async function freshVolumeHold(ctx: Context, volumes: StartVolume[]): Promise<string | undefined> {
+  const samples = new Map<number, number | null>();
+  for (const {target, floor, label} of volumes) {
+    if (floor === 0) continue;
     const ancestor = existingAncestor(target);
-    try {
-      const device = fs.statSync(ancestor).dev;
-      if (devices.has(device)) continue;
-      devices.add(device);
-      const stat = statfs(ancestor);
-      const gb = Number(stat.bavail) * Number(stat.bsize) / 1024 ** 3;
-      if (gb < config.disk.minFreeStartGb) {
-        const external = repos.find(repo => repo.worktree === target);
-        const mount = external && (external.worktreeMount ?? inferredWorktreeMount(external.worktree));
-        return `wstrzymane: dysk ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB${mount ? ` (${mount})` : ''}`;
-      }
-    } catch { return 'wstrzymane: dysk – nie można odczytać wolnego miejsca'; }
+    const dev = fs.statSync(ancestor, {throwIfNoEntry: false})?.dev;
+    if (dev === undefined) return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
+    if (!samples.has(dev)) samples.set(dev, (await freeSpace(ctx, ancestor, fs.promises.statfs, START_DISK_BUDGET_MS)).availableBytes);
+    const bytes = samples.get(dev);
+    if (bytes == null) return `wstrzymane: dysk – nie można odczytać wolnego miejsca (${label})`;
+    const gb = bytes / 1024 ** 3;
+    if (gb >= floor) continue;
+    const held = `wstrzymane: dysk ${Math.floor(gb)} GB < ${floor} GB (${label})`;
+    if (!ctx.config.disk.autoGc.enabled || ctx.runner.dryRun) return held;
+    kickAutoGc(ctx, [{path: inferredWorktreeMount(target) ?? ancestor, device: String(dev)}], {held: true});
+    return held + '; zlecono auto_gc';
   }
   return undefined;
 }
@@ -347,16 +421,22 @@ export async function refreshDiskFreeSpace(ctx: Context, previous: DiskReport): 
 /** Cached host admission for synchronous queue previews; never stat a remote path locally. */
 export function taskDiskStartHold(config: Context['config'], host: string | undefined, worktrees: (string | DiskWorktree)[], now = Date.now()): string | undefined {
   if (!host) return diskStartHold(config, worktrees);
-  if (config.disk.minFreeStartGb === 0) return undefined;
+  const local = startVolumeHold(stateVolumes(config));
+  if (local || config.disk.minFreeStartGb === 0) return local;
   const health = readHostsCache(process.env, now, 60_000)?.hosts.find(h => h.name === host);
   if (!health || health.state !== 'reachable' || health.disk?.workDir !== config.hosts[host]?.workDir) return `wstrzymane: dysk [${host}] – brak świeżego odczytu work_dir`;
   const gb = health.disk.freeKb / 1024 ** 2;
   return gb < config.disk.minFreeStartGb ? `wstrzymane: dysk [${host}] ${Math.floor(gb)} GB < ${config.disk.minFreeStartGb} GB` : undefined;
 }
 
-/** Fresh remote work_dir counters before any worktree/setup mutation. */
+/** Fresh local and remote filesystem counters before any worktree/setup mutation. */
 export async function freshTaskDiskStartHold(ctx: Context, host: string | undefined, worktrees: (string | DiskWorktree)[]): Promise<string | undefined> {
-  if (!host) return diskStartHold(ctx.config, worktrees);
+  if (!host) {
+    const plan = localStartVolumes(ctx.config, worktrees);
+    return plan.missing ? `volume missing: ${plan.missing}` : freshVolumeHold(ctx, plan.volumes);
+  }
+  const local = await freshVolumeHold(ctx, stateVolumes(ctx.config));
+  if (local) return local;
   const workDir = ctx.config.hosts[host]!.workDir;
   const mount = inferredWorktreeMount(workDir);
   if (ctx.config.disk.minFreeStartGb === 0 && !mount) return undefined;

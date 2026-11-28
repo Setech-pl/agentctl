@@ -6,12 +6,14 @@ import { describe, it } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import YAML from 'yaml';
-import { Harness, defaultCacheRoot } from '../scripts/live-harness.ts';
+import { Harness, commandV, defaultCacheRoot } from '../scripts/live-harness.ts';
+import { shellQuote } from '../src/core/util.ts';
 import { REPO_ROOT } from './helpers.ts';
 
 /*
  * P19 over the real thing: the MCP server as the app starts it (stdio, a real Client), a real watcher process, a real tmux server of its own, the
- * fake agent of the live harness. Setup is `sleep 3` in two repositories (the live script uses 20 s).
+ * fake agent of the live harness. The first setup stays active until both clients
+ * have read its progress and the original MCP connection has shut down.
  */
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -21,18 +23,25 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
     const cache = defaultCacheRoot();
     const h = new Harness({ name: 'p19-stdio', cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [new]}\nwatch: {interval: 1}\n' }, REPO_ROOT);
     // tests/isolation.ts replaced tmux on the PATH of this process with a stub; the harness links the real tools into its fake bin directory.
+    // Only the real tmux goes in front: on Linux it lives in /usr/bin next to a system node (and possibly a real agent).
+    const realTmux = commandV('tmux', ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(':'));
+    assert.ok(realTmux, 'tmux is installed');
+    const tools = fs.mkdtempSync(path.join(process.env.TMPDIR ?? REPO_ROOT, 'p19-tools-'));
+    fs.symlinkSync(realTmux, path.join(tools, 'tmux'));
     const isolatedPath = process.env.PATH;
-    process.env.PATH = `${['/opt/homebrew/bin', '/usr/local/bin'].join(':')}:${isolatedPath}`;
+    process.env.PATH = `${tools}:${isolatedPath}`;
     try { h.start(); } finally { process.env.PATH = isolatedPath; }
     const clients: Client[] = [];
     try {
+      const finishSetup = path.join(h.root, 'allow-setup-to-finish');
       const git = (cwd: string, args: string[]) => { const r = spawnSync('git', ['-C', cwd, ...args], { env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
       const repos = ['alpha', 'beta'].map((n) => {
         const dir = path.join(h.root, n);
         fs.mkdirSync(dir);
         git(dir, ['init', '-b', 'main']);
         fs.writeFileSync(path.join(dir, 'file.txt'), 'x\n');
-        fs.writeFileSync(path.join(dir, '.agentctl.yaml'), YAML.stringify({ setup: [`sleep 3; echo installed-${n}`] }));
+        const wait = n === 'alpha' ? 'while [ ! -f ' + shellQuote(finishSetup) + ' ]; do sleep 0.05; done; ' : '';
+        fs.writeFileSync(path.join(dir, '.agentctl.yaml'), YAML.stringify({ setup: [wait + 'echo installed-' + n] }));
         git(dir, ['add', '.']);
         git(dir, ['commit', '-m', 'fixture']);
         return dir;
@@ -63,9 +72,12 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
       assert.ok(!confirmed.error, confirmed.text);
       assert.match(confirmed.text, /^Registered: SLOW-1/);
       assert.ok(confirmMs < 5000, `confirm took ${confirmMs} ms`);
-      const journal = fs.readFileSync(path.join(h.agentctlHome, 'journal.jsonl'), 'utf8');
-      assert.match(journal, /"kind":"mcp-write","text":"new: new SLOW-1"/);
       assert.equal(fs.existsSync(path.join(h.agentctlHome, 'queue')), true);
+      const journal = path.join(h.agentctlHome, 'journal.jsonl');
+      const auditRecorded = () => {
+        try { return /"kind":"mcp-write","text":"new: new SLOW-1"/.test(fs.readFileSync(journal, 'utf8')); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+      };
 
       // reads, from the same server and from another chat's, while the watcher is in the setup
       let sawSetup = false;
@@ -79,15 +91,18 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
           slowest.push(r.ms);
           if (tool === 'queue_list' && /setup w toku \(repo \d\/2/.test(r.text)) sawSetup = true;
         }
-        if (sawSetup && !again) {
+        if (sawSetup && !again && auditRecorded()) {
           // a repeated confirm during the setup, and the death of the first server in the middle of it
           again = (await call(b.client, 'new', { spec, confirm: true })).text;
+          assert.match(again, /SLOW-1: already being started/);
           await a.client.close();
           firstServer = b.client;
+          fs.writeFileSync(finishSetup, 'MCP client closed\n');
         }
         await sleep(300);
       }
       assert.ok(sawSetup, 'queue_list said where the setup was');
+      assert.ok(auditRecorded(), 'the asynchronous order audit reached the journal');
       assert.match(again, /SLOW-1: already being started/);
       assert.ok(Math.max(...slowest) < 2000, `reads took up to ${Math.max(...slowest)} ms`);
 

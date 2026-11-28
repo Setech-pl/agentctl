@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import { Context } from '../src/core/context.ts';
 import { DiskRunner } from './helpers.ts';
 import { describe, it } from 'node:test';
@@ -131,7 +132,8 @@ describe('PROGRESS in status', () => {
     assert.ok(!runner.queries.some((q) => q.startsWith('git')), runner.queries.join('\n'));
   });
 
-  it('status --json and status --clip carry it', async () => {
+  it('status --json and status --clip carry it', async (t) => {
+    t.mock.method(os, 'platform', () => 'darwin'); // the clipboard fixture fakes the macOS tools (pbcopy/pbpaste)
     const { config, tmux } = setup('ps3');
     const git = mockGit({ '/wt/a': { count: 2, diff: ['a.ts'], status: [' M b.ts'] } });
     const runner = new RecordingRunner({ dryRun: false, respond: (cmd, args, opts) => tmux.respond(cmd, args, opts) ?? git(cmd, args) });

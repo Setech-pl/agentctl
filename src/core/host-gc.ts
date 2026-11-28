@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Context } from './context.ts';
 import type { GcItem, GcOptions, GcPlan, GcSkip } from './gc.ts';
-import { listArchivedRecords, listTaskRecords } from './taskstore.ts';
+import { listArchivedRecords, listTaskRecords, type RecordScan } from './taskstore.ts';
 import { cohortKey, errorMessage } from './util.ts';
 
 /** Serialized into a bounded Node program executed by HostRunner; no dispatcher paths or secrets. */
@@ -40,7 +40,8 @@ export function remoteGcProgram(): void {
     return { bytes, newest };
   };
   const listing = run('tmux', ['list-windows', '-t', '=agentctl-' + input.host, '-F', '#{window_id}\t#{window_name}\t#{@agentctl-role}']);
-  if (listing.error || listing.status !== 0 && !/can't find session|no server running|no sessions|error connecting to.*No such file/i.test(listing.stderr)) throw Error('cannot verify remote tmux windows: ' + listing.stderr);
+  // TMUX_SESSION_ABSENT (tmux.ts), inline: this program runs on the remote host from its source text.
+  if (listing.error || listing.status !== 0 && !/no server running|failed to connect to server|can't find session|can't find window|no sessions|no current target|error connecting to.*No such file/i.test(listing.stderr)) throw Error('cannot verify remote tmux windows: ' + listing.stderr);
   const live = listing.stdout.split('\n').filter(Boolean).map(line => line.split('\t'));
   const finished = (r: any) => (r.closed || r.cancelled || r.archived) && !live.some(w => w[2] === r.window || w[1] === r.window || w[1]?.endsWith(' ' + r.window));
   const records = input.records as any[];
@@ -107,9 +108,13 @@ export function remoteGcProgram(): void {
     const wanted = input.item;
     const item = items.find(i => i.kind === wanted.kind && i.task === wanted.task && i.target === wanted.target && i.repo === wanted.repo);
     if (!item) throw Error(skipped.find(s => s.target === wanted.target)?.reason ?? 'item no longer eligible');
+    const parent = p.dirname(item.target);
+    const available = () => { try { const stat = fs.statfsSync(parent); return stat.bavail * stat.bsize; } catch { return undefined; } };
+    const before = available();
     if (item.kind === 'worktree') git(item.repo!, ['worktree', 'remove', item.target]);
     else fs.rmSync(item.target, { recursive: true });
-    process.stdout.write(JSON.stringify(item));
+    const after = available();
+    process.stdout.write(JSON.stringify({ ...item, bytes: before === undefined || after === undefined ? 0 : Math.max(0, after - before) }));
   } else process.stdout.write(JSON.stringify({ items, skipped }));
 }
 
@@ -117,17 +122,17 @@ const fingerprint = (ctx: Context, host: string) => { const h = ctx.config.hosts
 
 const script = () => `(${remoteGcProgram.toString()})()`;
 const cacheFile = (ctx: Context, host: string) => path.join(ctx.config.stateDir, 'hosts', host + '-gc.json');
-function payload(ctx: Context, host: string, olderThanMs: number, opts: GcOptions = {}) {
-  const archived = listArchivedRecords(ctx.config);
-  const current = listTaskRecords(ctx.config);
+function payload(ctx: Context, host: string, olderThanMs: number, opts: GcOptions = {}, inventory?: RecordScan) {
+  const archived = inventory?.archived ?? listArchivedRecords(ctx.config);
+  const current = inventory?.current ?? listTaskRecords(ctx.config);
   return { host, hostFingerprint: fingerprint(ctx, host), root: ctx.config.hosts[host]!.workDir, repos: ctx.config.hosts[host]!.repos, olderThanMs, includeCache: opts.includeCache === true, keepCache: opts.keepCache ?? [], keep: opts.keep ?? [],
     records: [...current, ...archived.filter(a => !current.some(r => r.window === a.window))].filter(r => r.host === host).map(r => ({ task: r.task, window: r.window, repos: r.repos, links: r.links, remoteDir: r.remoteDir, remoteReport: r.remoteReport, pin: r.pin, keepCache: r.keepCache, reportText: (() => { try { return fs.readFileSync(r.report, 'utf8'); } catch { return ''; } })(), closed: r.closed, cancelled: r.cancelled, archived: archived.some(a => a.window === r.window), cohort: r.cohort, selected: opts.cohort === undefined || !!r.cohort && cohortKey(r.cohort) === cohortKey(opts.cohort) })) };
 }
 
-export async function planRemoteGc(ctx: Context, opts: GcOptions, olderThanMs: number): Promise<Pick<GcPlan, 'items' | 'skipped'>> {
+export async function planRemoteGc(ctx: Context, opts: GcOptions, olderThanMs: number, inventory?: RecordScan): Promise<Pick<GcPlan, 'items' | 'skipped'>> {
   const plans = await Promise.all(Object.keys(ctx.config.hosts).map(async host => {
     try {
-      const data = payload(ctx, host, olderThanMs, opts);
+      const data = payload(ctx, host, olderThanMs, opts, inventory);
       if (!data.records.length) return { items: [], skipped: [] };
       if (opts.cachedSizes) {
         const cached = JSON.parse(fs.readFileSync(cacheFile(ctx, host), 'utf8'));

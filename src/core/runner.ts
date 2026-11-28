@@ -1,7 +1,8 @@
-import { atomicWriteFile, atomicAppendFile, noteStateWriteFailure } from './atomic-file.ts';
+import { appendJournalFile, atomicWriteFileAsync, atomicAppendFileAsync, noteStateWriteFailure } from './atomic-file.ts';
 import { withStateWriteLock, taskLock } from './file-lock.ts';
 import { readRateLimits } from './readonly-rpc.ts';
 import { spawn, spawnSync } from 'node:child_process';
+import { commandStage, commandStageRemaining } from './command-stage.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { shellLine } from './util.ts';
@@ -23,6 +24,7 @@ export interface ExecOptions {
   /** What a dry run pretends a read-only query returned. */
   dryResult?: Partial<ExecResult>;
   timeoutMs?: number;
+  signal?: AbortSignal;
   /** Kept for callers that say so; every command except `interactive` runs without blocking the event loop (the MCP server answers other calls meanwhile). */
   async?: boolean;
   /** Hand the terminal to the command (stdin, stdout and stderr are inherited, no timeout): `tmux attach-session`. */
@@ -67,7 +69,11 @@ export class RealRunner implements Runner {
   readonly dryRun = false;
 
   async exec(cmd: string, args: string[], opts: ExecOptions = {}): Promise<ExecResult> {
-    if (opts.rpc) return readRateLimits(cmd, args, opts.cwd, opts.timeoutMs ?? 3000, opts.env);
+    const timeoutMs = Math.min(opts.timeoutMs ?? (opts.rpc ? 3000 : 30_000), commandStageRemaining(), 2 ** 31 - 1);
+    const signals = [opts.signal, commandStage.getStore()?.signal].filter(s => s !== undefined);
+    const signal = signals.length ? AbortSignal.any(signals) : undefined;
+    if (signal?.aborted || timeoutMs <= 0) return { code: 1, stdout: '', stderr: 'ETIMEDOUT or interrupted before launch' };
+    if (opts.rpc) return readRateLimits(cmd, args, opts.cwd, timeoutMs, opts.env);
     const commandEnv = opts.env ?? process.env;
     const env = cmd === 'tmux' ? tmuxEnv(commandEnv) : commandEnv;
     if (opts.interactive) {
@@ -76,22 +82,50 @@ export class RealRunner implements Runner {
       return { code: r.status ?? 1, stdout: '', stderr: '' };
     }
     return new Promise<ExecResult>((resolve) => {
-      let timedOut = false;
+      let stopReason: string | undefined;
       let failure: NodeJS.ErrnoException | undefined;
       let size = 0;
       const stdout: Buffer[] = [];
       const stderr: Buffer[] = [];
       const child = spawn(cmd, args, { cwd: opts.cwd, env, detached: process.platform !== 'win32', stdio: 'pipe' });
+      const track = (active: boolean) => {
+        if (child.pid && process.env.AGENTCTL_WATCH_WORKER === '1' && process.connected) process.send?.({ watchCommand: child.pid, active }, () => {});
+      };
+      track(true);
       const signalGroup = (signal: NodeJS.Signals): void => {
         if (!child.pid) return;
         try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, signal); } catch { /* already exited */ }
       };
       let escalation: NodeJS.Timeout | undefined;
-      const timeout = setTimeout(() => {
-        timedOut = true;
+      let settled = false;
+      const finish = (code: number): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        clearTimeout(escalation);
+        signal?.removeEventListener('abort', abort);
+        track(false);
+        const detail = stopReason ?? failure?.message;
+        const err = Buffer.concat(stderr).toString('utf8');
+        resolve({ code: failure?.code === 'ENOENT' ? 127 : stopReason || failure ? 1 : code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: detail ? `${err}${err ? '\n' : ''}${detail}` : err });
+      };
+      const stop = (reason: string): void => {
+        if (stopReason || settled) return;
+        stopReason = reason;
         signalGroup('SIGTERM');
-        escalation = setTimeout(() => signalGroup('SIGKILL'), 1000);
-      }, opts.timeoutMs ?? 30_000);
+        escalation = setTimeout(() => {
+          signalGroup('SIGKILL');
+          // A descendant can retain the pipes or a process can be stuck in kernel I/O.
+          child.stdout.destroy();
+          child.stderr.destroy();
+          child.stdin.destroy();
+          child.unref();
+          finish(1);
+        }, 1000);
+      };
+      const abort = () => stop('interrupted');
+      const timeout = setTimeout(() => stop(`ETIMEDOUT after ${timeoutMs}ms`), timeoutMs);
+      signal?.addEventListener('abort', abort, { once: true });
       const collect = (into: Buffer[], chunk: Buffer): void => {
         size += chunk.length;
         if (size > 64 * 1024 * 1024) {
@@ -103,11 +137,8 @@ export class RealRunner implements Runner {
       child.stderr.on('data', (chunk: Buffer) => collect(stderr, chunk));
       child.on('error', (error: NodeJS.ErrnoException) => { failure = error; });
       child.on('close', (code) => {
-        clearTimeout(timeout); clearTimeout(escalation);
-        if (timedOut) signalGroup('SIGKILL');
-        const detail = timedOut ? `ETIMEDOUT after ${opts.timeoutMs ?? 30_000}ms` : failure?.message;
-        const err = Buffer.concat(stderr).toString('utf8');
-        resolve({ code: failure?.code === 'ENOENT' ? 127 : timedOut || failure ? 1 : code ?? 1, stdout: Buffer.concat(stdout).toString('utf8'), stderr: detail ? `${err}${err ? '\n' : ''}${detail}` : err });
+        if (stopReason) signalGroup('SIGKILL');
+        finish(code ?? 1);
       });
       child.stdin.on('error', () => { /* a child that exits before reading stdin may close the pipe */ });
       child.stdin.end(opts.input);
@@ -118,24 +149,24 @@ export class RealRunner implements Runner {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  private async writeLocked(file: string, operation: () => void): Promise<void> {
+  private async writeLocked(file: string, operation: () => void | Promise<void>): Promise<void> {
     let entered = false;
     try { await withStateWriteLock(path.basename(file) === 'TASK.md' ? taskLock(file) : `${file}.write.lock`, async () => {
       entered = true;
-      try { operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
+      try { await operation(); } catch (error) { noteStateWriteFailure(file, error); throw error; }
     }); } catch (error) { if (!entered) noteStateWriteFailure(file, error); throw error; }
   }
 
   async writeFile(file: string, content: string): Promise<void> {
-    await this.writeLocked(file, () => atomicWriteFile(file, content));
+    await this.writeLocked(file, () => atomicWriteFileAsync(file, content));
   }
 
   async appendFile(file: string, content: string): Promise<void> {
-    await this.writeLocked(file, () => atomicAppendFile(file, content));
+    await this.writeLocked(file, () => path.basename(file) === 'journal.jsonl' ? appendJournalFile(file, content) : atomicAppendFileAsync(file, content));
   }
 
   async copyFile(src: string, dest: string): Promise<void> {
-    await this.writeLocked(dest, () => atomicWriteFile(dest, fs.readFileSync(src)));
+    await this.writeLocked(dest, async () => atomicWriteFileAsync(dest, await fs.promises.readFile(src)));
   }
 
   async rename(from: string, to: string): Promise<void> {

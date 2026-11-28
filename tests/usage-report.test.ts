@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
@@ -140,7 +141,8 @@ describe('status TOKENS', () => {
 });
 
 describe('agentctl usage', () => {
-  it('prints the table; --json the report; --clip goes through the clipboard tool, never the real one', async () => {
+  it('prints the table; --json the report; --clip goes through the clipboard tool, never the real one', async (t) => {
+    t.mock.method(os, 'platform', () => 'darwin'); // the clipboard fixture fakes the macOS tools (pbcopy/pbpaste)
     const s = twoTasks('cli');
     const plain = await runCli(s.config, s.runner, ['usage', '--since', '30d']);
     assert.equal(plain.code, 0, plain.stderr);

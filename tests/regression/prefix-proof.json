@@ -571,6 +571,26 @@
       "FIELD0256-STALE: a cached snapshot drops a reading as its reset passes"
     ]
   },
+  "FIX-331D4A3": {
+    "rev": "bf115b61891277afd3c99824fb596367b723f434",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "lost server/session stays visible with recovery, one durable event per loss",
+      "lost server/session stays visible with recovery, one durable event per loss"
+    ]
+  },
+  "FIX-5246F46": {
+    "rev": "7c331003fd87f50f6bd69c689a2b23e885af2d3d",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIX-5246F46: an interrupted checkout before a worktree exists stays under queue ownership",
+      "FIX-5246F46: an interrupted checkout before a worktree exists stays under queue ownership"
+    ]
+  },
   "FLOW-CLOSE": {
     "rev": "v0.25.3",
     "outcome": "FAILS",
@@ -828,6 +848,123 @@
     "failing": [
       "tests/host-boundaries.test.ts",
       "tests/host-boundaries.test.ts"
+    ]
+  },
+  "HOTFIX0263-DISK": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-DISK: reports free blocks gained on the volume, excluding estimates for failed and skipped entries",
+      "gc: --apply",
+      "HOTFIX0263-DISK: reports free blocks gained on the volume, excluding estimates for failed and skipped entries"
+    ]
+  },
+  "HOTFIX0263-LOCK": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed",
+      "HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed"
+    ]
+  },
+  "HOTFIX0263-START": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-START: hung worktree releases admission and a setup slot by the second tick",
+      "HOTFIX0263-START: hung setup releases admission and a setup slot by the second tick",
+      "HOTFIX0263-START: hung worktree releases admission and a setup slot by the second tick",
+      "HOTFIX0263-START: hung setup releases admission and a setup slot by the second tick"
+    ]
+  },
+  "HOTFIX0263-TRASH": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge previews legacy ownership",
+      "HOTFIX0263-TRASH: trash mode purges only recorded moves and one-off purge previews legacy ownership"
+    ]
+  },
+  "HOTFIX0263-WATCH": {
+    "rev": "v0.26.0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-WATCH: stalled stage exits and the restarted watcher reconciles request and start",
+      "HOTFIX0263-WATCH: stalled stage exits and the restarted watcher reconciles request and start"
+    ]
+  },
+  "HOTFIX0264-F1": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F1: admission can wait beyond five seconds for a holder",
+      "HOTFIX0264-F1: a prepared queue start retries the TASK.md commit without replaying setup",
+      "HOTFIX0264-F1: admission can wait beyond five seconds for a holder",
+      "HOTFIX0264-F1: a prepared queue start retries the TASK.md commit without replaying setup"
+    ]
+  },
+  "HOTFIX0264-F2": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F2: integration removal receives the Git timeout without the admission lock",
+      "HOTFIX0264-F2: integration removal receives the Git timeout without the admission lock",
+      "HOTFIX0264-F2: prompt delivery can settle past the admission deadline and still presses Enter",
+      "HOTFIX0264-F2: prompt delivery can settle past the admission deadline and still presses Enter"
+    ]
+  },
+  "HOTFIX0264-F3": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy has its own section",
+      "HOTFIX0264-F3: basename alone never purges personal Trash and marked legacy has its own section"
+    ]
+  },
+  "HOTFIX0264-F4": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F4: a 0.27.x config loads with one warning and ordinary settings still apply",
+      "HOTFIX0264-F4: a 0.27.x config loads with one warning and ordinary settings still apply"
+    ]
+  },
+  "HOTFIX0264-F5": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F5: only the explicitly approved dirty removal uses force and is journaled",
+      "HOTFIX0264-F5: only the explicitly approved dirty removal uses force and is journaled"
+    ]
+  },
+  "HOTFIX0264-F6": {
+    "rev": "v0.26.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners after 30 seconds",
+      "HOTFIX0264-F6: expires a reused PID by recorded age and empty or zero owners after 30 seconds"
     ]
   },
   "L1": {
@@ -1457,6 +1594,519 @@
       "REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures"
     ]
   },
+  "REL0272-ADMISSION-CHAIN": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status",
+      "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status"
+    ]
+  },
+  "REL0272-ASYNC-FSYNC": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync on the event loop",
+      "REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync on the event loop"
+    ]
+  },
+  "REL0272-CANCEL-SNAPSHOT": {
+    "rev": "560b422462e02f28812e9251981ddddef4893d24",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks",
+      "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks"
+    ]
+  },
+  "REL0272-CANDIDATE-WATCH": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task",
+      "REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task"
+    ]
+  },
+  "REL0272-COLD-SNAPSHOT": {
+    "rev": "2aff93d417d52478679a3e1a29bf2bade7c4012d",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-COLD-SNAPSHOT: an initial scan failure does not publish a rowless replacement",
+      "REL0272-COLD-SNAPSHOT: an initial scan failure does not publish a rowless replacement"
+    ]
+  },
+  "REL0272-CONTENTION": {
+    "rev": "3484fbebdf0c7beaceec2a1b855cef0417044277",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target",
+      "REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target"
+    ]
+  },
+  "REL0272-DELIVERY-SCAN": {
+    "rev": "e3a6373f67cc15323ad95af1e91bacb8c0d83760",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up",
+      "REL0272-DELIVERY-SCAN: the watch locks only tasks with a pending prompt or queued follow-up"
+    ]
+  },
+  "REL0272-DISK-ASYNC": {
+    "rev": "2aff93d417d52478679a3e1a29bf2bade7c4012d",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-DISK-ASYNC: watch can resolve worktree volume identity off the event loop",
+      "REL0272-DISK-ASYNC: watch can resolve worktree volume identity off the event loop"
+    ]
+  },
+  "REL0272-DOCTOR-IO": {
+    "rev": "560b422462e02f28812e9251981ddddef4893d24",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-DOCTOR-IO: cached doctor does not open task headers synchronously",
+      "REL0272-DOCTOR-IO: cached doctor does not open task headers synchronously"
+    ]
+  },
+  "REL0272-GC-APPLY-IO": {
+    "rev": "25fae22e54d8692ce1dd744d56e215f4587a3f45",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-GC-APPLY-IO: removal revalidates task record versions without synchronous header reads",
+      "REL0272-GC-APPLY-IO: removal revalidates task record versions without synchronous header reads"
+    ]
+  },
+  "REL0272-GC-INVENTORY": {
+    "rev": "560b422462e02f28812e9251981ddddef4893d24",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory",
+      "REL0272-GC-INVENTORY: a cohort preview shares the asynchronous task inventory"
+    ]
+  },
+  "REL0272-GC-RESULT-COMPAT": {
+    "rev": "25fae22e54d8692ce1dd744d56e215f4587a3f45",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "FIELD0256-GC-EVENT: deferred cohort GC publishes one summary",
+      "FIELD0256-GC-EVENT: deferred cohort GC publishes one summary"
+    ]
+  },
+  "REL0272-GIT-REFUSAL": {
+    "rev": "5274994a68ce2d2fdaf2cc310ad602c00a6b0e94",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "D1: cached MCP preview checks every repo including untracked files in the second",
+      "D1: cached MCP preview checks every repo including untracked files in the second"
+    ]
+  },
+  "REL0272-HEADER-PIPELINE": {
+    "rev": "ce3f8972f18b810361bc43d7c99ce71999157970",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-HEADER-PIPELINE: a slow early header does not delay reading the remaining inventory",
+      "REL0272-HEADER-PIPELINE: a slow early header does not delay reading the remaining inventory"
+    ]
+  },
+  "REL0272-HOLD-OBSERVATION": {
+    "rev": "2aff93d417d52478679a3e1a29bf2bade7c4012d",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-HOLD-OBSERVATION: a load-held queue publishes its reason without observing panes",
+      "REL0272-HOLD-OBSERVATION: a load-held queue publishes its reason without observing panes"
+    ]
+  },
+  "REL0272-HOLD-WRITES": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons",
+      "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons"
+    ]
+  },
+  "REL0272-HOST-PERSIST": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-HOST-PERSIST: an unchanged host state is not rewritten on every window inventory",
+      "REL0272-HOST-PERSIST: an unchanged host state is not rewritten on every window inventory"
+    ]
+  },
+  "REL0272-INDEX-ROOT-WRITES": {
+    "rev": "ce3f8972f18b810361bc43d7c99ce71999157970",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-INDEX-ROOT-WRITES: snapshot and progress writes do not recheck unchanged active tasks",
+      "REL0272-INDEX-ROOT-WRITES: snapshot and progress writes do not recheck unchanged active tasks"
+    ]
+  },
+  "REL0272-INVENTORY-EIO": {
+    "rev": "41389e16720925de95d380fa026cc2f6b6633812",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-INVENTORY-EIO: a directory read error preserves the last complete snapshot",
+      "REL0272-INVENTORY-EIO: a directory read error preserves the last complete snapshot"
+    ]
+  },
+  "REL0272-JOURNAL-APPEND": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-JOURNAL-APPEND: a torn last line does not absorb the next journal event",
+      "REL0272-JOURNAL-APPEND: a torn last line does not absorb the next journal event"
+    ]
+  },
+  "REL0272-LEGACY-JOURNAL": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-LEGACY-JOURNAL: legacy launch events share a single append",
+      "REL0272-LEGACY-JOURNAL: legacy launch events share a single append"
+    ]
+  },
+  "REL0272-MAINTENANCE": {
+    "rev": "2aff93d417d52478679a3e1a29bf2bade7c4012d",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-MAINTENANCE: a delayed usage observation does not delay publishing status",
+      "REL0272-MAINTENANCE: a delayed usage observation does not delay publishing status"
+    ]
+  },
+  "REL0272-MCP-PAGES": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-MCP-PAGES: a continuation measures only a bounded fragment",
+      "REL0272-MCP-PAGES: a continuation measures only a bounded fragment"
+    ]
+  },
+  "REL0272-P19-RETRY": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-P19-RETRY: two reused worktrees share one bounded process census",
+      "worktree start resilience",
+      "REL0272-P19-RETRY: two reused worktrees share one bounded process census"
+    ]
+  },
+  "REL0272-PRESSURE-OVERSHOOT": {
+    "rev": "cad707e92212f3f95773251354295b93c340ab74",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without weakening the measured requirement",
+      "REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without weakening the measured requirement"
+    ]
+  },
+  "REL0272-PRESSURE-POLICY": {
+    "rev": "6631d091d0b6f64af65184dbb37f68684d9faa43",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group",
+      "REL0272-PRESSURE-POLICY: only load workers leave the Darwin background scheduling group"
+    ]
+  },
+  "REL0272-PRESSURE-START": {
+    "rev": "ce3f8972f18b810361bc43d7c99ce71999157970",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-START: initial synthetic load accounts for existing host pressure",
+      "REL0272-PRESSURE-START: initial synthetic load accounts for existing host pressure"
+    ]
+  },
+  "REL0272-PRESSURE-TEARDOWN": {
+    "rev": "41389e16720925de95d380fa026cc2f6b6633812",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRESSURE-TEARDOWN: pressure is released before cleaning an unsuccessful canary",
+      "REL0272-PRESSURE-TEARDOWN: pressure is released before cleaning an unsuccessful canary"
+    ]
+  },
+  "REL0272-PRODSHAPE-ORDER": {
+    "rev": "ce3f8972f18b810361bc43d7c99ce71999157970",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-PRODSHAPE-ORDER: measure before long independent regression and smoke suites",
+      "REL0272-PRODSHAPE-ORDER: measure before long independent regression and smoke suites"
+    ]
+  },
+  "REL0272-QUEUE-IO": {
+    "rev": "ce3f8972f18b810361bc43d7c99ce71999157970",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independent replacements",
+      "REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independent replacements"
+    ]
+  },
+  "REL0272-RACY-VERSION": {
+    "rev": "6e98ca541a83cbc0d1a7c8d4778d2b58e014f02a",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-RACY-VERSION: a same-size rewrite that reuses the inode within one clock tick is not served from the cache",
+      "REL0272-RACY-VERSION: a same-size rewrite that reuses the inode within one clock tick is not served from the cache"
+    ]
+  },
+  "REL0272-RESUME-LOCK": {
+    "rev": "64fdb988f5ece0aa7a97abd348151ad9039dac2a",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W4 a stale resume plan cannot start the same window twice even when the provider has two slots",
+      "W4 a stale resume plan cannot start the same window twice even when the provider has two slots"
+    ]
+  },
+  "REL0272-SMOKE-EVIDENCE": {
+    "rev": "f702dcca477f2d708a55a3cf9ed540cae21001ed",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results",
+      "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
+    ]
+  },
+  "REL0272-SNAPSHOT-HOLD": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot",
+      "REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot"
+    ]
+  },
+  "REL0272-STATUS-AGE": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-STATUS-AGE: status serves a healthy 25 s old snapshot (loaded tick plus interval) instead of the fallback",
+      "REL0272-STATUS-AGE: status serves a healthy 25 s old snapshot (loaded tick plus interval) instead of the fallback"
+    ]
+  },
+  "REL0272-TICK-LEGACY": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-LEGACY: interrupted legacy launches never enter tmux loss recovery",
+      "REL0272-TICK-LEGACY: interrupted legacy launches never enter tmux loss recovery"
+    ]
+  },
+  "REL0272-TICK-NEW-FOLDER": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-NEW-FOLDER: a newly created task is indexed before a native notification",
+      "REL0272-TICK-NEW-FOLDER: a newly created task is indexed before a native notification"
+    ]
+  },
+  "REL0272-TICK-PANES": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-PANES: many missing windows share one second tmux observation",
+      "REL0272-TICK-PANES: many missing windows share one second tmux observation"
+    ]
+  },
+  "REL0272-TICK-ROWS": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age",
+      "REL0272-TICK-ROWS: degraded publication retains last good rows and their actual age"
+    ]
+  },
+  "REL0272-TICK-SCANS": {
+    "rev": "322af1c18634e368f996b72dcff6c7c22a221d4b",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory",
+      "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory"
+    ]
+  },
+  "REL0272-TMUX-ABSENT": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version",
+      "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version"
+    ]
+  },
+  "REVIEW0256-DOWNGRADE": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-DOWNGRADE: check lists incompatible keys and prunes only expired overrides",
+      "REVIEW0256-DOWNGRADE: check lists incompatible keys and prunes only expired overrides"
+    ]
+  },
+  "REVIEW0256-EVENTS": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-EVENTS: scoped events reuse headers and respect recorded chat ownership",
+      "REVIEW0256-EVENTS: scoped events reuse headers and respect recorded chat ownership"
+    ]
+  },
+  "REVIEW0256-INDEX": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-INDEX: repeated launch checks keep task reads and journal parsing bounded",
+      "REVIEW0256-INDEX: repeated launch checks keep task reads and journal parsing bounded"
+    ]
+  },
+  "REVIEW0256-LEGACY": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-LEGACY: dead legacy launching tasks are journaled once and wait for a named resume",
+      "REVIEW0256-LEGACY: dead legacy launching tasks are journaled once and wait for a named resume"
+    ]
+  },
+  "REVIEW0256-LOAD": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-LOAD: configured load alert does not hold admission unless opted in",
+      "REVIEW0256-LOAD: configured load alert does not hold admission unless opted in"
+    ]
+  },
+  "REVIEW0256-MCP": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-MCP: starting watch fences old direct limits writers and identifies their version",
+      "REVIEW0256-MCP: starting watch fences old direct limits writers and identifies their version"
+    ]
+  },
+  "REVIEW0256-RESUME": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-RESUME: a stalled tmux launch leaves the tick and releases its reservation",
+      "REVIEW0256-RESUME: a stalled tmux launch leaves the tick and releases its reservation"
+    ]
+  },
+  "REVIEW0263-F1": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0263-F1: accepted start probes do not hold the shared admission lock",
+      "REVIEW0263-F1: accepted start probes do not hold the shared admission lock"
+    ]
+  },
+  "REVIEW0263-F2": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "REVIEW0263-F2: a nearing deadline leaves the pending prompt untouched for another tick",
+      "REVIEW0263-F2: a nearing deadline leaves the pending prompt untouched for another tick",
+      "FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it",
+      "FLOW-GC: watch proposes one owner-scoped plan for a fast-forward and confirm rechecks it"
+    ]
+  },
+  "REVIEW0263-F4": {
+    "rev": "795247ab32fc91b345ada1f9ce1ede77cdfcfb72",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed",
+      "HOTFIX0263-LOCK: an old dead owner is named when its admission lock is reclaimed"
+    ]
+  },
   "ROWSEL0252": {
     "rev": "v0.25.1",
     "outcome": "FAILS",
@@ -1479,6 +2129,17 @@
       "SNAP0247: a stuck statfs falls back to df and keeps worktree sizes independent",
       "SNAP0247: a hung disk notification times out while watch publishes and continues ticking",
       "SNAP0247: stale MCP status uses durable state and fresh disk with dated capacity, and doctor warns"
+    ]
+  },
+  "UPGRADE0272": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "a failed post-upgrade check restores the previous SHA and config, restarts both roles, and notifies the owner",
+      "agentctl-update: release safety",
+      "a failed post-upgrade check restores the previous SHA and config, restarts both roles, and notifies the owner"
     ]
   },
   "UX0228": {
@@ -1512,6 +2173,118 @@
     "failing": [
       "UX0228: queued selection closes its cohort and manager selection has no implicit cohort",
       "UX0228: queued selection closes its cohort and manager selection has no implicit cohort"
+    ]
+  },
+  "W102-VOLUME": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W102-VOLUME: external checkout uses its own floor and close/GC keep data safe across volumes",
+      "W102-VOLUME: external checkout uses its own floor and close/GC keep data safe across volumes"
+    ]
+  },
+  "W110-A": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 2,
+    "passed": 0,
+    "failing": [
+      "W110-A: repeated misses are promoted and a ten-minute stall requests a restart",
+      "W110-A: the running loop reports the stuck stage to the owner and asks its supervisor to restart",
+      "W110-A: repeated misses are promoted and a ten-minute stall requests a restart",
+      "W110-A: the running loop reports the stuck stage to the owner and asks its supervisor to restart"
+    ]
+  },
+  "W110-B": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-B: complete report and an idle pane with an update footer become report-ready",
+      "W110-B: complete report and an idle pane with an update footer become report-ready"
+    ]
+  },
+  "W110-C": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-C: watch rechecks a missing window before recording loss",
+      "W110-C: watch rechecks a missing window before recording loss"
+    ]
+  },
+  "W110-D": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-D: a failed Codex version check retries three times and records the output",
+      "W110-D: a failed Codex version check retries three times and records the output"
+    ]
+  },
+  "W110-E": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-E: closed dependency without a report has warnings, a queue reason and a durable event",
+      "W110-E: closed dependency without a report has warnings, a queue reason and a durable event"
+    ]
+  },
+  "W110-F": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-F: leading verdict tokens accept trailing findings and ambiguity is journaled",
+      "W110-F: leading verdict tokens accept trailing findings and ambiguity is journaled"
+    ]
+  },
+  "W110-G": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-G: outputs retain deferred cells and silently ignore namespaced extensions",
+      "W110-G: outputs retain deferred cells and silently ignore namespaced extensions"
+    ]
+  },
+  "W110-H": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-H: off and null erase a provider quota even with an inherited share, whereas 0 blocks",
+      "W110-H: off and null erase a provider quota even with an inherited share, whereas 0 blocks"
+    ]
+  },
+  "W110-I": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-I: short-window samples expire after two windows and disappear from the plan",
+      "W110-I: short-window samples expire after two windows and disappear from the plan"
+    ]
+  },
+  "W110-MCP-AGE": {
+    "rev": "v0.27.1",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval",
+      "W110-MCP-AGE: a recent complete snapshot still serves full queue and limits after a missed interval"
     ]
   },
   "WALL-1-f1": {

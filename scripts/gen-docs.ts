@@ -21,7 +21,8 @@ fs.writeFileSync(mcpFile, before.includes('<!-- BEGIN GENERATED MCP PARITY -->')
 // The versioned report schema is generated from the same validator as every consumer.
 const { outputsSchema } = await import('../src/core/outputs.ts');
 const { z } = await import('zod');
-fs.writeFileSync(path.join(root, 'docs/examples/outputs-v1.schema.json'), `${JSON.stringify(z.toJSONSchema(outputsSchema), null, 2)}\n`);
+const reportSchema = { ...z.toJSONSchema(outputsSchema), patternProperties: {'^x_': {}} };
+fs.writeFileSync(path.join(root, 'docs/examples/outputs-v1.schema.json'), `${JSON.stringify(reportSchema, null, 2)}\n`);
 
 await import('./docs-reference.ts');
 

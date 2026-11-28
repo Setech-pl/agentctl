@@ -7,7 +7,7 @@ import type { GlobalConfig } from './config.ts';
 import type { LaunchExit } from './start-failure.ts';
 import type { Context } from './context.ts';
 import { notifyPhone } from './phone-send.ts';
-import { listTaskRecords, readTaskRecord } from './taskstore.ts';
+import { readTaskRecord } from './taskstore.ts';
 import { isObject, windowName } from './util.ts';
 
 /*
@@ -15,7 +15,7 @@ import { isObject, windowName } from './util.ts';
  * the limits commands write it; `agentctl events` and the MCP tool `events_since` read it for a chat that gets no notifications.
  */
 
-export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered', 'host-sync', 'host-availability', 'perf-transfer','watch-resumed', 'state-write-recovered', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'launch-failed', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-held', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
+export const JOURNAL_KINDS = ['pulled-auto-close', 'host-unreachable', 'host-recovered', 'host-sync', 'host-availability', 'perf-transfer','watch-resumed', 'watch-stage-restarted', 'watch-stalled', 'start-lock-recovered', 'ambiguous-verdict', 'state-write-recovered', 'consult', 'tmux-lost', 'machine-load-high', 'machine-load-recovered', 'report-outputs', 'review-added', 'review-repinned', 'gc_suggest', 'gc-force-dirty', 'gc-freed', 'limited-resume', 'needs-attention', 'report-candidate', 'overloaded', 'overload-retry', 'queue-retry', 'launch-failed', 'launch-legacy', 'mcp-write', 'disk-warn', 'disk-critical', 'disk-ok', 'disk-auto-gc', 'report-ready', 'task-start', 'task-ordered', 'queue-start', 'queue-held', 'queue-failed', 'setup-started', 'setup-finished', 'setup-failed', 'node-modules', 'close-cleanup', 'needs-input', 'needs-trust', 'blocked', 'cancelled', 'limited', 'dead', 'orphan', 'cohort-done', 'usage', 'limits-changed', 'report-detected', 'delivery', 'delivery-queued', 'mcp-applied', 'mcp-failed', 'unblocked', 'wall'] as const;
 export type JournalKind = (typeof JOURNAL_KINDS)[number];
 
 export interface JournalEntry {
@@ -45,6 +45,7 @@ export interface JournalEntry {
   decisions?: string[];
   actions?: Array<{ title: string; shell: string }>;
   gc_preview?: unknown;
+  diskGc?: unknown;
   /** `usage` only: how far the plan is (`critical` is what goes to the phone). */
   level?: 'warn' | 'critical';
   /** The event went to the phone: `sent`, or `queued` when the first request failed and the watcher retries. Absent: not sent (away off, event not chosen, no phone). */
@@ -63,7 +64,7 @@ export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'
     const record = readTaskRecord(ctx.config, windowName(entry.task));
     if (record) {
       const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
-      if (!report.ready || (record.attemptId && !report.sentinel)) return;
+      if (!report.ready || (record.attemptId && !report.sentinel && !report.structured)) return;
       const identity = record.attemptId ? `attempt:${record.attemptId}` : `started:${record.started}`;
       return withFileLock(`${journalPath(ctx.config)}.reports.lock`, async () => {
         if (readJournal(ctx.config, -1).some(e => e.kind === entry.kind && e.task === entry.task && e.reportAttempt === identity)) return;
@@ -73,17 +74,22 @@ export async function recordJournal(ctx: Context, entry: Omit<JournalEntry, 'at'
   }
   return appendJournal(ctx, entry);
 }
-async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
-  const record = entry.task ? readTaskRecord(ctx.config, windowName(entry.task)) : undefined;
+async function prepareJournalEntry(ctx: Context, entry: Omit<JournalEntry, 'at'>, useTaskHeader = true): Promise<JournalEntry> {
+  const record = useTaskHeader && entry.task ? readTaskRecord(ctx.config, windowName(entry.task)) : undefined;
   const cohort = entry.cohort ?? record?.cohort;
   const owner = entry.owner ?? record?.owner ?? (entry.task && ctx.config.quotas ? 'default' : undefined);
-  const full: JournalEntry = secretRedactor([ctx.config, process.env, entry], new Set(listTaskRecords(ctx.config).map(r => r.task)))({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}), ...(owner ? { owner } : {}) });
+  const full: JournalEntry = secretRedactor([ctx.config, process.env, entry])({ at: new Date(ctx.runner.now()).toISOString(), ...entry, ...(cohort ? { cohort } : {}), ...(owner ? { owner } : {}) });
   // Belt and braces: a bulky payload once flooded events_since with JSON fragments for days (a gc_suggest carrying a whole
   // GC plan). Known bulky fields are replaced by a pointer past a bound; the text always stays.
   if (full.gc_preview !== undefined && Buffer.byteLength(JSON.stringify(full)) > 4000) full.gc_preview = { dropped: 'oversized payload; details via gc_preview / agentctl gc' };
   // The phone gets what was announced on the Mac (this is written once per announcement), and the entry says whether it went.
   const phone = await notifyPhone(ctx, full).catch(() => undefined);
   if (phone) full.phone = phone;
+  return full;
+}
+
+async function appendJournal(ctx: Context, entry: Omit<JournalEntry, 'at'>): Promise<void> {
+  const full = await prepareJournalEntry(ctx, entry);
   try {
     await ctx.runner.appendFile(journalPath(ctx.config), `${JSON.stringify(full)}\n`);
   } catch {
@@ -115,9 +121,77 @@ export function readJournal(config: Pick<GlobalConfig, 'path'>, sinceMs: number 
   return out;
 }
 
+type JournalIndex = { inode: bigint; device: bigint; modified: bigint; offset: number; tail: Buffer; ids: Set<string> };
+const indexes = new Map<string, JournalIndex>();
+const indexing = new Map<string, Promise<Set<string>>>();
+const changeKey = (kind: JournalKind, id: string) => `${kind}:\0${id}`;
+
+/** Change IDs survive restarts. Repeated reads parse only bytes appended since the last lookup. */
+export function journalChangeIds(config: Pick<GlobalConfig, 'path'>): Promise<Set<string>> {
+  const file = journalPath(config);
+  const pending = indexing.get(file);
+  if (pending) return pending;
+  const scan = (async () => {
+    const fd = await fs.promises.open(file, 'r').catch(() => undefined);
+    if (!fd) { indexes.delete(file); return new Set<string>(); }
+    try {
+      const stat = await fd.stat({bigint: true});
+      const size = Number(stat.size);
+      let index = indexes.get(file);
+      if (!index || index.inode !== stat.ino || index.device !== stat.dev || size < index.offset
+        || size === index.offset && stat.mtimeNs !== index.modified) {
+        index = { inode: stat.ino, device: stat.dev, modified: stat.mtimeNs, offset: 0, tail: Buffer.alloc(0), ids: new Set() };
+      }
+      while (index.offset < size) {
+        const data = Buffer.alloc(Math.min(64 * 1024, size - index.offset));
+        const {bytesRead} = await fd.read(data, 0, data.length, index.offset);
+        if (!bytesRead) break;
+        index.offset += bytesRead;
+        const bytes = Buffer.concat([index.tail, data.subarray(0, bytesRead)]);
+        const end = bytes.lastIndexOf(10);
+        if (end >= 0) for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
+          try {
+            const event = JSON.parse(line) as JournalEntry;
+            if (typeof event.changeId === 'string' && typeof event.kind === 'string') index.ids.add(changeKey(event.kind, event.changeId));
+          } catch { /* torn line */ }
+        }
+        index.tail = bytes.subarray(end + 1);
+      }
+      index.modified = stat.mtimeNs;
+      indexes.set(file, index);
+      if (indexes.size > 32) indexes.delete(indexes.keys().next().value!);
+      return index.ids;
+    } finally { await fd.close(); }
+  })().finally(() => indexing.delete(file));
+  indexing.set(file, scan);
+  return scan;
+}
+
+export const indexedJournalChange = (ids: ReadonlySet<string>, kind: JournalKind, id: string): boolean => ids.has(changeKey(kind, id));
+
+/** One durable append and one deduplication pass for entries whose caller supplies task ownership. */
+export async function recordJournalChanges(ctx: Context, entries: (Omit<JournalEntry, 'at' | 'changeId'> & {changeId: string})[]): Promise<boolean> {
+  if (!entries.length) return true;
+  const file = journalPath(ctx.config);
+  return withFileLock(`${file}.changes.lock`, async () => {
+    const ids = await journalChangeIds(ctx.config);
+    const added = new Set<string>();
+    const lines: string[] = [];
+    for (const entry of entries) {
+      const key = changeKey(entry.kind, entry.changeId);
+      if (added.has(key) || ids.has(key)) continue;
+      added.add(key);
+      lines.push(JSON.stringify(await prepareJournalEntry(ctx, entry, false)));
+    }
+    if (!lines.length) return true;
+    return ctx.runner.appendFile(file, `${lines.join('\n')}\n`).then(() => true, () => false);
+  });
+}
+
 /** Record unless the last entry of this kind said the same within `withinMs` (two writers of one fact: a command and the watcher that noticed it). */
 export async function recordJournalOnce(ctx: Context, entry: Omit<JournalEntry, 'at'>, withinMs = 5 * 60_000): Promise<void> {
   const now = ctx.runner.now();
-  const seen = readJournal(ctx.config, entry.changeId ? -1 : now - withinMs).some(e => e.kind === entry.kind && (entry.changeId ? e.changeId === entry.changeId : e.text === entry.text && (e.task ?? '') === (entry.task ?? '')));
+  const seen = entry.changeId ? indexedJournalChange(await journalChangeIds(ctx.config), entry.kind, entry.changeId)
+    : readJournal(ctx.config, now - withinMs).some(e => e.kind === entry.kind && e.text === entry.text && (e.task ?? '') === (entry.task ?? ''));
   if (!seen) await recordJournal(ctx, entry);
 }

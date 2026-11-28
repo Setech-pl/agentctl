@@ -2,49 +2,115 @@ import { checkResponseBudget, withoutResponseBudget } from './response-budget.ts
 import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
+import { commandStageRemaining } from './command-stage.ts';
 
-/** Recover only a dead process owner. Never expire a lock held by a slow live sender. */
-function recoverDeadOwner(file: string): void {
+interface LockOwner { pid: number; task: string; at: string }
+interface LockRecovery { task: string; staleMs: number; recovered: (owner: Partial<LockOwner>) => void }
+const ownerFile = (file: string): string => `${file}.owner.json`;
+
+function ownerDetails(file: string, pid: number, inode: fs.Stats): Partial<LockOwner> {
   try {
-    const original = fs.statSync(file);
-    const owner = Number(fs.readFileSync(file, 'utf8'));
-    let dead = owner <= 0 && Date.now() - original.mtimeMs > 5000;
-    if (owner > 0) {
-      try { process.kill(owner, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+    const details = JSON.parse(fs.readFileSync(ownerFile(file), 'utf8'));
+    if (details.pid === pid && details.ino === inode.ino && details.dev === inode.dev) return details;
+  } catch { /* older writers store only the PID */ }
+  return {pid, at: new Date(inode.mtimeMs).toISOString()};
+}
+
+function clearOwnerDetails(file: string): void {
+  try { fs.unlinkSync(ownerFile(file)); } catch { /* best-effort diagnostic metadata */ }
+}
+
+function parseOwner(raw: string): Partial<LockOwner> {
+  if (!raw.startsWith('{')) return { pid: Number(raw) };
+  try {
+    const owner = JSON.parse(raw);
+    const at = typeof owner.at === 'number' ? new Date(owner.at).toISOString() : owner.at;
+    return { pid: Number(owner.pid), ...(typeof owner.task === 'string' ? { task: owner.task } : {}), ...(typeof at === 'string' ? { at } : {}) };
+  } catch { return {}; }
+}
+
+function recoverDeadOwner(file: string, recovery?: LockRecovery): void {
+  try {
+    const original = fs.lstatSync(file);
+    if (!original.isFile()) return;
+    const now = Date.now();
+    const raw = fs.readFileSync(file, 'utf8').trim();
+    const owner = !raw.startsWith('{') && recovery ? ownerDetails(file, Number(raw), original) : parseOwner(raw);
+    const at = Date.parse(owner.at ?? '');
+    const pid = owner.pid;
+    const validPid = pid !== undefined && Number.isSafeInteger(pid) && pid > 0;
+    let dead = !validPid && now - original.mtimeMs >= (recovery ? 30_000 : 5000);
+    if (validPid) {
+      dead = Boolean(recovery && Number.isFinite(at) && now - at >= Math.max(30_000, recovery.staleMs));
+      if (!dead) {
+        try { process.kill(pid, 0); } catch (e) { dead = (e as NodeJS.ErrnoException).code === 'ESRCH'; }
+      }
     }
-    if (dead && fs.statSync(file).ino === original.ino) fs.unlinkSync(file);
+    if (dead && sameLock(file, original)) {
+      if (recovery) clearOwnerDetails(file);
+      fs.unlinkSync(file);
+      recovery?.recovered(owner);
+    }
   } catch { /* owner released it */ }
 }
 
+function sameLock(file: string, expected: fs.Stats): boolean {
+  const current = fs.lstatSync(file, { throwIfNoEntry: false });
+  return current?.ino === expected.ino && current.dev === expected.dev;
+}
+
 /** Non-blocking variant for synchronous sampling. A skipped competing read can be sampled on the next look. */
-export function tryFileLock(file: string): (() => void) | undefined {
+export function tryFileLock(file: string, recovery?: LockRecovery): (() => void) | undefined {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = fs.openSync(file, 'wx', 0o600);
-      try { fs.writeFileSync(fd, String(process.pid)); } catch (error) { try { fs.unlinkSync(file); } catch { /* already gone */ } throw error; } finally { fs.closeSync(fd); }
-      return () => fs.unlinkSync(file);
+      const identity = fs.fstatSync(fd);
+      const release = () => {
+        try {
+          if (!sameLock(file, identity)) return;
+          if (recovery) clearOwnerDetails(file);
+          fs.unlinkSync(file);
+        }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      };
+      try {
+        fs.writeFileSync(fd, String(process.pid));
+        if (recovery) {
+          clearOwnerDetails(file);
+          try {
+            fs.writeFileSync(ownerFile(file), JSON.stringify({pid: process.pid, task: recovery.task, at: new Date().toISOString(), ino: identity.ino, dev: identity.dev}), {mode: 0o600, flag: 'wx'});
+          } catch { /* a writer from 0.26.0 can still recover the PID lock */ }
+        }
+      } catch (error) { release(); throw error; } finally { fs.closeSync(fd); }
+      return release;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-      recoverDeadOwner(file);
+      recoverDeadOwner(file, recovery);
     }
   }
   return undefined;
 }
 
+export class FileLockTimeout extends Error {
+  readonly file: string;
+  constructor(file: string) { super(`Timed out waiting for ${file}`); this.file = file; }
+}
+
 const ownership = new AsyncLocalStorage<Map<string, { active: boolean }>>();
+export const withoutFileLockOwnership = <T>(run: () => T): T => ownership.exit(run);
 export const taskLock = (file: string): string => path.join(path.dirname(path.resolve(file)), 'prompt-delivery.lock');
 
-/** Short, process-shared critical section. A dead owner's lock can be recovered; a live owner is never evicted. */
-export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000, stateWrite = false): Promise<T> {
+/** Short, process-shared critical section. An admission lease can be recovered when its recorded timestamp expires. */
+export async function withFileLock<T>(file: string, action: () => Promise<T>, timeoutMs = 60_000, stateWrite = false, recovery?: LockRecovery): Promise<T> {
   file = path.resolve(file);
   if (stateWrite) checkResponseBudget();
   if (ownership.getStore()?.get(file)?.active) return action();
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + Math.min(timeoutMs, commandStageRemaining());
   let release: (() => void) | undefined;
-  while (!(release = tryFileLock(file))) {
+  while (!(release = tryFileLock(file, recovery))) {
     checkResponseBudget();
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    if (Date.now() >= deadline || commandStageRemaining() <= 0) throw new FileLockTimeout(file);
     await new Promise((resolve) => setTimeout(resolve, 10));
     if (stateWrite) checkResponseBudget();
   }
@@ -69,7 +135,7 @@ export function withFileLockSync<T>(file: string, action: () => T, timeoutMs = 2
   let release: (() => void) | undefined;
   while (!(release = tryFileLock(file))) {
     checkResponseBudget();
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${file}`);
+    if (Date.now() >= deadline) throw new FileLockTimeout(file);
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
   }
   const lease = { active: true }, owned = new Map(ownership.getStore()); owned.set(file, lease);

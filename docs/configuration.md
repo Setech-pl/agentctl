@@ -33,8 +33,8 @@ Per-chat ceilings and floor-first admission are configured in `quotas:`. See the
 | `setup` | list of strings | `[]` | g p s | Shell commands run after `git worktree add` and before the links; a failing command stops `new`. Every repository runs its own setup in its own worktree: `repos[].setup` in the spec, else the `setup` of that repository's `.agentctl.yaml`. The top-level spec `setup` and the global one belong to the first repository only (compatible with single-repo specs). The preview lists them per repository (`backend 1/1, client 1/1`). MCP specs can name a clone source. Shell commands come from project or global config. |
 | `setup.commands` | list of strings | inherited | g p s | Mapping form of the setup list. Set `[]` to disable commands, including an implicit `npm ci`. For specs, submit commands through the CLI. |
 | `setup.node_modules` | `clone` or `off` | `off` | g p | Reuse compatible npm installs from `<AGENTCTL_HOME>/nm-store` on the same filesystem. |
-| `close` | mapping | `{}` | g p | Optional Trash cleanup after a task closes. |
-| `close.cleanup` | list of relative paths or globs | `[]` | g p | Move matching Git-ignored worktree paths to the OS Trash. The project list overrides the global list. |
+| `close` | mapping | `{}` | g p | Optional cleanup after a task closes. |
+| `close.cleanup` | list of relative paths or globs | `[]` | g p | Remove matching Git-ignored worktree paths using `gc.delete_mode`. The project list overrides the global list. |
 | `defaults` | mapping | `{}` | g p | Values for a spec that leaves them out: `agent`, `model`, `effort`. |
 | `defaults.agent` | active `claude`, `codex` or `kimi` | none | g p | Agent when the spec has no `agent`. |
 | `defaults.model` | string | `default` | g p | Model when the spec has none. `default` passes no model flag. |
@@ -166,6 +166,7 @@ The session started by `agentctl manager`: Claude Code with [Remote Control](htt
 | Key | Type | Default | Layers | Meaning |
 |---|---|---|---|---|
 | `mcp.allow` | list | `[]` | g | Write tools the chat may call: any of `send`, `new`, `interrupt`, `close`, `move`, `queue`, `queue_rm`, `cancel`, `mark`, `set_limits`, `reserve`, `resume` (full list below); `wall` allows the three WALL writes (`wall_post`, `wall_reply`, `wall_set_status`). Read again on every call. |
+| `mcp.gc_scope` | enum | `all` | g | `owner` reserves GC writes for the owner CLI. `own-cohort` limits each chat to the cohorts it exclusively owns. |
 | `mcp.allow_rm_worktree` | boolean | `false` | g | `close` and `cancel` from the chat may also remove the git worktree (never forced). |
 
 ### `wall`
@@ -210,6 +211,7 @@ Queued tasks live in `<config dir>/queue/` (one JSON file each, with the spec te
 |---|---|---|---|---|
 | `queue.enabled` | boolean | `true` | g | `false`: `watch` never starts a queued task (entries can still be added and listed). |
 | `queue.parallel_starts` | positive integer | `2` | g | Most queued tasks that `watch` is in the middle of starting (worktree, setup, waiting for the agent or for the folder-trust dialog) at the same time. |
+| `queue.hold_on_load` | boolean | `false` | g | When true, the queue holds above the explicit load threshold and reports the reason. |
 
 ### `cancel`
 
@@ -388,7 +390,7 @@ In 0.15.0, installed runtime commands use `dist/bin/agentctl.js`. Status `questi
 | `guide` | mapping (global), path (project) | `{lang: en}` globally | g, p | Global guide settings; project `.agentctl.yaml` uses `guide: docs/agent-dispatch.md` (repository-relative or `~/…`) as a trusted project overlay. A missing file warns in guide and doctor, and does not fail an order. |
 | `guide.lang` | en or pl | en | g | Default language for CLI, MCP and manager shared guide. |
 | `capacity` | mapping | see below | g | Dispatcher capacity settings. |
-| `capacity.load_threshold` | positive number | 3 × logical CPUs for alerts | g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. An explicit threshold also holds queue admission. Capacity JSON/text and status --detail include load (1/5/15 min) and free memory bytes. |
+| `capacity.load_threshold` | positive number | 3 × logical CPUs for alerts | g | Watch emits machine-load-high and machine-load-recovered on 1-minute load crossings. Queue admission uses the explicit threshold when `queue.hold_on_load: true` is set. Capacity JSON/text and status --detail include load (1/5/15 min) and free memory bytes. |
 | `capacity.snapshot` | boolean | true | g | Add both providers' capacity to new and queue responses. |
 | `capacity.stale_minutes` | integer 1–10080 | 30 | g | Reading age that sets stale; emits one event per reading while that provider has active task windows. |
 | `capacity.sample_limit` | integer 2–10000 | 2048 | g | Maximum combined provider samples in `usage-samples.jsonl` (under 10 MB even at maximum). Each distinct usage reading is sampled; repeated timestamps do not create samples. |
@@ -417,14 +419,17 @@ The guide ships in npm `docs/dispatcher*.md`, with no dependency on a developmen
 | `disk.critical_gb` | `20` | Critical below this space; must not exceed warn_gb. |
 | `disk.workers` | `2` | Process-wide tree-measurement worker cap shared by disk facts, capacity, previews and GC; integer 1–8. A lower reloaded cap admits no new work until existing workers drain below it. |
 | `disk.measurement_timeout_s` | `600` | Maximum execution time of a tree measurement. A timed-out worker is terminated and frees its slot; reads retain the last known value and report a measurement error. |
-| `git` | mapping | Worktree checkout and setup limits. |
+| `git` | mapping | Worktree checkout limits. |
 | `gc` | mapping | Integration cleanup settings. |
 | `gc.after_integration` | `off` or `propose` | `propose` | When watch sees local `main` or `master` advance, prepare a confirmation-bound plan of eligible worktrees and route one WALL info message to each affected chat owner. |
-| `git.timeout_s` | `600` | Positive timeout in seconds for worktree add (including checkout) and each setup command. |
+| `start_lock_stale_s` | `180` | Seconds before reclaiming a lock without an owner. A lock with an exited PID can be reclaimed immediately. |
+| `setup.timeout_s` | `900` | Total per-task budget for setup, in seconds. |
+| `gc.delete_mode` | `delete` | `trash` records and purges the exact item it moved. Use `agentctl gc --purge-trash` to preview older agentctl items. |
+| `git.timeout_s` | `600` | Positive timeout in seconds for the Git checkout stage. |
 
 `capacity` (including JSON/MCP), MCP `status`, CLI `status`, `doctor`, and the board show disk facts. Unknown readings are `null` / `n/d`. Filesystems holding the global worktree root, known projects' `.agentctl.yaml` roots, recorded worktrees, cache and state are deduplicated by device. `statfs` falls back to `df -kP`. Worktree sizes are cached for five minutes; symlinks are not followed. The watcher checks every five minutes, persists the previous level, and records `disk-warn`, `disk-critical`, `disk-ok` once per transition. These events can be selected in `notify.ntfy.events`.
 
-A critical reading warns before `new` or queue insertion. The terminal asks y/N (`--yes` acknowledges the warning); MCP shows it before confirmation. It does not impose a capacity limit or switch providers.
+The start gate holds starts below `disk.min_free_start_gb` (30 GiB by default). See [disk management](en/configuration.md#disk-management) for automatic GC, Trash purge and MCP scope.
 
 MCP write permissions accept exact tool names and explicit groups: `queue:*`, `cohort`, `manager:*`. Existing `queue` still permits only insertion. All previous names keep their permission scope. Group membership is generated in docs/mcp.md; reads remain available without allow.
 
@@ -738,6 +743,7 @@ Usage accounting is separate (benchmark/statistics rows show `glm`). Z.ai docume
 | Key | Default | Meaning |
 |---|---|---|
 | `disk.min_free_start_gb` | `30` | Minimum fresh free GiB before a queued start. |
+| `disk.min_free_state_gb` | `5` | Minimum fresh free GiB on each state and cache volume. |
 | `queue.max_parallel_setups` | `2` | Maximum concurrent worktree/setup phases. |
 | `notify.attention_after_min` | `15` | Minutes before one desktop/phone/WALL escalation. |
 | `providers_config.<p>.peak` | `glm: Singapore 14:00–18:00 mon-fri` | Windows {days, from, to, tz}; IANA time zone; peak: [] disables. |

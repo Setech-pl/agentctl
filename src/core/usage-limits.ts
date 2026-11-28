@@ -10,13 +10,14 @@ import type { Notifier } from './notify.ts';
 import type { ResolvedSpec } from './spec.ts';
 import { notifyPhone } from './phone-send.ts';
 import { recordStaleCapacity } from './capacity-events.ts';
-import { formatReset, openReader, readPlans } from './usage.ts';
+import { formatReset, openReader, readPlans, readPlanStates } from './usage.ts';
 import type { PlanState, PlanWindowView } from './usage.ts';
 import { planLine } from './usage-report.ts';
 import { homeDir } from './usage-sources.ts';
 import { isObject } from './util.ts';
 import { withFileLock } from './file-lock.ts';
 import { RESET_TOLERANCE_MS } from './usage-samples.ts';
+import type { TaskRecord } from './taskstore.ts';
 
 /*
  * What the plan percentages are used for: a notification when a window crosses `usage.warn` or `usage.critical`, a hint when a task is
@@ -118,14 +119,14 @@ export function alertText(config: Pick<GlobalConfig, 'usage'>, plans: ProviderVa
  * One look at the plans for `watch`: a notification for every window that crossed `usage.warn` or `usage.critical` since the last look
  * (once per threshold and window period; the ledger survives a restart of the watcher). Returns the texts that were sent.
  */
-export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void> | void): Promise<string[]> {
+export async function usageTick(ctx: Context, notifier: Notifier, log?: (line: string) => Promise<void> | void, records?: readonly TaskRecord[]): Promise<string[]> {
   const { config, runner } = ctx;
   if (runner.dryRun) return [];
   const file = alertsFile(config);
   const { now, plans, alerts } = await withFileLock(`${file}.lock`, async () => {
     const now = runner.now();
     const reader = openReader(config);
-    const plans = readPlans(config, reader, now);
+    const plans = readPlans(config, reader, now, records);
     reader.save();
     const ledger = readAlertLedger(config);
     let changed = false;
@@ -199,4 +200,22 @@ export function queueHolds(config: GlobalConfig, now: number, plans?: ProviderVa
     out[provider] = `wstrzymane: ${provider} ${Math.round(worst.usedPercent)}% limitu ${worst.label}${worst.resetsAt === null ? '' : ` (reset ${formatReset(worst.resetsAt, now)})`} > usage.queue_hold ${limit}%`;
   }
   return out;
+}
+
+const startRefreshes = new Map<string, Promise<void>>();
+
+/** A failed or disabled provider probe leaves admission on the current eligible samples. */
+export async function refreshExpiredStartPlan(ctx: Context, agent: AgentName): Promise<void> {
+  const { config, runner } = ctx;
+  const probe = adapter(agent).usage.refreshPlan;
+  if (!probe || runner.dryRun) return;
+  const key = `${config.path}:${agent}`;
+  const running = startRefreshes.get(key);
+  if (running) return running;
+  const reader = openReader(config);
+  const plan = providerValue(readPlanStates(config, reader, runner.now()), agent);
+  if (!plan.expired) return;
+  const refresh = probe(ctx).then(() => undefined, error => ctx.info(`${agent} plan refresh: ${String(error)}`)).finally(() => startRefreshes.delete(key));
+  startRefreshes.set(key, refresh);
+  await refresh;
 }

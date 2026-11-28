@@ -34,6 +34,8 @@ npm run build
 ./bin/agentctl-update --ref v0.23.1 --dry-run
 ~~~
 
+[Release safety, shadow canary and upgrade rollback](docs/en/release-safety.md) · [0.27.2 release notes](docs/release-notes/0.27.2.en.md).
+
 For dev, `./bin/agentctl-dev-update v0.23.1` rebuilds `~/Projects/agentctl-wt/devtest` using `~/.agentctl-dev`. It accepts a tag, branch or SHA, `--status`, `--rollback`, `--no-restart` and `--skip-ci`.
 
 Agentctl runs with your permissions; worktrees are not an OS sandbox. Folder trust is never automatically accepted. Local MCP uses desktop stdio; web/phone cannot connect directly. The owner reviews evidence and decides integration/publication; report actions are proposals. [Boundaries](docs/en/overview.md#boundaries).

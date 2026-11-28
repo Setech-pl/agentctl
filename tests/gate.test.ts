@@ -3,8 +3,8 @@ import { it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson } from '../scripts/gate.ts';
-import { checkRuntime, verifyArchive, node22Path, ensureNode22 } from '../scripts/runtime.ts';
+import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson, defaultBase, DEFAULT_BASE_TAG } from '../scripts/gate.ts';
+import { checkRuntime, verifyArchive, node22Path, ensureNode22, node26Runtime } from '../scripts/runtime.ts';
 import { useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures', async () => {
@@ -18,11 +18,60 @@ it('REL0244-LIVE-EVIDENCE: release collects every live result after earlier fail
   assert.deepEqual(seen, checks);
   assert.deepEqual(failures, ['regression (1)', 'scripts/live-a.ts (1)']);
 });
-it('plans tiers in order, keeping both runtimes sequential and live last', () => {
+it('REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results', async () => {
+  const { runReleaseChecks } = await import('../scripts/gate.ts');
+  const ran: string[] = [];
+  const failures = await runReleaseChecks(['prodshape'], async name => {
+    ran.push(name);
+    return name === 'smoke-node22' || name === 'prodshape' ? 1 : 0;
+  }, ['node22', 'node26']);
+  assert.ok(ran.includes('prodshape') && ran.includes('smoke-node26') && ran.includes('doctor-node26'));
+  assert.deepEqual(failures.sort(), ['prodshape (1)', 'smoke-node22 (1)']);
+});
+it('REL0272-PRODSHAPE-ORDER: measure before long independent regression and smoke suites', async () => {
+  const { runReleaseChecks } = await import('../scripts/gate.ts');
+  const ran: string[] = [];
+  const failures = await runReleaseChecks(['scripts/live-a.ts', 'prodshape'], async name => {
+    ran.push(name);
+    return name === 'prodshape' ? 1 : 0;
+  }, ['node26']);
+  assert.deepEqual(ran, ['prodshape', 'smoke-node26', 'doctor-node26', 'regression', 'scripts/live-a.ts']);
+  assert.deepEqual(failures, ['prodshape (1)']);
+});
+it('REL0272-PRESSURE-START: initial synthetic load accounts for existing host pressure', async () => {
+  const prodshape = await import('../scripts/prodshape.ts');
+  const {initialPressureWorkers} = prodshape;
+  assert.equal(initialPressureWorkers(18, 0), 44);
+  assert.equal(initialPressureWorkers(18, 21), 23);
+  assert.equal(initialPressureWorkers(18, 98), 5);
+});
+it('REL0272-PRESSURE-POLICY: load workers keep their configured nice level outside the Darwin background group', async () => {
+  const { pressureWorkerArgs } = await import('../scripts/prodshape.ts');
+  assert.deepEqual(heavyCommand('node', ['scripts/prodshape.ts'], 'darwin'),
+    ['nice', ['-n', '10', 'taskpolicy', '-b', 'node', 'scripts/prodshape.ts']]);
+  assert.deepEqual(pressureWorkerArgs('darwin'), ['-n', '19', '/bin/sh', '-c', 'taskpolicy -B -p "$$" || exit\nwhile :; do :; done']);
+  assert.deepEqual(pressureWorkerArgs('linux'), ['-n', '19', '/bin/sh', '-c', 'while :; do :; done']);
+});
+it('REL0272-CONTENTION: low observed load adds bounded CPU workers without lowering the target', async () => {
+  const { additionalPressureWorkers, pressureWorkerArgs } = await import('../scripts/prodshape.ts');
+  assert.equal(additionalPressureWorkers(18, 44, 15), 5);
+  assert.equal(additionalPressureWorkers(18, 105, 39), 3);
+  assert.equal(additionalPressureWorkers(18, 108, 39), 0);
+  assert.equal(additionalPressureWorkers(18, 44, 40), 0);
+  assert.equal(pressureWorkerArgs('darwin', 0)[1], '0');
+});
+it('REL0272-PRESSURE-OVERSHOOT: the load controller sheds excess workers without weakening the measured requirement', async () => {
+  const { additionalPressureWorkers } = await import('../scripts/prodshape.ts');
+  assert.equal(additionalPressureWorkers(18, 44, 43), 0);
+  assert.equal(additionalPressureWorkers(18, 54, 51), -5);
+  assert.equal(additionalPressureWorkers(18, 80, 120), -10);
+  assert.equal(additionalPressureWorkers(18, 20, 120), -2);
+});
+it('plans tiers in order, keeping both runtimes sequential and package-dependent live tests last', () => {
   assert.deepEqual(planTier('quick', ['tests/a.test.ts'], []), ['typecheck', 'build', 'git diff --check', 'regression scenarios (tests/regression/CATALOG.md)', 'tests current: tests/a.test.ts']);
   assert.deepEqual(planTier('full', [], []), ['tests Node 22.14.0 (full)', 'tests Node 26 (full)', 'regression scenarios (tests/regression/CATALOG.md)']);
   const plan = planTier('release', [], ['scripts/live-a.ts', 'scripts/live-b.ts']);
-  assert.equal(plan.length, 9); assert.match(plan[6]!, /^regression scenarios/); assert.match(plan[2]!, /smoke Node 22/); assert.match(plan[5]!, /doctor.*Node 26/);
+  assert.equal(plan.length, 10); assert.match(plan[7]!, /^regression scenarios/); assert.match(plan[3]!, /smoke Node 22/); assert.match(plan[6]!, /doctor.*Node 26/);
   assert.deepEqual(plan.slice(-2), ['scripts/live-a.ts', 'scripts/live-b.ts']);
   assert.equal(planTier('release', [], ['scripts/live-a.ts'], true).at(-1), 'SKIP live entries');
   assert.equal(parseArgs(['quick', '--base', 'HEAD~1']).base, 'HEAD~1');
@@ -255,7 +304,21 @@ it('checks cached runtime version and archive checksum with fakes and no network
   assert.doesNotThrow(() => verifyArchive(data, `${hash}  node.tar.gz\n`, 'node.tar.gz'));
   assert.throws(() => verifyArchive(data, `${'0'.repeat(64)}  node.tar.gz`, 'node.tar.gz'));
   assert.throws(() => verifyArchive(data, '', 'node.tar.gz'));
-  assert.equal(node22Path('/runtime'), '/runtime/node-v22.14.0-darwin-arm64/bin/node');
+  assert.equal(node22Path('/runtime', 'darwin', 'arm64'), '/runtime/node-v22.14.0-darwin-arm64/bin/node');
+  assert.equal(node22Path('/runtime', 'linux', 'x64'), '/runtime/node-v22.14.0-linux-x64/bin/node');
+});
+it('GATE-LINUX-RUNTIMES: Linux provisions the linux Node 22 archive and uses the Node 26 that runs the gate', async () => {
+  const dir = scratch.sub('linux-runtime'), work = scratch.sub('linux-download');
+  const data = Buffer.from('linux archive'), hash = createHash('sha256').update(data).digest('hex');
+  const downloads: string[] = [];
+  const node = await ensureNode22(work, { dir, platform: 'linux', arch: 'x64', version: () => 'v22.14.0',
+    download: async (file: string) => { downloads.push(file); return file === 'SHASUMS256.txt' ? Buffer.from(`${hash}  node-v22.14.0-linux-x64.tar.gz`) : data; },
+    extract: () => { fs.mkdirSync(path.dirname(node22Path(dir, 'linux', 'x64')), { recursive: true }); fs.writeFileSync(node22Path(dir, 'linux', 'x64'), ''); } });
+  assert.equal(node, node22Path(dir, 'linux', 'x64'));
+  assert.deepEqual(downloads, ['node-v22.14.0-linux-x64.tar.gz', 'SHASUMS256.txt']);
+  await assert.rejects(ensureNode22(work, { dir: scratch.sub('win-runtime'), platform: 'win32', arch: 'x64' }), /requires one of/);
+  assert.equal(node26Runtime('linux', process.execPath, () => 'v26.13.1'), fs.realpathSync(process.execPath));
+  assert.throws(() => node26Runtime('linux', process.execPath, () => 'v24.1.0'), /expected Node 26/);
 });
 it('wraps every heavy command without shell interpolation or load waiting', () => {
   assert.deepEqual(heavyCommand('node', ['x.ts'], 'darwin'), ['nice', ['-n', '10', 'taskpolicy', '-b', 'node', 'x.ts']]);
@@ -269,12 +332,12 @@ it('provisions a missing runtime once, verifies before extraction and never dele
   const downloads: string[] = [];
   const io = { dir, platform: 'darwin', arch: 'arm64', version: () => 'v22.14.0',
     download: async (file: string) => { downloads.push(file); return file === 'SHASUMS256.txt' ? Buffer.from(`${hash}  node-v22.14.0-darwin-arm64.tar.gz`) : data; },
-    extract: (archive: string) => { assert.deepEqual(fs.readFileSync(archive), data); fs.mkdirSync(path.dirname(node22Path(dir)), { recursive: true }); fs.writeFileSync(node22Path(dir), 'cached'); },
+    extract: (archive: string) => { assert.deepEqual(fs.readFileSync(archive), data); fs.mkdirSync(path.dirname(node22Path(dir, 'darwin', 'arm64')), { recursive: true }); fs.writeFileSync(node22Path(dir, 'darwin', 'arm64'), 'cached'); },
   };
-  assert.equal(await ensureNode22(work, io), node22Path(dir));
+  assert.equal(await ensureNode22(work, io), node22Path(dir, 'darwin', 'arm64'));
   assert.equal(downloads.length, 2);
   await ensureNode22(work, { ...io, download: async () => { throw new Error('must not download cached runtime'); } });
-  assert.equal(fs.readFileSync(node22Path(dir), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
+  assert.equal(fs.readFileSync(node22Path(dir, 'darwin', 'arm64'), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
   await assert.rejects(ensureNode22(work, { ...io, dir: scratch.sub('bad-runtime'), download: async () => data, extract: () => assert.fail('unverified extraction') }), /SHA256/);
 });
 
@@ -290,6 +353,9 @@ it('packJson reads the npm pack array and ignores trailing notices', () => {
   const noticed = '[{"filename":"a.tgz"}]\nnpm notice\nnpm notice New major version of npm available! 11.20.0 -> 12.2.2\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2\nnpm notice\n';
   assert.deepEqual(packJson(noticed), [{ filename: 'a.tgz' }]);
   assert.throws(() => packJson('npm notice only, no json'), /no JSON array/);
+  // npm 12 keys the result by package name; its file list holds arrays and strings with brackets.
+  const npm12 = '{\n  "@setech-pl/agentctl": {\n    "id": "@setech-pl/agentctl@0.27.2",\n    "filename": "setech-pl-agentctl-0.27.2.tgz",\n    "files": [{"path": "docs/a]b{.md"}],\n    "bundled": []\n  }\n}\nnpm notice {done}\n';
+  assert.deepEqual(packJson(npm12).map(e => e.filename), ['setech-pl-agentctl-0.27.2.tgz']);
 });
 
 it('L1 prechecked contender: publication must not admit C while A is displaced', async () => {
@@ -328,4 +394,41 @@ it('L1 prechecked contender: publication must not admit C while A is displaced',
     release();
     assert.ok(waits > 0, 'C must wait for A; pre-acquisition tombstone check alone is insufficient');
   } finally { fs.mkdirSync = mkdir; fs.renameSync = rename; }
+});
+
+it('release input seal rejects SHA changes and fixture edits restored to the original bytes', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { releaseInputs, assertReleaseInputs } = await import('../scripts/gate.ts');
+  const root = scratch.sub('release-inputs');
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=gate@example.invalid', '-c', 'user.name=Gate', '-C', root, ...args], {stdio: 'ignore'});
+  git('init', '-b', 'main');
+  const file = path.join(root, 'fixture.txt');
+  fs.writeFileSync(file, 'before');
+  git('add', 'fixture.txt');
+  git('commit', '-m', 'initial');
+  const expected = releaseInputs(root);
+  assert.doesNotThrow(() => assertReleaseInputs(expected, releaseInputs(root), 'check A'));
+  fs.writeFileSync(file, 'changed');
+  assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'check B'), /fixtures.*changed/);
+  fs.writeFileSync(file, 'before');
+  assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'check C'), /fixtures.*changed/);
+  git('commit', '--allow-empty', '-m', 'new SHA');
+  assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'final result'), /SHA changed.*final result/);
+});
+
+it('GATE-BASE: a missing default base tag falls back to the newest reachable release tag with a warning', () => {
+  const calls: string[] = [], warnings: string[] = [];
+  const run = (tags: Record<string, string>) => (...args: string[]): string => {
+    calls.push(args.join(' '));
+    if (args[0] === 'merge-base') { if (tags[DEFAULT_BASE_TAG]) return 'mb-0181'; throw new Error('not a valid object name'); }
+    if (args[0] === 'tag') return tags.v ? `${tags.v}\nv0.26.2\n` : '';
+    if (args[0] === 'rev-parse') return `sha-of-${args[2]}`;
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  assert.equal(defaultBase(run({ [DEFAULT_BASE_TAG]: 'x', v: 'v0.27.1' }), m => warnings.push(m)), 'mb-0181');
+  assert.equal(warnings.length, 0);
+  assert.equal(defaultBase(run({ v: 'v0.27.1' }), m => warnings.push(m)), 'sha-of-v0.27.1^{commit}');
+  assert.match(warnings[0] ?? '', /agentctl-0181-rc1 is missing.*v0\.27\.1/);
+  assert.ok(calls.includes('tag --merged HEAD --list v[0-9]* --sort=-v:refname'));
+  assert.throws(() => defaultBase(run({}), () => {}), /pass --base/);
 });

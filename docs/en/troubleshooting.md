@@ -87,3 +87,13 @@ After server/session loss, unfinished tasks show `needs-attention` with a recove
 <!-- tmux-dev-end -->
 
 Missing `main` base: the error identifies the locally known default (for example `master`) or unknown metadata. Correct `repos[].base` and retry; agentctl never substitutes it automatically.
+
+## Watch stalls or `start.lock` times out
+
+Check the watch log and `agentctl events` for the stalled stage, a reclaimed lock, and the restart result. A stage that remains active for more than three ticks emits one owner event. After ten minutes a stalled watcher exits. The tmux supervisor restarts it with backoff, up to five times in ten minutes. If the limit is reached, use `agentctl watch --tmux --restart` after checking the log.
+
+Interrupted starts return to the queue and reuse a complete, verified worktree. Watch retains an existing prompt delivery and refuses unsafe checkout residue. An MCP write that stopped while applying is marked failed with instructions to check the result and preview again.
+
+## Recover disk space from old Trash entries
+
+`agentctl gc --purge-trash` lists candidates and their original paths. Review them, then run `agentctl gc --purge-trash --apply` and confirm. MCP uses `purge_trash: true` with a preview and confirmation token. GC reports the net gain in available filesystem blocks. Concurrent disk use can affect the reported number.

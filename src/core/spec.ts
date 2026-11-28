@@ -2,7 +2,7 @@ import { parsePerfSpec } from './perf-spec.ts';
 import type { PerfSpec } from './perf-spec.ts';
 import { chatOwner, taskOwner } from './chat-quotas.ts';
 import { mapEffort } from './equivalents.ts';
-import { linkBaseWarnings, validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
+import { validateLink, missingLinkTargets, fillTaskLinkTargets, staleProjectLinkWarnings, projectDefaultLinkPolicy } from './links.ts';
 import { validateLaunch, ANTHROPIC_SECRET_ENV } from './safety.ts';
 import { provider, isActive, activeProviders } from './providers/registry.ts';
 import { PROVIDER_IDS } from './providers/types.ts';
@@ -574,7 +574,7 @@ export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const projectDefaults = projectDefaultLinkPolicy([...projectLinkByFrom.values()], config, repos, repos[0]?.path ?? config.cache, ctx.now, intentionalWorktrees);
   for (const [from, link] of projectLinkByFrom) if (!projectDefaults.links.includes(link)) linkByFrom.delete(from);
   for (const {from, to} of linkByFrom.values()) validateLink(from, to, repos[0]!.worktree);
-  const linkWarnings = [...projectDefaults.notices, ...staleProjectLinkWarnings(projectDefaults.links, config), ...linkBaseWarnings([...linkByFrom.values()], repos)];
+  const linkWarnings = [...projectDefaults.notices, ...staleProjectLinkWarnings(projectDefaults.links, config)];
 
   // Env: spec > project > global.
   const env: Record<string, string> = {};

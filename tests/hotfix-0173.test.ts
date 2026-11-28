@@ -11,6 +11,7 @@ import { sizeOf } from '../src/core/fs-measure.ts';
 import { collectDisk } from '../src/core/disk.ts';
 import { cohortTick, touchCohort } from '../src/core/cohort.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
+import { WatchMemory, watchTick } from '../src/core/watch.ts';
 import { commitQueueAdd, planQueueAdd, setPaused } from '../src/core/queue.ts';
 import { splitSpecs } from '../src/core/spec.ts';
 import { stableSelfArgv } from '../src/core/mcp-install.ts';
@@ -71,6 +72,21 @@ it('0173-2/3: mentioned README is ignored; glob candidate is a flag beside needs
   assert.equal(fs.readFileSync(r.report, 'utf8'), 'Werdykt: PASS\n');
   assert.doesNotMatch((await f.call('status')).text, /raport pochodzi z kopii/);
   assert.doesNotMatch((await f.call('doctor')).text, /raport pochodzi z kopii/);
+});
+it('REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task', async t => {
+  const f = fixture('candidate-watch'), wt = scratch.sub('candidate-watch/wt');
+  const r = seedTask(f.config, 'T2', { repos: [{ path: wt, worktree: wt }], reportAlt: ['*.md'] });
+  f.tmux.add('t2', question);
+  fs.writeFileSync(path.join(wt, 'README.md'), 'Werdykt: PASS');
+  const memory = new WatchMemory();
+  t.after(() => { memory.launchHealth.close(); memory.archive.close(); });
+  await watchTick(f.ctx, memory, { notify: async () => {} });
+  assert.equal(readTaskRecord(f.config, r.window)?.reportCandidate, undefined, 'a file not named for the task is never a candidate');
+  fs.writeFileSync(path.join(wt, 'T2-final.md'), 'Werdykt: PASS\n');
+  await watchTick(f.ctx, memory, { notify: async () => {} });
+  assert.equal(readTaskRecord(f.config, r.window)?.reportCandidate, path.join(wt, 'T2-final.md'));
+  const row = (await collectStatus(f.ctx))[0]!;
+  assert.equal(row.state, 'needs-input'); assert.ok(row.reportCandidate); assert.ok(row.question);
 });
 it('0173-4: grace persists, resets on membership/state changes, cancels for new work and announces a later cohort again', async () => {
   const f = fixture('grace'); assert.equal(f.config.cohort.doneGraceS, 300);
@@ -145,6 +161,17 @@ it('0173-1: continuation preserves Unicode and errors, isolates sessions and nev
   page = JSON.parse(error.text); joined = page.fragment;
   while (page.has_more) { const r = await f.call('response_page', { response_id: page.response_id, response_offset: page.next_response_offset }); assert.equal(r.isError, true); assert.ok(responseWireBytes(r) <= 1024); page = JSON.parse(r.text); joined += page.fragment; }
   assert.match(joined, /no task/);
+});
+
+it('REL0272-MCP-PAGES: a continuation measures only a bounded fragment', async t => {
+  const f = fixture('bounded-continuation', 'mcp: {max_response_kb: 1}\n');
+  const first = JSON.parse((await f.call('task_spec', {task: 'UNKNOWN'.repeat(4000)})).text);
+  assert.ok(first.has_more);
+  const measured = t.mock.method(Buffer, 'byteLength');
+  const next = await f.call('response_page', {response_id: first.response_id, response_offset: first.next_response_offset});
+  assert.equal(JSON.parse(next.text).total_bytes, first.total_bytes);
+  assert.ok(responseWireBytes(next) <= 1024);
+  assert.ok(!measured.mock.calls.some(call => typeof call.arguments[0] === 'string' && call.arguments[0].length > 4096));
 });
 
 it('0173-1/4: config validates response limits and cohort grace, while accepting legacy candidate icon config', () => {
