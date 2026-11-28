@@ -1448,6 +1448,13 @@
       "READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error"
     ]
   },
+  "READFAST0269-CLI": {
+    "rev": "v0.26.4",
+    "outcome": "PASSES",
+    "failed": 0,
+    "passed": 1,
+    "failing": []
+  },
   "READFAST0269-COMPAT": {
     "rev": "v0.26.4",
     "outcome": "PASSES",
