@@ -48,7 +48,8 @@ function fixture(name: string, posts: string) {
   fs.writeFileSync(record.report, report(posts));
   const call = (toolName: string, args: Record<string, unknown> = {}) => {
     const tool = MCP_TOOLS.find((t) => t.name === toolName)!;
-    return tool.run({ context: () => ctx, notify: async () => {} }, z.object(tool.input).parse(args) as never);
+    // A frozen request clock: the 100 ms local publication window is measured on it, not on this host's fsync latency.
+    return tool.run({ context: () => ctx, notify: async () => {}, budgetClock: { now: () => 0, schedule: () => () => {} } }, z.object(tool.input).parse(args) as never);
   };
   const event = () => readJournal(config, -1).filter((e) => e.kind === 'report-outputs' && e.task === 'NC-1');
   return { config, ctx, record, call, event };

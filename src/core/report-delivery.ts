@@ -1,6 +1,6 @@
 import { journalOutputs } from './outputs.ts';
 import type { OutputData } from './outputs.ts';
-import { withResponseBudget, ResponseBudgetError } from './response-budget.ts';
+import { withResponseBudget, ResponseBudgetError, type BudgetClock } from './response-budget.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
@@ -28,7 +28,7 @@ async function fields(ctx: Context, record: TaskRecord, receipt: Receipt): Promi
     if (current && unchanged(ctx, current, receipt.signature)) await setHeaderFields(ctx.runner, file, receipt.fields!);
   }, 0);
 }
-async function deliver(ctx: Context, receipt: Receipt, action: () => Promise<void>): Promise<void> {
+async function deliver(ctx: Context, receipt: Receipt, action: () => Promise<void>, clock?: BudgetClock): Promise<void> {
   let queued = false;
   const defer = () => { if (!queued) { enqueue(ctx, receipt); queued = true; } };
   // Optional metadata never holds the report response. Replay is idempotent and
@@ -36,18 +36,19 @@ async function deliver(ctx: Context, receipt: Receipt, action: () => Promise<voi
   await withResponseBudget(async () => {
     try { await action(); }
     catch (error) { if (!(error instanceof FileLockTimeout) && !(error instanceof ResponseBudgetError)) throw error; defer(); }
-  }, defer, undefined, 100);
+  }, defer, clock, 100);
 }
 export async function deliverReportFields(ctx: Context, record: TaskRecord, signature: string, values: Record<string, string>): Promise<void> {
   const receipt = {task: record.task, signature, fields: values};
   await deliver(ctx, receipt, () => fields(ctx, record, receipt));
 }
-export async function deliverReportOutputs(ctx: Context, record: TaskRecord, text: string, data: OutputData): Promise<void> {
+/** `clock` is the MCP request's budget clock (tests inject one; production uses wall time). */
+export async function deliverReportOutputs(ctx: Context, record: TaskRecord, text: string, data: OutputData, clock?: BudgetClock): Promise<void> {
   if (data.outputs_pending || (!record.outputsProtocol && !text.includes('agentctl-outputs'))) return;
   const receipt: Receipt = {task: record.task, signature: createHash('sha256').update(text).digest('hex'), journal: true};
   // Git reference validation belongs to watch, never to the report read.
   if (data.outputs?.commits.length || data.outputs?.integrate.length) { enqueue(ctx, receipt); return; }
-  await deliver(ctx, receipt, () => journalOutputs(ctx, record, {readOnly: true, parsed: data, lockTimeoutMs: 0}));
+  await deliver(ctx, receipt, () => journalOutputs(ctx, record, {readOnly: true, parsed: data, lockTimeoutMs: 0}), clock);
 }
 
 async function page(ctx: Context, record: TaskRecord, receipt: Receipt): Promise<void> {

@@ -18,7 +18,8 @@ it('P83: reads and post-GC publication never start a measurement or discover wor
   const record = seedTask(config, 'READ-1', { repos: [{ path: repo, worktree: wt }] });
   const runner = new DiskRunner({ dryRun: false, respond: cmd => cmd === 'tmux' ? { code: 1 } : { code: 0, stdout: '' } });
   const ctx = new Context(runner, config, () => {});
-  const deps = { context: () => ctx, notify: async () => {} };
+  // A frozen request clock: this scenario counts measurements and walks; the response deadline is covered elsewhere.
+  const deps = { context: () => ctx, notify: async () => {}, budgetClock: { now: () => 0, schedule: () => () => {} } };
   const NativeWorker = threads.Worker, readdir = fs.readdirSync;
   let workers = 0, walks = 0;
   threads.Worker = class extends NativeWorker {

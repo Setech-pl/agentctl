@@ -25,6 +25,8 @@ function setup(name: string, extraYaml = '') {
   const deps: McpDeps = {
     context: (out) => new Context(runner, { ...loadGlobalConfig(path.dirname(config.path)), notify: { ...loadGlobalConfig(path.dirname(config.path)).notify, mcpWrites: 'all' } }, out),
     notify: async (m) => void notified.push(m),
+    // A frozen request clock: these scenarios assert cancellation semantics, not this host's speed under a parallel suite.
+    budgetClock: { now: () => 0, schedule: () => () => {} },
   };
   const call = (n: string, args: Record<string, unknown> = {}): Promise<ToolResult> => tool(n).run(deps, z.object(tool(n).input).parse(args) as never);
   const audit = (): { tool: string; task?: string; outcome: string; detail?: string }[] =>

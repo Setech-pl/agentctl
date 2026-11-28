@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Report reads measure the 100 ms local WALL publication window on the MCP request clock; tests freeze that clock instead of depending on fsync latency (WSL) or suite load. / Odczyt raportu mierzy 100 ms okno lokalnej publikacji WALL zegarem żądania MCP; testy zamrażają ten zegar zamiast zależeć od opóźnienia fsync (WSL) lub obciążenia.
+
 - REL0274-EVENTS-IO: Events count ready reports from the already indexed task headers instead of reopening every TASK.md. / Zdarzenia liczą gotowe raporty z już zindeksowanych nagłówków zadań zamiast ponownie otwierać każdy TASK.md.
 
 - Watch treats a vanished agentctl tmux session as empty on tmux 3.4 ("can't find window", "no current target") instead of failing status collection every tick; also for remote host GC. / Watch traktuje zniknięcie sesji tmux agentctl w tmux 3.4 ("can't find window", "no current target") jako pustą listę zamiast błędu odczytu stanu w każdym przebiegu; dotyczy też GC hostów zdalnych.

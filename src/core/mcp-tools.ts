@@ -881,7 +881,7 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
   }
   const full = readReportText(ctx.config, record, record.report);
   const parsed = directOutputs(ctx, record, full);
-  await deliverReportOutputs(ctx, record, full, parsed).catch(() => undefined);
+  await deliverReportOutputs(ctx, record, full, parsed, deps.budgetClock).catch(() => undefined);
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
     return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, parsed, record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
@@ -924,7 +924,7 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
 
   for (const row of chosen) {
     const record = findRecord(ctx, row.task), text = readReportText(ctx.config, record, row.reportPath);
-    await deliverReportOutputs(ctx, record, text, directOutputs(ctx, record, text)).catch(() => undefined);
+    await deliverReportOutputs(ctx, record, text, directOutputs(ctx, record, text), deps.budgetClock).catch(() => undefined);
   }
   if (!args.detail && args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
