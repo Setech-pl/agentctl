@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'READFAST0269-COMPAT', fixedIn: '0.26.5', symptom: 'Unreleased direct report reads bypassed outputs settling, stopped fast WALL publication, and changed missing-report diagnostic wording.', noProof: 'Introduced before the 0.26.5 tag: v0.26.4 passes all three contracts; all three fail on unreleased 2d7b1cd (compat-before.log).', scenarios: [s('fix3.test.ts', '^F2-B4-READ:'), s('wall2-posts.test.ts', '^get_report publishes'), s('production-0174.test.ts', '^P5 displaced')] },
   { id: 'READFAST0269-ACK', fixedIn: '0.26.5', symptom: 'A slow acknowledgement lock syscall can replace a successfully read report with a deadline error.', scenarios: [s('readfast0269.test.ts', '^READFAST0269-ACK:')] },
   { id: 'READFAST0269-COUNT', fixedIn: '0.26.5', symptom: 'Events report totals stop at the ten displayed task names.', scenarios: [s('readfast0269.test.ts', '^READFAST0269-COUNT:')] },
   { id: 'READFAST0269', fixedIn: '0.26.5', symptom: 'Report reads wait for status collection and exhaust the shared MCP deadline on loaded hosts; report counts trust snapshots.', scenarios: [s('readfast0269.test.ts', '^READFAST0269:')] },

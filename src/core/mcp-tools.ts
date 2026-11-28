@@ -1,5 +1,5 @@
 import { directReportRows } from './direct-reports.ts';
-import { deliverReportFields, deferReportPage } from './report-delivery.ts';
+import { deliverReportFields, deferReportPage, deliverReportOutputs } from './report-delivery.ts';
 import { gcLocation, pathsOverlap } from './start-paths.ts';
 import { trashOwners } from './trash.ts';
 import { chatOwner, quotaWarnings } from './chat-quotas.ts';
@@ -31,7 +31,7 @@ import { findBlocked } from './depends.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { planMark, markTasks } from './mark.ts';
 import type { MarkSelection } from './mark.ts';
-import { parseOutputs, aggregateOutputs, reviewVerdict } from './outputs.ts';
+import { parseOutputs, outputsPending, aggregateOutputs, reviewVerdict } from './outputs.ts';
 import type { OutputData } from './outputs.ts';
 import { developmentEnvironment } from './installation.ts';
 import { redactQueue } from './mcp-redact.ts';
@@ -256,6 +256,14 @@ function conciseReport(text: string, data: OutputData, review = false): string {
   return `${data.outputs_warnings?.length ? `outputs_warnings: ${JSON.stringify(data.outputs_warnings)}\n` : ''}${data.outputs_errors.length ? `outputs_errors: ${JSON.stringify(data.outputs_errors)}\n` : ''}${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
 }
 
+/** The same settle rule as readOutputs, with no Git validation or status sweep. */
+function directOutputs(ctx: Context, record: TaskRecord, text: string): OutputData {
+  const now = ctx.runner.now();
+  if (outputsPending(ctx.config, record, inspectReport(ctx.config, record, now, !record.attemptId), now))
+    return {outputs: null, outputs_valid: false, outputs_errors: [], outputs_partial: false, outputs_pending: true};
+  return parseOutputs(text, {review: record.reviewOf != null});
+}
+
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
   if (!rows.length) return ok('No new reports.');
   const taken: StatusRow[] = [];
@@ -265,7 +273,7 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const record = findRecord(ctx, row.task);
     const text = readReportText(ctx.config, record, row.reportPath);
     const sha = /`([0-9a-f]{7,40})`/i.exec(text)?.[1] ?? /\b(?:SHA|commit)\s*[:=]?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1] ?? 'n/d';
-    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, parseOutputs(text, { review: record.reviewOf != null }), record.reviewOf != null)}`); taken.push(row);
+    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, directOutputs(ctx, record, text), record.reviewOf != null)}`); taken.push(row);
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512 && taken.length > 1) { parts.pop(); taken.pop(); break; }
   }
   for (const row of taken) await deliverReportFields(ctx, findRecord(ctx, row.task), row.reportSignature!, { summary_delivered: new Date(ctx.runner.now()).toISOString() });
@@ -827,19 +835,20 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
   const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   const warning = reportMessageWarning(ctx, record.window, record);
   if (!state.ready && !warning) {
-    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet at ${record.report}: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
+    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason} (${record.report})`, 'Use report to inspect candidates or wait for completion.');
   }
   async function markRead(signature: string): Promise<void> {
     const current = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
     if (current.ready && createHash('sha256').update(readReportText(ctx.config, record, record.report)).digest('hex') === signature)
       await deliverReportFields(ctx, record, signature, { pulled: new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString() });
   }
-  // The watcher journals outputs; delivery must never wait for Git or journal locks.
+  const full = readReportText(ctx.config, record, record.report);
+  const parsed = directOutputs(ctx, record, full);
+  await deliverReportOutputs(ctx, record, full, parsed).catch(() => undefined);
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
-    const full = readReportText(ctx.config, record, record.report);
-    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, parseOutputs(full, { review: record.reviewOf != null }), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
+    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, parsed, record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
-  const validated = parseOutputs(readReportText(ctx.config, record, record.report), { review: record.reviewOf != null });
+  const validated = parsed;
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? validated : validated.outputs_errors.length || validated.outputs_warnings?.length ? {outputs_errors: validated.outputs_errors, outputs_warnings: validated.outputs_warnings ?? []} : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
@@ -876,6 +885,10 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
 
+  for (const row of chosen) {
+    const record = findRecord(ctx, row.task), text = readReportText(ctx.config, record, row.reportPath);
+    await deliverReportOutputs(ctx, record, text, directOutputs(ctx, record, text)).catch(() => undefined);
+  }
   if (!args.detail && args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   const { text, pulled } = joinReports(chosen, ctx);

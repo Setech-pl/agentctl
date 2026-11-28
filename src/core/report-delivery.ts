@@ -1,3 +1,5 @@
+import { journalOutputs } from './outputs.ts';
+import type { OutputData } from './outputs.ts';
 import { withResponseBudget, ResponseBudgetError } from './response-budget.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +11,7 @@ import type { Context } from './context.ts';
 import { readReportText } from './report-path.ts';
 import { inspectReport } from './report-state.ts';
 
-type Receipt = { task: string; signature: string; fields?: Record<string, string>; page?: { client: string; start: number; end: number; bytes: number } };
+type Receipt = { task: string; signature: string; fields?: Record<string, string>; journal?: true; page?: { client: string; start: number; end: number; bytes: number } };
 const receiptDir = (ctx: Context) => path.join(path.dirname(ctx.config.path), 'report-delivery-requests');
 function enqueue(ctx: Context, receipt: Receipt): void {
   fs.mkdirSync(receiptDir(ctx), {recursive: true});
@@ -26,17 +28,28 @@ async function fields(ctx: Context, record: TaskRecord, receipt: Receipt): Promi
     if (current && unchanged(ctx, current, receipt.signature)) await setHeaderFields(ctx.runner, file, receipt.fields!);
   }, 0);
 }
-export async function deliverReportFields(ctx: Context, record: TaskRecord, signature: string, values: Record<string, string>): Promise<void> {
-  const receipt = {task: record.task, signature, fields: values};
+async function deliver(ctx: Context, receipt: Receipt, action: () => Promise<void>): Promise<void> {
   let queued = false;
   const defer = () => { if (!queued) { enqueue(ctx, receipt); queued = true; } };
-  // Delivery never waits on an asynchronous state write either. A late writer may finish;
-  // replay is idempotent and still verifies the content signature.
+  // Optional metadata never holds the report response. Replay is idempotent and
+  // verifies the content signature even if a late writer has already finished.
   await withResponseBudget(async () => {
-    try { await fields(ctx, record, receipt); }
+    try { await action(); }
     catch (error) { if (!(error instanceof FileLockTimeout) && !(error instanceof ResponseBudgetError)) throw error; defer(); }
   }, defer, undefined, 100);
 }
+export async function deliverReportFields(ctx: Context, record: TaskRecord, signature: string, values: Record<string, string>): Promise<void> {
+  const receipt = {task: record.task, signature, fields: values};
+  await deliver(ctx, receipt, () => fields(ctx, record, receipt));
+}
+export async function deliverReportOutputs(ctx: Context, record: TaskRecord, text: string, data: OutputData): Promise<void> {
+  if (data.outputs_pending || (!record.outputsProtocol && !text.includes('agentctl-outputs'))) return;
+  const receipt: Receipt = {task: record.task, signature: createHash('sha256').update(text).digest('hex'), journal: true};
+  // Git reference validation belongs to watch, never to the report read.
+  if (data.outputs?.commits.length || data.outputs?.integrate.length) { enqueue(ctx, receipt); return; }
+  await deliver(ctx, receipt, () => journalOutputs(ctx, record, {readOnly: true, parsed: data, lockTimeoutMs: 0}));
+}
+
 async function page(ctx: Context, record: TaskRecord, receipt: Receipt): Promise<void> {
   const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');
   await withFileLock(`${file}.lock`, async () => {
@@ -70,7 +83,11 @@ export async function applyReportDeliveries(ctx: Context): Promise<void> {
     try {
       const receipt: Receipt = JSON.parse(fs.readFileSync(file, 'utf8'));
       const record = readTaskRecordById(ctx.config, receipt.task);
-      if (record) { if (receipt.page) await page(ctx, record, receipt); else await fields(ctx, record, receipt); }
+      if (record) {
+        if (receipt.journal) { if (unchanged(ctx, record, receipt.signature)) await journalOutputs(ctx, record, {readOnly: true}); }
+        else if (receipt.page) await page(ctx, record, receipt);
+        else await fields(ctx, record, receipt);
+      }
       fs.unlinkSync(file);
     } catch { /* retry on the next tick */ }
   }

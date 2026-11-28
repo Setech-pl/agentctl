@@ -6,12 +6,13 @@ import type { ExecOptions } from '../src/core/runner.ts';
 import { Context } from '../src/core/context.ts';
 import { MCP_TOOLS } from '../src/core/mcp-tools.ts';
 import type { McpDeps, ToolResult } from '../src/core/mcp-tools.ts';
+import type { TaskRecord } from '../src/core/taskstore.ts';
 import { taskFile, readTaskRecord } from '../src/core/taskstore.ts';
 import { tryFileLock, taskLock } from '../src/core/file-lock.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 const scratch = useScratch();
 const drain = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
-function fixture(name: string, yaml = '') {
+function fixture(name: string, yaml = '', extra: Partial<TaskRecord> = {}) {
   const config = makeConfig(scratch.sub(name), `capacity: {snapshot: false, codex_refresh: false}\n${yaml}`);
   const tmux = new FakeTmux();
   let release!: () => void;
@@ -28,7 +29,7 @@ function fixture(name: string, yaml = '') {
     now: () => now, schedule: (fn, ms) => { timers.set(fn, now + ms); return () => { timers.delete(fn); }; },
   }};
   const advance = (ms: number) => { now += ms; for (const [fn, at] of timers) if (at <= now) { timers.delete(fn); fn(); } };
-  const record = seedTask(config, 'FAST');
+  const record = seedTask(config, 'FAST', extra);
   fs.mkdirSync(path.dirname(record.report), {recursive: true});
   fs.writeFileSync(record.report, 'Werdykt: PASS\n\n## Summary\nSmall direct report.\n<!-- agentctl:report-end -->\n');
   const call = (name: string, args: Record<string, unknown> = {}) => MCP_TOOLS.find(t => t.name === name)!.run(deps, args);
@@ -130,4 +131,36 @@ it('READFAST0269-ACK: a slow lock syscall defers acknowledgement without replaci
   assert.equal(result.isError, undefined, result.text);
   assert.match(result.text, /Small direct report/);
   assert.ok(fs.readdirSync(path.join(path.dirname(f.config.path), 'report-delivery-requests')).length > 0);
+});
+
+it('READFAST0269: a held outputs journal lock records watch work and still returns the report', async () => {
+  const f = fixture('journal-lock'); f.release();
+  const text = 'Werdykt: PASS\nSmall direct report.\n```agentctl-outputs\nversion: 1\nverdict: PASS\ndecisions: []\n```\n<!-- agentctl:report-end -->';
+  fs.writeFileSync(f.record.report, text);
+  const unlock = tryFileLock(path.join(f.config.stateDir, 'fast', 'outputs-seen.json.lock'))!;
+  let result: ToolResult | undefined;
+  const pending = f.call('get_report', {task: 'FAST', mode: 'full', mark_pulled: false}).then(r => { result = r; });
+  try {
+    await drain(); f.advance(9000); await drain();
+    assert.ok(result, 'the journal must not hold the read');
+    assert.equal(result.isError, undefined, result.text);
+    assert.doesNotMatch(result.text, /Partial result|Durable queue/);
+    assert.match(result.text, /Small direct report/);
+    assert.ok(fs.readdirSync(path.join(path.dirname(f.config.path), 'report-delivery-requests')).length > 0);
+  } finally { unlock(); await pending; }
+});
+it('READFAST0269: declared Git references are returned without running Git and journaling is requested for watch', async () => {
+  const repo = scratch.sub('refs-repo');
+  const f = fixture('refs', '', {repos: [{name: 'agentctl', path: repo, worktree: repo, branch: 'pending'}]});
+  fs.writeFileSync(f.record.report, `Werdykt: PASS\nSmall direct report.\n\`\`\`agentctl-outputs\nversion: 1\nverdict: PASS\ncommits: [{repo: agentctl, branch: pending, sha: ${'a'.repeat(40)}}]\n\`\`\`\n<!-- agentctl:report-end -->`);
+  let result: ToolResult | undefined;
+  const pending = f.call('get_report', {task: 'FAST', mode: 'full', mark_pulled: false}).then(r => { result = r; });
+  await drain(); f.advance(9000); await drain();
+  const direct = result; f.release(); await pending;
+  assert.ok(direct); assert.equal(direct.isError, undefined, direct.text);
+  assert.doesNotMatch(direct.text, /Partial result|Durable queue/);
+  assert.match(direct.text, /Small direct report/);
+  assert.equal(f.calls(), 0);
+  const requests = fs.readdirSync(path.join(path.dirname(f.config.path), 'report-delivery-requests'));
+  assert.ok(requests.some(name => JSON.parse(fs.readFileSync(path.join(path.dirname(f.config.path), 'report-delivery-requests', name), 'utf8')).journal));
 });

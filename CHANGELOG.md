@@ -32,6 +32,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [0.26.5] - 2026-11-27
 
+- READFAST0269-COMPAT: Preserve the settled-outputs gate, fast local WALL publication and missing-file diagnostics; busy publication and Git validation go to watch. / Zachowany próg gotowości outputs, szybka publikacja WALL i komunikaty o brakującym pliku; zajęta publikacja i walidacja Git trafiają do watch.
+
 - READFAST0269-ACK: Slow acknowledgement locks defer the write without hiding a delivered report. / Wolna blokada potwierdzenia odkłada zapis bez ukrywania odczytanego raportu.
 - READFAST0269-COUNT: Events show the full ready-report count, with at most ten task names. / Zdarzenia pokazują pełną liczbę gotowych raportów i do dziesięciu nazw zadań.
 - READFAST0269: MCP reads reports directly from task files, bypassing status collection and the shared deadline; contended acknowledgements wait for watch. / MCP czyta raporty bezpośrednio z plików zadań, omija status i wspólny budżet; zajęte potwierdzenia czekają na watch.
