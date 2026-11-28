@@ -1018,7 +1018,7 @@
     ]
   },
   "NODES0262-BASE": {
-    "rev": "v0.27.1",
+    "rev": "v0.27.2",
     "outcome": "FAILS",
     "failed": 1,
     "passed": 0,
@@ -1028,7 +1028,7 @@
     ]
   },
   "NODES0262-PLACEMENT": {
-    "rev": "v0.27.1",
+    "rev": "v0.27.2",
     "outcome": "FAILS",
     "failed": 1,
     "passed": 0,

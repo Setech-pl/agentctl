@@ -4,9 +4,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- Mac and PC dispatch now supports automatic SSH placement, per-host health and capacity, owner reservations and fetch-only branch sync. / Dyspozytor Mac + PC automatycznie wybiera host po SSH, sprawdza jego stan i limity, respektuje rezerwacje właściciela i synchronizuje gałęzie przez fetch.
-- `class: perf` reserves a worker and transfers bounded builds and measurement results. / `class: perf` rezerwuje host i przesyła buildy oraz wyniki pomiarów z limitem rozmiaru.
-
 - Watch treats a vanished agentctl tmux session as empty on tmux 3.4 ("can't find window", "no current target") instead of failing status collection every tick; also for remote host GC. / Watch traktuje zniknięcie sesji tmux agentctl w tmux 3.4 ("can't find window", "no current target") jako pustą listę zamiast błędu odczytu stanu w każdym przebiegu; dotyczy też GC hostów zdalnych.
 - Watch again flags a configured report candidate (a `report:` pattern match) for open tasks such as needs-input, without a discovery walk for every row. / Watch ponownie oznacza kandydata raportu ze wzorca `report:` dla otwartych zadań, np. needs-input, bez przeszukiwania katalogów dla każdego wiersza.
 - MCP status serves a complete watch snapshot up to 60 s old (like limits and queue_list), with its age, instead of the slow fallback when a loaded watch cycle exceeds two intervals. / MCP status zwraca pełny snapshot watch do 60 s (jak limits i queue_list) wraz z jego wiekiem zamiast wolnego odczytu zastępczego, gdy obciążony cykl watch przekracza dwa interwały.
@@ -83,6 +80,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.27.3] - 2026-11-28
+
+Mac dispatcher with PC workers / Dyspozytor na Macu z hostami PC. [Release notes (EN)](docs/release-notes/0.27.3.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.3.pl.md).
+
+- Remote host placement: `host: auto` and `placement` chat/cohort rules choose a worker over SSH by fresh health, per-host limits, quotas, disk, load and related worktrees, with failover after `placement.failover_after`. `placement.default` stays `local` unless configured. / Wybór hosta: `host: auto` i reguły `placement` dla czatów i kohort wybierają host po SSH według świeżej próbki stanu, limitów hosta, kwot, dysku, obciążenia i powiązanych worktree, z przełączeniem po `placement.failover_after`. `placement.default` pozostaje `local`, dopóki go nie zmienisz.
+- Branch fetch-back: watch fetches a worker's task branch into the Mac clone when it reports and at close; a checked-out or divergent branch keeps its local ref and the worker head stays at `refs/remotes/<host>/<branch>`. / Powrót gałęzi: watch pobiera gałąź zadania z hosta do klonu na Macu po raporcie i przy zamknięciu; gałąź wyciągnięta lub rozbieżna zachowuje lokalną referencję, a głowica hosta zostaje w `refs/remotes/<host>/<branch>`.
+- PC availability: `hosts.<name>.availability` (time windows that may cross midnight, busy processes, GPU load, `yield: stop-new` or `pause-all`), `agentctl hosts pause <host> --until …` / `hosts resume` (MCP `hosts_pause`/`hosts_resume`) and the board `H` key reserve a worker for its owner; placement and status show the reason. / Dostępność PC: `hosts.<nazwa>.availability` (okna czasowe, także przez północ, zajęte procesy, obciążenie GPU, `yield: stop-new` lub `pause-all`), `agentctl hosts pause <host> --until …` / `hosts resume` (MCP `hosts_pause`/`hosts_resume`) oraz klawisz `H` na tablicy rezerwują host dla właściciela; wybór hosta i status pokazują powód.
+- Perf on a host: `class: perf` reserves a worker exclusively at its scheduled time, transfers a bounded build there and measurement results back. / Perf na hoście: `class: perf` rezerwuje host na wyłączność o zaplanowanej porze, przesyła na niego build z limitem rozmiaru i odsyła wyniki pomiarów.
 
 ## [0.27.2] - 2026-11-25
 
