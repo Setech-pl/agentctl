@@ -177,7 +177,7 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const attention = open.filter(r => ['limited', 'needs-attention', 'needs-input', 'needs-trust', 'waiting'].includes(r.state)
     || (r.reportCandidate && r.report !== 'yes'));
   // Report files decide readiness even when status rows are cached or partial (READFAST0269-COUNT); status adds remote rows.
-  const direct = selectReady(directReportRows(ctx).filter(r => !r.hidden && (!inScope || inScope(r)) && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort)))), false);
+  const direct = selectReady(directReportRows(ctx, false, records.current).filter(r => !r.hidden && (!inScope || inScope(r)) && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort)))), false);
   const readyTasks = [...new Set([...accounting.reports.map(r => r.task), ...direct.map(r => r.task)])].sort((a, b) => a.localeCompare(b));
   const summary: EventsSummary = {
     active: accounting.active.length,

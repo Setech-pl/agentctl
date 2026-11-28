@@ -1,11 +1,12 @@
 import { inspectReport } from './report-state.ts';
-import { listTaskRecords, listArchivedRecords } from './taskstore.ts';
+import { listTaskRecords, listArchivedRecords, type TaskRecord } from './taskstore.ts';
 import type { Context } from './context.ts';
 import type { StatusRow } from './status.ts';
 
 /** Report facts belong to TASK.md and its file, never to tmux or a watch snapshot. */
-export function directReportRows(ctx: Context, archived = false): StatusRow[] {
-  const records = [...listTaskRecords(ctx.config), ...(archived ? listArchivedRecords(ctx.config) : [])];
+/** `loaded` reuses headers a caller already read (events keeps its indexed snapshot instead of reopening TASK.md). */
+export function directReportRows(ctx: Context, archived = false, loaded?: readonly TaskRecord[]): StatusRow[] {
+  const records = loaded ? [...loaded] : [...listTaskRecords(ctx.config), ...(archived ? listArchivedRecords(ctx.config) : [])];
   const seen = new Set<string>();
   return records.flatMap(record => {
     if (seen.has(record.task)) return [];

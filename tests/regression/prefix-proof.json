@@ -2283,6 +2283,16 @@
       "REL0273-LEGACY-LOCAL: a legacy SSH host named local still loads and receives explicit host: local orders"
     ]
   },
+  "REL0274-EVENTS-IO": {
+    "rev": "fad4532e64aad8ffc3e78fc3135e9a2efc9bbff0",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REVIEW0256-EVENTS: scoped events reuse headers and respect recorded chat ownership",
+      "REVIEW0256-EVENTS: scoped events reuse headers and respect recorded chat ownership"
+    ]
+  },
   "REVIEW0256-DOWNGRADE": {
     "rev": "v0.27.1",
     "outcome": "FAILS",

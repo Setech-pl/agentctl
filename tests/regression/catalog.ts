@@ -28,6 +28,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'REL0274-EVENTS-IO', fixedIn: '0.27.4', proofAgainst: 'fad4532e64aad8ffc3e78fc3135e9a2efc9bbff0', symptom: 'After merging v0.26.5, every scoped events read reopened each TASK.md to count ready reports instead of reusing the indexed headers.', scenarios: [s('review0256.test.ts', '^REVIEW0256-EVENTS:')] },
   { id: 'FIELD0268-COHORT-MOVE', fixedIn: '0.27.4', proofAgainst: '0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff', symptom: 'A stale header of a moved task withheld the cohort completion notice after its successor finished.', scenarios: [s('cohort.test.ts', '^FIELD0268-COHORT-MOVE:')] },
   { id: 'FIELD0268-JOURNAL-ONCE', fixedIn: '0.27.4', proofAgainst: '0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff', symptom: 'A delivery failure noticed on the first tick produced two journal entries.', scenarios: [s('hotfix-0173-p.test.ts', '^0173-P3: watch restart at the deadline')] },
   { id: 'FIELD0268-GC-RESUME-IO', fixedIn: '0.27.4', proofAgainst: 'f63261cecbf52e7285e400d3c1a1c41434c3e835', symptom: 'A missing free-space sample or a different mount alias discarded a paused GC plan.', scenarios: [s('autogc0266.test.ts', '^FIELD0268-GC-RESUME-IO:')] },

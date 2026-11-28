@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| REL0274-EVENTS-IO | After merging v0.26.5, every scoped events read reopened each TASK.md to count ready reports instead of reusing the indexed headers. | `tests/review0256.test.ts` (`^REVIEW0256-EVENTS:`) | 0.27.4 | fails on fad4532e64aad8ffc3e78fc3135e9a2efc9bbff0 (1 failing of 1) |
 | FIELD0268-COHORT-MOVE | A stale header of a moved task withheld the cohort completion notice after its successor finished. | `tests/cohort.test.ts` (`^FIELD0268-COHORT-MOVE:`) | 0.27.4 | fails on 0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff (1 failing of 1) |
 | FIELD0268-JOURNAL-ONCE | A delivery failure noticed on the first tick produced two journal entries. | `tests/hotfix-0173-p.test.ts` (`^0173-P3: watch restart at the deadline`) | 0.27.4 | fails on 0c2c5baafc9e407499534efb7ea5c5c6f56ad3ff (1 failing of 1) |
 | FIELD0268-GC-RESUME-IO | A missing free-space sample or a different mount alias discarded a paused GC plan. | `tests/autogc0266.test.ts` (`^FIELD0268-GC-RESUME-IO:`) | 0.27.4 | fails on f63261cecbf52e7285e400d3c1a1c41434c3e835 (1 failing of 1) |
