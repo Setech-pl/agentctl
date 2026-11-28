@@ -110,7 +110,7 @@ import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
 import { wallAge, findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
 import type { PostInput, WallIdentity, WallKind, WallMessage, WallStatus } from './wall.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, resolvePath } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, resolvePath, windowName } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -1970,8 +1970,8 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   let scope: unknown;
   if (request.tool === 'gc' && request.scope === null) throw new AgentctlError('GC request has no confirmed preview');
   if (request.scope !== null) {
-    scope = request.tool === 'gc' ? scopeMcpGc(ctx, request.args, await planMcpGc(ctx, request.args, true)) : await confirmationScope(ctx, request.tool, request.args);
-    if (JSON.stringify(canonical(confirmationTargets(request.tool, scope))) !== request.scope) {
+    scope = request.tool === 'gc' ? scopeMcpGc(ctx, request.args, await planMcpGc(ctx, request.args, true)) : await confirmationScope(ctx, request.tool, request.args, {apply: true});
+    if (!sameConfirmationScope(request.scope, JSON.stringify(canonical(confirmationTargets(request.tool, scope))))) {
       throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
     }
   }
@@ -2029,10 +2029,62 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     }
     return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, project(v)]));
   };
-  return project(scope);
+  const projected = project(scope) as {directTaskPreview?: boolean; tasks?: Record<string, unknown>[]};
+  if (projected?.directTaskPreview) return {...projected, tasks: projected.tasks?.map(({line: _line, hasReport: _report, ...identity}) => identity)};
+  return projected;
+}
+
+function explicitTaskPreview(name: string, args: Record<string, unknown>): boolean {
+  return ['close', 'cancel'].includes(name) && !args.cohort && !args.pulled &&
+    (typeof args.task === 'string' || Array.isArray(args.tasks) && args.tasks.length > 0);
+}
+/** An unknown bounded observation never claims a window is gone; watch must resolve it before acting. */
+function sameConfirmationScope(expected: string, actual: string): boolean {
+  if (expected === actual) return true;
+  const before = JSON.parse(expected), after = JSON.parse(actual);
+  if (!before?.directTaskPreview || !after?.directTaskPreview) return false;
+  for (const item of before.tasks) if (item.windowAlive === null) {
+    const fresh = after.tasks.find((t: {task: string}) => t.task === item.task);
+    if (fresh) { fresh.windowAlive = null; if (item.kind === null) fresh.kind = null; }
+  }
+  return JSON.stringify(canonical(before)) === JSON.stringify(canonical(after));
+}
+
+async function directTaskScope(ctx: Context, name: string, args: Record<string, unknown>, opts: {apply?: boolean; clock?: BudgetClock}): Promise<unknown | undefined> {
+  if (!explicitTaskPreview(name, args)) return undefined;
+  if (name === 'cancel' && [args.task !== undefined, args.tasks !== undefined, args.cohort !== undefined].filter(Boolean).length !== 1) throw new AgentctlError('give either task or cohort');
+  const ids = (args.tasks as string[] | undefined) ?? [args.task as string];
+  const records = new Map<string, TaskRecord>();
+  const entries = name === 'cancel' ? readQueue(ctx.config) : [];
+  for (const id of ids) {
+    const record = readTaskRecordById(ctx.config, id.trim());
+    if (record) records.set(record.task, record);
+    else if (!entries.some(e => e.task.toLowerCase() === id.trim().toLowerCase())) return undefined; // existing prefix/orphan semantics
+  }
+  // Read only the named records and their explicit move links; apply checks the complete authoritative chain.
+  if (name === 'cancel' && !opts.apply) for (const record of records.values()) {
+    for (const id of [record.continues, record.supersededBy]) if (id && !records.has(id)) {
+      if (records.size >= 128) throw new AgentctlError('cancel move chain exceeds 128 tasks; inspect it with the CLI');
+      const linked = readTaskRecordById(ctx.config, id);
+      if (linked) records.set(linked.task, linked);
+    }
+  }
+  const windows = opts.apply ? undefined : await withResponseBudget(async () => {
+    const hosts = [...new Set([...records.values()].flatMap(r => r.host ? [r.host] : []))];
+    const local = [...records.values()].some(r => !r.host);
+    return (await Promise.all([...(local ? [ctx.localTmux.listWindows()] : []), ...hosts.map(host => ctx.hosts.tmux(host).listWindows())])).flat();
+  }, () => null, opts.clock, 250);
+  if (name === 'close') return {directTaskPreview: true,
+    tasks: await planClose(ctx, [...records.keys()], {rmWorktree: Boolean(args.remove_worktree), ...(!opts.apply ? {previewWindows: windows} : {})}), records: [...records.values()]};
+  const plan = await planCancel(ctx, ids, {reason: args.reason as string | undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp',
+    ...(!opts.apply ? {preview: {records: [...records.values()], windows: windows!}} : {})});
+  return {directTaskPreview: true, tasks: plan.items.map(({task, kind, record, entry, blocks, line, hasReport, windowAlive}) =>
+    ({task, kind: !opts.apply && windows === null && record ? null : kind, record, entry, blocks, line, hasReport, windowAlive: opts.apply ? kind === 'live' : windowAlive}))};
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
-async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>, opts: {apply?: boolean; clock?: BudgetClock} = {}): Promise<unknown> {
+  const direct = await directTaskScope(ctx, name, args, opts);
+  if (direct !== undefined) return direct;
   if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
   if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config) };
@@ -2265,7 +2317,7 @@ for (const tool of MCP_TOOLS) {
     }
     if (!confirm && tool.name === 'gc' && !prepared && deferMcpWrites(ctx)) return requestGcPreview(deps, effective);
     let scope: unknown = prepared;
-    try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective))); }
+    try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective, {apply: true}) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective, {clock: deps.budgetClock}))); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     if (tool.name === 'gc') scope = scopeMcpGc(ctx, effective, scope as GcPlan, deps.clientId);
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
@@ -2273,6 +2325,7 @@ for (const tool of MCP_TOOLS) {
     if (!confirm) {
       let result: ToolResult;
       if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\n${tool.name === 'queue' ? readMcpRequests(ctx.config).filter(r => r.tool === 'queue_rm' && ['pending', 'applying'].includes(r.status) && (scope as {specs: ResolvedSpec[]}).specs.some(s => s.task === r.task)).map(r => `${r.task}: oczekuje queue_rm (request ${r.id}); use replace: true`).join('\n') : ''}\n${effective.replace ? 'replace: true – remove and re-add in one watch step.' : ''}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
+      else if (tool.name === 'cancel' && (scope as {directTaskPreview?: boolean}).directTaskPreview) result = await writeTool(deps, 'cancel', {}, async () => ({text: `Cancel:\n${(scope as {tasks: {line: string}[]}).tasks.map(t => t.line).join('\n')}\nNot cancelled yet. Watch rechecks the full move chain, queue dependencies and windows at apply time.`, executed: false, announce: ''}));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await observeHostWindows(() => original(deps, args));
       else if (tool.name === 'send') result = await observeHostWindows(() => writeTool(deps, 'send', { task: String(input.task) }, async () => ({
         text: await previewSend(ctx, input as unknown as SendMcpArgs, scope as Awaited<ReturnType<typeof sendScope>>),
@@ -2288,12 +2341,13 @@ for (const tool of MCP_TOOLS) {
         pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS, ...(tool.name === 'new' || tool.name === 'queue' ? { planned: (scope as { specs: ResolvedSpec[] }).specs.map(plannedOrder) } : {}) });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
-        if (tool.name === 'send' || tool.name === 'gc') result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
-        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${['send', 'gc'].includes(tool.name) ? '' : `\npreview_token: ${token}`}`;
+        const tokenFirst = ['send', 'gc', 'close', 'cancel'].includes(tool.name);
+        if (tokenFirst) result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
+        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${tokenFirst ? '' : `\npreview_token: ${token}`}`;
       }
       return result;
     }
-    if (preview!.scope !== scopeIdentity) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
+    if (!sameConfirmationScope(preview!.scope, scopeIdentity)) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
     // Another confirm may have completed while this one checked the scope.
     if (token && receipts.has(token)) return (await replay())!;
     const taskIds = typeof effective.spec === 'string' && tool.name !== 'consult' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
@@ -2469,7 +2523,7 @@ for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
     // An accepted confirm (P93/P93b) answers without the footer: it reads tmux and the disk, which a loaded host may not run in time.
     const accepted = args.confirm && (['new', 'queue'].includes(tool.name) || typeof (result.data as { request?: unknown } | undefined)?.request === 'string');
     const explicit = args.detail === true || args.capacity === true;
-    const footer = accepted || ['new', 'queue'].includes(tool.name) ? []
+    const footer = accepted || ['new', 'queue'].includes(tool.name) || tool.name === 'close' && !args.confirm && explicitTaskPreview(tool.name, args) ? []
       : tool.name === 'close' && !args.confirm ? await observeHostWindows(() => capacityFooter(deps, ctx, explicit, false))
       : await capacityFooter(deps, ctx, explicit);
     // Core new/queue helpers also serve the CLI. Remove only their display footer here.
@@ -2685,6 +2739,10 @@ for (const tool of MCP_TOOLS) {
       return result;
     }, () => {
       const ctx = deps.context(() => {});
+      if (!args.confirm && explicitTaskPreview(tool.name, args)) {
+        const ids = (args.tasks as string[] | undefined) ?? [args.task as string];
+        return fail(`${tool.name} preview could not resolve task state within ${budgetS} s: ${ids.map(id => taskFile(ctx.config, windowName(id))).join(', ')}`);
+      }
       const entries = readQueue(ctx.config);
       const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
       const cached = saved.get(key);

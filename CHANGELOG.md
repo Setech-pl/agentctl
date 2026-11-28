@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- READFAST0269-PREVIEW: Exact-ID MCP close/cancel previews read only target state and explicit move links, bound window observation to 250 ms, return the token first and defer heavy validation to watch. / Podgląd close/cancel dla pełnych ID czyta stan wskazanych zadań i ich powiązania move, ogranicza sprawdzanie okien do 250 ms, zwraca token na początku i zostawia ciężką walidację watch.
+
 - READFAST0269-CLI: Keep CLI pull marking synchronous; only MCP may defer acknowledgement to watch. / CLI zapisuje odbiór raportu przed powrotem; tylko MCP może odroczyć potwierdzenie do watch.
 
 - READFAST0269-HARNESS: Keep long task-owned tmux sockets within the limit using a shorter internal directory and an in-sandbox cleanup alias. / Długie ścieżki socketów tmux mieszczą się w limicie dzięki krótszemu katalogowi i aliasowi sprzątania wewnątrz sandboxa.
@@ -35,6 +37,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
 
 ## [0.26.5] - 2026-11-27
+
+- Exact-ID close/cancel previews remain available with blocked status collection; watch validates the full scope before applying. / Podgląd close/cancel dla pełnych ID działa przy zablokowanym zbieraniu statusu; watch sprawdza pełny zakres przed wykonaniem.
 
 - READFAST0269-COMPAT: Preserve the settled-outputs gate, fast local WALL publication and missing-file diagnostics; busy publication and Git validation go to watch. / Zachowany próg gotowości outputs, szybka publikacja WALL i komunikaty o brakującym pliku; zajęta publikacja i walidacja Git trafiają do watch.
 

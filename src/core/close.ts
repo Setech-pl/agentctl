@@ -19,6 +19,8 @@ import { assertCheckoutNotBorrowed } from './readonly-review.ts';
 
 export interface CloseOptions {
   rmWorktree?: boolean;
+  /** MCP preview supplies one bounded observation; null means watch must check. */
+  previewWindows?: string[] | null;
 }
 
 const PROTECTED_BRANCHES = new Set(['main', 'master']);
@@ -130,7 +132,7 @@ export interface ClosePlanItem {
   task: string;
   /** TASK.md exists for it. */
   known: boolean;
-  windowAlive: boolean;
+  windowAlive: boolean | null;
   /** The report file is there and was written after the task started. */
   hasReport: boolean;
   /** Printable line for the confirmation list. */
@@ -141,19 +143,20 @@ export interface ClosePlanItem {
 export async function planClose(ctx: Context, tasks: string[], opts: CloseOptions = {}): Promise<ClosePlanItem[]> {
   const { tmux, config, runner } = ctx;
   const unique = [...new Set(tasks.map((t) => t.toUpperCase()))];
-  const live = new Set(runner.dryRun ? [] : await tmux.listWindows());
+  const live = opts.previewWindows === null ? null : new Set(opts.previewWindows ?? (runner.dryRun ? [] : await tmux.listWindows()));
   const p = new Problems();
   const items = unique.map((task): ClosePlanItem => {
     const window = windowName(task);
     const record = readTaskRecord(config, window);
     const known = record !== undefined;
-    const hasReport = record ? inspectReport(config, record, runner.now(), !record.attemptId && !live.has(window)).ready : false;
+    const hasReport = record ? inspectReport(config, record, runner.now(), !record.attemptId && !live?.has(window)).ready : false;
     if (opts.rmWorktree && !known) p.add(`${task}: no TASK.md in ${config.stateDir}/${window} lists its worktrees`);
     const notes: string[] = [];
     if (!known) notes.push('unknown task (no TASK.md)');
     else if (!hasReport) notes.push('WARNING: no report yet');
-    if (known && !live.has(window) && !runner.dryRun) notes.push('window already gone');
-    return { task, known, windowAlive: live.has(window), hasReport, line: `${task}${notes.length ? `  (${notes.join('; ')})` : ''}` };
+    if (!live) notes.push('window check deferred to watch');
+    else if (known && !live.has(window) && !runner.dryRun) notes.push('window already gone');
+    return { task, known, windowAlive: live?.has(window) ?? null, hasReport, line: `${task}${notes.length ? `  (${notes.join('; ')})` : ''}` };
   });
   p.throwIfAny('Cannot close:', 'Remove those tasks from the list, or remove their worktrees yourself with "git worktree remove <path>".');
   return items;
@@ -161,15 +164,18 @@ export async function planClose(ctx: Context, tasks: string[], opts: CloseOption
 
 /** Closed tasks remain addressable by exact ID without making open-task prefixes ambiguous. */
 export async function resolveCloseTasks(ctx: Context, inputs: string[]): Promise<string[]> {
-  const targets = await listTargets(ctx);
-  return inputs.map(input => {
+  let targets: Awaited<ReturnType<typeof listTargets>> | undefined;
+  const result: string[] = [];
+  for (const input of inputs) {
     const exact = readTaskRecordById(ctx.config, input.trim());
-    if (exact) return exact.task;
+    if (exact) { result.push(exact.task); continue; }
+    targets ??= await listTargets(ctx);
     const match = matchTask(input, targets);
-    if (match.kind === 'one') return match.target.task;
+    if (match.kind === 'one') { result.push(match.target.task); continue; }
     if (match.kind === 'many') throw new AgentctlError(`"${input}" fits more than one task: ${match.matches.map(m => m.task).join(', ')}`);
     throw new AgentctlError(`no task "${input}"`, 'See "agentctl status --all".');
-  });
+  }
+  return result;
 }
 
 /** Close several tasks one after another; a failure does not stop the others, it is reported at the end. */

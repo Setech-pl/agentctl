@@ -52,8 +52,60 @@ function fixture(name: string, yaml = '', extra: Partial<TaskRecord> = {}) {
   fs.mkdirSync(path.dirname(record.report), {recursive: true});
   fs.writeFileSync(record.report, 'Werdykt: PASS\n\n## Summary\nSmall direct report.\n<!-- agentctl:report-end -->\n');
   const call = (name: string, args: Record<string, unknown> = {}) => MCP_TOOLS.find(t => t.name === name)!.run(deps, args);
-  return {config, ctx, record, call, release, advance, calls: () => calls};
+  return {config, ctx, record, call, release, advance, deps, calls: () => calls};
 }
+for (const tool of ['close', 'cancel']) for (const selection of [{task: 'FAST'}, {tasks: ['FAST']}]) {
+  it(`READFAST0269-PREVIEW: ${tool} ${JSON.stringify(selection)} returns a token while status and tmux are blocked`, async t => {
+    const f = fixture(`preview-${tool}-${Object.keys(selection)[0]}`, 'mcp: {allow: [close, cancel]}\n');
+    seedTask(f.config, 'UNRELATED');
+    const reads: string[] = [], read = fs.readFileSync;
+    t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => { reads.push(String(args[0])); return read(...args); });
+    let result: ToolResult | undefined;
+    const pending = f.call(tool, selection).then(r => { result = r; });
+    await drain(); f.advance(250); await drain();
+    const direct = result;
+    f.release(); await pending;
+    assert.ok(direct, 'preview must return before blocked runtime/status is released');
+    assert.equal(direct.isError, undefined, direct.text);
+    assert.match(direct.text, /^preview_token: [a-f0-9-]+/);
+    assert.match(direct.text, /window check deferred to watch/);
+    assert.doesNotMatch(direct.text, /Partial result|Durable queue/);
+    assert.equal(reads.some(p => p.endsWith('/unrelated/TASK.md')), false, 'exact-ID preview never scans unrelated task state');
+    assert.equal(f.calls(), 1, 'one bounded window listing; no status, Git or capacity footer');
+  });
+}
+for (const tool of ['close', 'cancel']) it(`READFAST0269-PREVIEW: ${tool} unknown window is checked by watch before apply`, async () => {
+  const f = fixture(`preview-apply-${tool}`, 'mcp: {allow: [close, cancel]}\ncancel: {grace: 0}\n');
+  let result: ToolResult | undefined;
+  const pending = f.call(tool, {task: 'FAST'}).then(r => {result = r;});
+  await drain(); f.advance(250); await drain();
+  f.release(); await pending;
+  const token = /^preview_token: (\S+)/.exec(result!.text)?.[1]; assert.ok(token);
+  fs.writeFileSync(path.join(f.config.stateDir, 'queue-worker.json'), JSON.stringify({pid: process.pid, at: f.ctx.runner.now()}));
+  const accepted = await f.call(tool, {confirm: true, preview_token: token});
+  assert.match(accepted.text, /^Accepted:/);
+  assert.equal(readTaskRecord(f.config, 'fast')?.closed, undefined);
+  assert.equal(readTaskRecord(f.config, 'fast')?.cancelled, undefined);
+  const { readMcpRequests } = await import('../src/core/mcp-requests.ts');
+  const { applyMcpRequest } = await import('../src/core/mcp-tools.ts');
+  await applyMcpRequest(f.deps, readMcpRequests(f.config)[0]!);
+  assert.equal(readTaskRecord(f.config, 'fast')?.[tool === 'close' ? 'closed' : 'cancelled'], true);
+});
+it('READFAST0269-PREVIEW: watch refuses a cancel scope enlarged by a reverse move link', async () => {
+  const f = fixture('preview-move-scope', 'mcp: {allow: [cancel]}\n');
+  const pending = f.call('cancel', {task: 'FAST'});
+  await drain(); f.advance(250); await drain(); f.release();
+  const preview = await pending;
+  const token = /^preview_token: (\S+)/.exec(preview.text)?.[1]; assert.ok(token);
+  seedTask(f.config, 'OTHER', {continues: 'FAST'});
+  fs.writeFileSync(path.join(f.config.stateDir, 'queue-worker.json'), JSON.stringify({pid: process.pid, at: f.ctx.runner.now()}));
+  assert.match((await f.call('cancel', {confirm: true, preview_token: token})).text, /^Accepted:/);
+  const { readMcpRequests } = await import('../src/core/mcp-requests.ts');
+  const { applyMcpRequest } = await import('../src/core/mcp-tools.ts');
+  await assert.rejects(applyMcpRequest(f.deps, readMcpRequests(f.config)[0]!), /changed preview/);
+  assert.equal(readTaskRecord(f.config, 'fast')?.cancelled, undefined);
+  assert.equal(readTaskRecord(f.config, 'other')?.cancelled, undefined);
+});
 for (const [tool, args] of [
   ['get_report', {task: 'FAST'}], ['get_report', {task: 'FAST', mode: 'full'}],
   ['get_report', {task: 'FAST', section: 'Summary'}], ['get_report', {task: 'FAST', offset: 3, limit: 1}],
