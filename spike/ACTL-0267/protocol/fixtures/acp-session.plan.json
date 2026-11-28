@@ -1,0 +1,1 @@
+{"steps":[{"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},"clientInfo":{"name":"agentctl_spike","version":"0.0.0"}}},{"method":"session/new","params":{"cwd":"$AGENTCTL_LIVE_CACHE/work","mcpServers":[]}}],"settleMs":2000,"timeoutMs":60000}

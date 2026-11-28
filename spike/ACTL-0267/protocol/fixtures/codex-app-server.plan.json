@@ -1,0 +1,6 @@
+{"steps":[
+ {"method":"initialize","params":{"clientInfo":{"name":"agentctl_spike","version":"0.0.0"},"capabilities":{"experimentalApi":true}}},
+ {"notify":"initialized"},
+ {"method":"hooks/list","params":{"cwds":["$AGENTCTL_LIVE_CACHE/work"]}},
+ {"method":"thread/start","params":{"cwd":"$AGENTCTL_LIVE_CACHE/work","ephemeral":true,"approvalPolicy":"on-request","sandbox":"read-only"}}
+],"settleMs":2500,"timeoutMs":25000}

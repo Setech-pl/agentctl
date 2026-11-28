@@ -1,0 +1,7 @@
+{"timestamp":"2026-11-28T10:00:00.000Z","type":"session_meta","payload":{"id":"019a0000-0000-7000-8000-000000000001","cli_version":"0.167.0","cwd":"/w","originator":"codex_cli_rs","source":"cli"}}
+{"timestamp":"2026-11-28T10:00:01.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"t1","started_at":1795860001,"model_context_window":272000}}
+{"timestamp":"2026-11-28T10:00:05.000Z","type":"response_item","payload":{"type":"function_call","name":"exec","call_id":"c1","arguments":"{\"cmd\":\"npm test\"}"}}
+{"timestamp":"2026-11-28T10:00:09.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"ok"}}
+{"timestamp":"2026-11-28T10:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":9000,"cached_input_tokens":8000,"output_tokens":300,"reasoning_output_tokens":120,"total_tokens":9300},"last_token_usage":{"input_tokens":9000,"output_tokens":300},"model_context_window":272000},"rate_limits":null}}
+{"timestamp":"2026-11-28T10:00:11.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"All green."}]}}
+{"timestamp":"2026-11-28T10:00:11.500Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"t1","completed_at":1795860011,"duration_ms":10000,"last_agent_message":"All green. Report: /r/REPORT.md"}}

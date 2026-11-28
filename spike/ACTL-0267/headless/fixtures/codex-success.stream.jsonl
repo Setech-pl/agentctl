@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"019a0000-0000-7000-8000-0000000000aa"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"npm run gate -- quick","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"npm run gate -- quick","aggregated_output":"PASS","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Report written to the canonical path."}}
+{"type":"turn.completed","usage":{"input_tokens":24000,"cached_input_tokens":20000,"output_tokens":900,"reasoning_output_tokens":300}}
