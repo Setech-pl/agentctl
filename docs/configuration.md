@@ -566,6 +566,7 @@ PL: `ui.instance_name` nadpisuje automatyczną etykietę `agentctl` / `agentctl-
 | Key | Default | Meaning |
 |---|---|---|
 | `mcp.max_response_kb` | `8` | Limit of each serialized MCP tool result in KiB (1–1024). Larger results return fragments through `response_page`; continuation never repeats the operation. |
+| `mcp.response_budget_s` | `8` | MCP deadline in seconds (>0–50); default 8. Use 25 on heavily loaded hosts. Direct report reads bypass this shared deadline. |
 | `cohort` | `{done_grace_s: 300}` | Global cohort completion settings. |
 | `cohort.done_grace_s` | `300` | Wait after the last observed membership or task-state change before announcing all reports ready. Adding work cancels the pending completion; persisted across watcher restarts. `0` restores immediate notices. |
 

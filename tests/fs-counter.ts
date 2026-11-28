@@ -10,7 +10,7 @@ import path from 'node:path';
 export interface FsCounts {
   /** Logical TASK.md reads, including bounded fd header reads (one parse per open). */
   taskMdReads: number;
-  /** readFileSync of a report body (a .md file under the fixture cache). */
+  /** Logical report body reads, including bounded fd reads (one per open). */
   reportReads: number;
   /** statSync + lstatSync calls. */
   statCalls: number;
@@ -54,7 +54,7 @@ export function installFsCounter(root: string): FsCounter {
   };
   fsp.readSync = function (fd: number, ...rest: unknown[]) {
     const p = fds.get(fd);
-    if (p?.endsWith(`${path.sep}TASK.md`) && !countedFds.has(fd)) { countRead(p); countedFds.add(fd); }
+    if (p && !countedFds.has(fd)) { countRead(p); countedFds.add(fd); }
     return (original.readSync as (...a: unknown[]) => number).call(fs, fd, ...rest);
   };
   fsp.closeSync = function (fd: number) {

@@ -1692,6 +1692,62 @@
       "R1: camelCase credentials and passwd are masked in fields, text and URLs"
     ]
   },
+  "READFAST0269": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 14,
+    "passed": 0,
+    "failing": [
+      "READFAST0269: get_report {\"task\":\"FAST\"} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"mode\":\"full\"} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"section\":\"Summary\"} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"offset\":3,\"limit\":1} bypasses blocked status and expired shared clock",
+      "READFAST0269: get_report {\"task\":\"FAST\",\"byte_offset\":16} bypasses blocked status and expired shared clock"
+    ]
+  },
+  "READFAST0269-ACK": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error",
+      "READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error"
+    ]
+  },
+  "READFAST0269-COUNT": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "READFAST0269-COUNT: events count every ready task while listing only ten names",
+      "READFAST0269-COUNT: events count every ready task while listing only ten names"
+    ]
+  },
+  "READFAST0269-HARNESS": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "READFAST0269-HARNESS: a two-byte socket overrun uses a short directory inside the task cache",
+      "READFAST0269-HARNESS: a two-byte socket overrun uses a short directory inside the task cache"
+    ]
+  },
+  "READFAST0269-PREVIEW": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 7,
+    "passed": 0,
+    "failing": [
+      "READFAST0269-PREVIEW: close {\"task\":\"FAST\"} returns a token while status and tmux are blocked",
+      "READFAST0269-PREVIEW: close {\"tasks\":[\"FAST\"]} returns a token while status and tmux are blocked",
+      "READFAST0269-PREVIEW: cancel {\"task\":\"FAST\"} returns a token while status and tmux are blocked",
+      "READFAST0269-PREVIEW: cancel {\"tasks\":[\"FAST\"]} returns a token while status and tmux are blocked",
+      "READFAST0269-PREVIEW: close unknown window is checked by watch before apply"
+    ]
+  },
   "READY0263-COMPOSER": {
     "rev": "v0.26.2",
     "outcome": "FAILS",

@@ -234,7 +234,7 @@ export class Harness {
     this.home = path.join(this.root, 'home');
     this.agentctlHome = path.join(this.root, 'agentctl-home');
     this.codexHome = path.join(this.root, 'codex-home');
-    this.tmuxDir = path.join(this.root, 'tmx');
+    this.tmuxDir = path.join(this.root, Buffer.byteLength(socketAt(this.root)) > 100 ? 't' : 'tmx');
     this.tmuxConf = path.join(this.root, 'tmux.conf');
     this.session = options.session ?? 'agentctl-test';
     this.agentLog = path.join(this.root, 'agent.log');
@@ -289,6 +289,8 @@ export class Harness {
     if (Buffer.byteLength(socket) > 100) throw new HarnessRefusal(`task-owned tmux socket path is too long: ${socket}`);
     fs.rmSync(this.root, { recursive: true, force: true });
     for (const dir of [this.root, this.fakeBin, this.home, this.agentctlHome, this.codexHome, this.tmuxDir, this.env.CLAUDE_CONFIG_DIR as string, this.env.KIMI_CODE_HOME as string, this.env.TMPDIR as string]) fs.mkdirSync(dir, { recursive: true });
+    // The short directory saves two bytes; keep gate clean's legacy socket alias inside this sandbox.
+    if (path.basename(this.tmuxDir) === 't') fs.symlinkSync('t', path.join(this.root, 'tmx'));
     fs.writeFileSync(path.join(this.root, 'gitconfig'), '[user]\n\tname = Harness\n\temail = harness@example.invalid\n[init]\n\tdefaultBranch = main\n');
     for (const [name, body] of Object.entries(FAKES)) fs.writeFileSync(path.join(this.fakeBin, name), body, { mode: 0o755 });
     if (this.sysBin) maskSystemBins(this.sysBin);

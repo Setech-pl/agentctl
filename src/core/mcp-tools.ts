@@ -1,6 +1,8 @@
 import { hostPlacementStats } from './host-commands.ts';
 import { assertHost, manualHostPause, hostPauseUntil, setHostPause } from './host-availability.ts';
 import { probeLocalHost } from './host-health.ts';
+import { directReportRows } from './direct-reports.ts';
+import { deliverReportFields, deferReportPage, deliverReportOutputs } from './report-delivery.ts';
 import { gcLocation, pathsOverlap } from './start-paths.ts';
 import { trashOwners } from './trash.ts';
 import { chatOwner, effectiveChatCeilings, quotaWarnings } from './chat-quotas.ts';
@@ -33,10 +35,9 @@ import { findBlocked } from './depends.ts';
 import { mcpWriteNotice } from './mcp-notify.ts';
 import { planMark, markTasks } from './mark.ts';
 import type { MarkSelection } from './mark.ts';
-import { readOutputs, aggregateOutputs, journalOutputs, reviewVerdict } from './outputs.ts';
+import { parseOutputs, outputsPending, aggregateOutputs, reviewVerdict } from './outputs.ts';
 import type { OutputData } from './outputs.ts';
 import { developmentEnvironment } from './installation.ts';
-import { withFileLock as withReportLock } from './file-lock.ts';
 import { redactQueue } from './mcp-redact.ts';
 import { reportFingerprint } from './report-state.ts';
 import { findMcpProcesses, staleProcesses } from './mcp-processes.ts';
@@ -114,7 +115,7 @@ import { openReader, readPlans } from './usage.ts';
 import { AGENT_NAMES } from './config.ts';
 import { wallAge, findMessage, MAX_BODY_BYTES, MAX_NOTE_CHARS, MAX_REF_CHARS, MAX_REFS, MAX_SUBJECT_CHARS, OWNER_KINDS, planPost, planStatus, postMessage, readThread, readWall, renderRead, renderThread, setStatus, subscribedChannels, readableChannels, WALL_KINDS, WALL_STATUSES, wallIdentity } from './wall.ts';
 import type { PostInput, WallIdentity, WallKind, WallMessage, WallStatus } from './wall.ts';
-import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, resolvePath } from './util.ts';
+import { AgentctlError, cohortKey, errorMessage, formatLocalTime, isObject, plural, resolvePath, windowName } from './util.ts';
 
 /*
  * The tools of `agentctl mcp`. This file is data and functions only: the MCP SDK front (src/mcp/server.ts) registers them.
@@ -260,6 +261,14 @@ function conciseReport(text: string, data: OutputData, review = false): string {
   return `${data.outputs_warnings?.length ? `outputs_warnings: ${JSON.stringify(data.outputs_warnings)}\n` : ''}${data.outputs_errors.length ? `outputs_errors: ${JSON.stringify(data.outputs_errors)}\n` : ''}${data.outputs_pending ? '"outputs_pending": true\n' : ''}verdict: ${verdict}\ndecisions: ${decisions}\nactions: ${actions}\n${safeSummary.slice(-3000)}`.trim();
 }
 
+/** The same settle rule as readOutputs, with no Git validation or status sweep. */
+function directOutputs(ctx: Context, record: TaskRecord, text: string): OutputData {
+  const now = ctx.runner.now();
+  if (outputsPending(ctx.config, record, inspectReport(ctx.config, record, now, !record.attemptId), now))
+    return {outputs: null, outputs_valid: false, outputs_errors: [], outputs_partial: false, outputs_pending: true};
+  return parseOutputs(text, {review: record.reviewOf != null});
+}
+
 async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Promise<ToolResult> {
   if (!rows.length) return ok('No new reports.');
   const taken: StatusRow[] = [];
@@ -269,11 +278,11 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     const record = findRecord(ctx, row.task);
     const text = readReportText(ctx.config, record, row.reportPath);
     const sha = /`([0-9a-f]{7,40})`/i.exec(text)?.[1] ?? /\b(?:SHA|commit)\s*[:=]?\s*`?([0-9a-f]{7,40})\b/i.exec(text)?.[1] ?? 'n/d';
-    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, await readOutputs(ctx, record), record.reviewOf != null)}`); taken.push(row);
+    parts.push(`=== ${row.task} ===\nattempt: ${row.attemptId ?? row.attempt ?? 'n/d (legacy)'}\npath: ${row.reportPath}\nbytes: ${Buffer.byteLength(text)}\nsha: ${sha}\ntruncated: ${Buffer.byteLength(text) > 1500}\n${conciseReport(text, directOutputs(ctx, record, text), record.reviewOf != null)}`); taken.push(row);
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512 && taken.length > 1) { parts.pop(); taken.pop(); break; }
   }
-  for (const row of taken) await setHeaderField(ctx.runner, taskFile(ctx.config, row.windowName), 'summary_delivered', new Date(ctx.runner.now()).toISOString());
-  if (ack) await markPulled(ctx, taken);
+  for (const row of taken) await deliverReportFields(ctx, findRecord(ctx, row.task), row.reportSignature!, { summary_delivered: new Date(ctx.runner.now()).toISOString() });
+  if (ack) await markPulled(ctx, taken, true);
   return { ...ok(response()), delivered: taken.length };
 }
 
@@ -806,7 +815,7 @@ async function runPeek(deps: McpDeps, args: { task: string; lines?: number | und
 async function runListReports(deps: McpDeps, args: { all?: boolean | undefined }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const all = Boolean(args.all);
-  const shown = shownRows(await collectStatus(ctx, { progress: false, archived: all }), all).filter((r) => r.report === 'yes');
+  const shown = shownRows(directReportRows(ctx, all), all).filter((r) => r.report === 'yes');
   if (shown.length === 0) return ok('No reports.');
   const list = shown.map((r) => {
     let bytes = 0;
@@ -860,24 +869,23 @@ export function readReportFile(record: Pick<TaskRecord, 'task' | 'report'> & Par
 async function runGetReport(deps: McpDeps, args: { task: string; section?: string; offset?: number; limit?: number; byte_offset?: number; detail?: boolean; mode?: string; mark_pulled?: boolean }): Promise<ToolResult> {
   const ctx = deps.context(() => {});
   const record = findRecord(ctx, args.task);
-  const row = (await collectStatus(ctx, { progress: false, archived: true })).find(r => r.task === record.task);
+  const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   const warning = reportMessageWarning(ctx, record.window, record);
-  if (row?.report !== 'yes' && !warning) {
-    const state = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
-    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason}`, 'Use report to inspect candidates or wait for completion.');
+  if (!state.ready && !warning) {
+    throw new AgentctlError(state.reason === 'not a regular report' ? `the report of ${record.task} is not a regular file; refusing to read it` : `${record.task} has no report yet: ${state.reason} (${record.report})`, 'Use report to inspect candidates or wait for completion.');
   }
   async function markRead(signature: string): Promise<void> {
     const current = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
     if (current.ready && createHash('sha256').update(readReportText(ctx.config, record, record.report)).digest('hex') === signature)
-      await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'pulled', new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString());
+      await deliverReportFields(ctx, record, signature, { pulled: new Date(Math.max(ctx.runner.now(), Math.ceil(fs.statSync(record.report).mtimeMs))).toISOString() });
   }
-  // The report is read: its outputs event (and its wall_posts) is recorded now if no watcher did it yet; once per attempt, never a failed read.
-  await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined);
+  const full = readReportText(ctx.config, record, record.report);
+  const parsed = directOutputs(ctx, record, full);
+  await deliverReportOutputs(ctx, record, full, parsed).catch(() => undefined);
   if (!args.detail && args.mode !== 'full' && args.section === undefined && args.offset === undefined && args.byte_offset === undefined && args.limit === undefined) {
-    const full = readReportText(ctx.config, record, record.report);
-    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, await readOutputs(ctx, record), record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
+    return { text: `=== ${record.task} (${record.agent} ${record.model}/${record.effort}) ===\n${conciseReport(full, parsed, record.reviewOf != null)}${warning ? `\n${JSON.stringify({ warning })}` : ''}`, ...(args.mark_pulled !== false ? { onDelivered: () => markRead(createHash('sha256').update(full).digest('hex')) } : {}) };
   }
-  const validated = await readOutputs(ctx, record);
+  const validated = parsed;
   const outputs = (args.detail || args.mode === 'full') && !(args.offset ?? 0) && !(args.byte_offset ?? 0) ? validated : validated.outputs_errors.length || validated.outputs_warnings?.length ? {outputs_errors: validated.outputs_errors, outputs_warnings: validated.outputs_warnings ?? []} : {};
   const render = (r: ReportPage, pulled: boolean): ToolResult => {
     const { text, signature: _signature, ...page } = r;
@@ -894,28 +902,14 @@ async function runGetReport(deps: McpDeps, args: { task: string; section?: strin
     if (args.mark_pulled === false) return;
     if (acknowledge) { await markRead(r.signature); return; }
     if (args.section) return;
-    const file = path.join(path.dirname(ctx.config.path), 'report-read-progress.json');
-    await withReportLock(`${file}.lock`, async () => {
-      let reads: Record<string, [number, number][]> = {};
-      try { const parsed = JSON.parse(fs.readFileSync(file, 'utf8')); for (const [key, value] of Object.entries(parsed)) {
-        if (typeof value === 'number' && Number.isFinite(value)) reads[key] = [[0, value]];
-        else if (Array.isArray(value)) reads[key] = value.filter(v => Array.isArray(v) && v.length === 2 && v.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0)) as [number, number][];
-      } } catch { /* first read */ }
-      const key = `${deps.clientId ?? 'direct'}:${record.task}:${record.attemptId ?? record.started}:${r.signature}`;
-      const ranges = [...(reads[key] ?? []), [r.start_byte, r.end_byte] as [number, number]].sort((a, b) => a[0] - b[0]);
-      const merged: [number, number][] = [];
-      for (const range of ranges) { const last = merged.at(-1); if (last && range[0] <= last[1]) last[1] = Math.max(last[1], range[1]); else merged.push([...range]); }
-      reads[key] = merged;
-      if (merged[0]?.[0] === 0 && merged[0][1] >= r.bytes) await markRead(r.signature);
-      await ctx.runner.writeFile(file, JSON.stringify(Object.fromEntries(Object.entries(reads).slice(-256))));
-    });
+    await deferReportPage(ctx, record, r.signature, deps.clientId ?? 'direct', r.start_byte, r.end_byte, r.bytes);
   };
   return { ...render(r, acknowledge), onDelivered: delivered };
 }
 
 async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; all?: boolean | undefined; mode?: string; detail?: boolean; offset?: number; limit?: number; ack?: boolean; cursor?: string } = {}): Promise<ToolResult> {
   const ctx = deps.context(() => {});
-  const everyRow = await collectStatus(ctx);
+  const everyRow = directReportRows(ctx);
   const rows = args.cohort === undefined ? everyRow : cohortRows(everyRow, findCohort(ctx.config, args.cohort).name);
   const scope = `${args.cohort ?? ''}:${Boolean(args.all)}:${args.detail ? 'full' : args.mode ?? 'summary'}`;
   let snapshots = reportSelections.get(deps); if (!snapshots) { snapshots = new Map(); reportSelections.set(deps, snapshots); }
@@ -927,13 +921,16 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   const chosen = selection.rows.slice(offset, offset + (args.limit ?? 100));
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   if (chosen.some(row => { const current = rows.find(r => r.task === row.task); return !current || current.report !== 'yes' || current.attemptId !== row.attemptId; })) throw new AgentctlError('report selection changed; restart at offset 0 before acknowledging');
-  const records = listTaskRecords(ctx.config);
-  for (const row of chosen) { const record = records.find(r => r.task === row.task); if (record) await journalOutputs(ctx, record, { readOnly: true }).catch(() => undefined); }
+
+  for (const row of chosen) {
+    const record = findRecord(ctx, row.task), text = readReportText(ctx.config, record, row.reportPath);
+    await deliverReportOutputs(ctx, record, text, directOutputs(ctx, record, text)).catch(() => undefined);
+  }
   if (!args.detail && args.mode !== 'full') { const result = await pullSummaries(ctx, chosen, args.ack); return ok(`${result.text}\nnext_cursor: ${selection.id}:${offset + (result.delivered ?? 0)}; has_more: ${offset + (result.delivered ?? 0) < selection.rows.length}`); }
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   const { text, pulled } = joinReports(chosen, ctx);
   const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}; marked as pulled after complete delivery: ${pulled.map(p => p.task).join(', ')}`;
-  return { text: `${head}\n\n${text}\nnext_cursor: ${selection.id}:${offset + chosen.length}; has_more: ${offset + chosen.length < selection.rows.length}`, onDelivered: () => markPulled(ctx, chosen) };
+  return { text: `${head}\n\n${text}\nnext_cursor: ${selection.id}:${offset + chosen.length}; has_more: ${offset + chosen.length < selection.rows.length}`, onDelivered: () => markPulled(ctx, chosen, true) };
 
 }
 
@@ -2028,8 +2025,8 @@ export async function applyMcpRequest(deps: McpDeps, request: McpRequest): Promi
   let scope: unknown;
   if (request.tool === 'gc' && request.scope === null) throw new AgentctlError('GC request has no confirmed preview');
   if (request.scope !== null) {
-    scope = request.tool === 'gc' ? scopeMcpGc(ctx, request.args, await planMcpGc(ctx, request.args, true)) : await confirmationScope(ctx, request.tool, request.args);
-    if (JSON.stringify(canonical(confirmationTargets(request.tool, scope))) !== request.scope) {
+    scope = request.tool === 'gc' ? scopeMcpGc(ctx, request.args, await planMcpGc(ctx, request.args, true)) : await confirmationScope(ctx, request.tool, request.args, {apply: true});
+    if (!sameConfirmationScope(request.scope, JSON.stringify(canonical(confirmationTargets(request.tool, scope))))) {
       throw new AgentctlError(`changed preview: the ${request.tool} target scope changed since the preview; nothing was done`, 'Call the tool again without confirm, show the new scope to the user and confirm that.');
     }
   }
@@ -2091,16 +2088,71 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     }
     return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, project(v)]));
   };
-  return project(scope);
+  const projected = project(scope) as {directTaskPreview?: boolean; tasks?: Record<string, unknown>[]; summary?: string[]};
+  if (projected?.directTaskPreview) {
+    const {summary: _summary, ...identity} = projected;
+    return {...identity, tasks: projected.tasks?.map(({line: _line, hasReport: _report, ...identity}) => identity)};
+  }
+  return projected;
+}
+
+function explicitTaskPreview(name: string, args: Record<string, unknown>): boolean {
+  return ['close', 'cancel'].includes(name) && !args.cohort && !args.pulled &&
+    (typeof args.task === 'string' || Array.isArray(args.tasks) && args.tasks.length > 0);
+}
+/** An unknown bounded observation never claims a window is gone; watch must resolve it before acting. */
+function sameConfirmationScope(expected: string, actual: string): boolean {
+  if (expected === actual) return true;
+  const before = JSON.parse(expected), after = JSON.parse(actual);
+  if (!before?.directTaskPreview || !after?.directTaskPreview) return false;
+  for (const item of before.tasks) if (item.windowAlive === null) {
+    const fresh = after.tasks.find((t: {task: string}) => t.task === item.task);
+    if (fresh) { fresh.windowAlive = null; if (item.kind === null) fresh.kind = null; }
+  }
+  return JSON.stringify(canonical(before)) === JSON.stringify(canonical(after));
+}
+
+async function directTaskScope(ctx: Context, name: string, args: Record<string, unknown>, opts: {apply?: boolean; clock?: BudgetClock}): Promise<unknown | undefined> {
+  if (!explicitTaskPreview(name, args)) return undefined;
+  if (name === 'cancel' && [args.task !== undefined, args.tasks !== undefined, args.cohort !== undefined].filter(Boolean).length !== 1) throw new AgentctlError('give either task or cohort');
+  const ids = (args.tasks as string[] | undefined) ?? [args.task as string];
+  const records = new Map<string, TaskRecord>();
+  const entries = name === 'cancel' ? readQueue(ctx.config) : [];
+  for (const id of ids) {
+    const record = readTaskRecordById(ctx.config, id.trim());
+    if (record) records.set(record.task, record);
+    else if (!entries.some(e => e.task.toLowerCase() === id.trim().toLowerCase())) return undefined; // existing prefix/orphan semantics
+  }
+  // Read only the named records and their explicit move links; apply checks the complete authoritative chain.
+  if (name === 'cancel' && !opts.apply) for (const record of records.values()) {
+    for (const id of [record.continues, record.supersededBy]) if (id && !records.has(id)) {
+      if (records.size >= 128) throw new AgentctlError('cancel move chain exceeds 128 tasks; inspect it with the CLI');
+      const linked = readTaskRecordById(ctx.config, id);
+      if (linked) records.set(linked.task, linked);
+    }
+  }
+  const windows = opts.apply ? undefined : await withResponseBudget(async () => {
+    const hosts = [...new Set([...records.values()].flatMap(r => r.host ? [r.host] : []))];
+    const local = [...records.values()].some(r => !r.host);
+    return (await Promise.all([...(local ? [ctx.localTmux.listWindows()] : []), ...hosts.map(host => ctx.hosts.tmux(host).listWindows())])).flat();
+  }, () => null, opts.clock, 250);
+  if (name === 'close') return {directTaskPreview: true,
+    tasks: await planClose(ctx, [...records.keys()], {rmWorktree: Boolean(args.remove_worktree), ...(!opts.apply ? {previewWindows: windows} : {})}), records: [...records.values()]};
+  const plan = await planCancel(ctx, ids, {reason: (args.reason as string | undefined)?.trim() || undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp',
+    ...(!opts.apply ? {preview: {records: [...records.values()], windows: windows!}} : {})});
+  return {directTaskPreview: true, summary: plan.summary, tasks: plan.items.map(({task, kind, record, entry, blocks, line, hasReport, windowAlive}) =>
+    ({task, kind: !opts.apply && windows === null && record ? null : kind, record, entry, blocks, line, hasReport, windowAlive: opts.apply ? kind === 'live' : windowAlive}))};
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
-async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>, opts: {apply?: boolean; clock?: BudgetClock} = {}): Promise<unknown> {
   if (name === 'hosts_pause' || name === 'hosts_resume') {
     const host = String(args.host);
     assertHost(ctx.config, host);
     if (name === 'hosts_pause') hostPauseUntil(args.until as string | undefined, ctx.runner.now());
     return { host, current: manualHostPause(ctx.config, host), until: args.until ?? null };
   }
+  const direct = await directTaskScope(ctx, name, args, opts);
+  if (direct !== undefined) return direct;
   if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
   if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, limitSettings: ctx.config.limitSettings, profile: ctx.config.limitRuntime.profile, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config, ctx.runner.now()) };
@@ -2335,7 +2387,7 @@ for (const tool of MCP_TOOLS) {
     }
     if (!confirm && tool.name === 'gc' && !prepared && deferMcpWrites(ctx)) return requestGcPreview(deps, effective);
     let scope: unknown = prepared;
-    try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective))); }
+    try { scope ??= accepting ? null : await (confirm ? confirmationScope(ctx, tool.name, effective, {apply: true}) : observeHostWindows(() => confirmationScope(ctx, tool.name, effective, {clock: deps.budgetClock}))); }
     catch (e) { audit(ctx, { tool: tool.name, outcome: 'error', detail: errorMessage(e) }); throw e; }
     if (tool.name === 'gc') scope = scopeMcpGc(ctx, effective, scope as GcPlan, deps.clientId);
     // Argument identity is independent of mutable runtime facts. Destructive scopes are checked separately.
@@ -2343,6 +2395,7 @@ for (const tool of MCP_TOOLS) {
     if (!confirm) {
       let result: ToolResult;
       if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\n${tool.name === 'queue' ? readMcpRequests(ctx.config).filter(r => r.tool === 'queue_rm' && ['pending', 'applying'].includes(r.status) && (scope as {specs: ResolvedSpec[]}).specs.some(s => s.task === r.task)).map(r => `${r.task}: oczekuje queue_rm (request ${r.id}); use replace: true`).join('\n') : ''}\n${effective.replace ? 'replace: true – remove and re-add in one watch step.' : ''}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
+      else if (tool.name === 'cancel' && (scope as {directTaskPreview?: boolean}).directTaskPreview) result = await writeTool(deps, 'cancel', {}, async () => ({text: `${(scope as {summary: string[]}).summary.join('\n')}\n\nNot cancelled yet. Show this to the user and ask; if they agree, call cancel again with the same arguments and confirm: true.\nWatch rechecks the full move chain, queue dependencies and windows at apply time.`, executed: false, announce: ''}));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await observeHostWindows(() => original(deps, args));
       else if (tool.name === 'send') result = await observeHostWindows(() => writeTool(deps, 'send', { task: String(input.task) }, async () => ({
         text: await previewSend(ctx, input as unknown as SendMcpArgs, scope as Awaited<ReturnType<typeof sendScope>>),
@@ -2358,12 +2411,13 @@ for (const tool of MCP_TOOLS) {
         pending.set(token, { key, arguments: arguments_, raw: input, scope: scopeIdentity, at: ctx.runner.now(), ttlS: ctx.config.preview.ttlS, ...(tool.name === 'new' || tool.name === 'queue' ? { planned: (scope as { specs: ResolvedSpec[] }).specs.map(plannedOrder) } : {}) });
         issuedPreviewTokens.set(token, { session, state: 'pending' });
         if (issuedPreviewTokens.size > 10000) issuedPreviewTokens.delete(issuedPreviewTokens.keys().next().value!);
-        if (tool.name === 'send' || tool.name === 'gc') result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
-        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${['send', 'gc'].includes(tool.name) ? '' : `\npreview_token: ${token}`}`;
+        const tokenFirst = ['send', 'gc', 'close', 'cancel'].includes(tool.name);
+        if (tokenFirst) result = { ...result, text: `preview_token: ${token}\n${result.text}`, data: { preview_token: token } };
+        result.text += `\npreview_ttl_s: ${ctx.config.preview.ttlS}; expires_at: ${new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString()}; expires_at_local: ${formatLocalTime(new Date(ctx.runner.now() + ctx.config.preview.ttlS * 1000).toISOString())}${tokenFirst ? '' : `\npreview_token: ${token}`}`;
       }
       return result;
     }
-    if (preview!.scope !== scopeIdentity) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
+    if (!sameConfirmationScope(preview!.scope, scopeIdentity)) return deny(`changed preview: invalidated by ${lastPreviewMutation.get(deps) ?? 'external operation'} (${tool.name} target scope changed)`);
     // Another confirm may have completed while this one checked the scope.
     if (token && receipts.has(token)) return (await replay())!;
     const taskIds = typeof effective.spec === 'string' && tool.name !== 'consult' ? splitSpecs(effective.spec, 'confirmation').map(s => String(s.header.task)) : [String(effective.task ?? tool.name)];
@@ -2539,7 +2593,7 @@ for (const tool of MCP_TOOLS.filter(t => capacityCarriers.has(t.name))) {
     // An accepted confirm (P93/P93b) answers without the footer: it reads tmux and the disk, which a loaded host may not run in time.
     const accepted = args.confirm && (['new', 'queue'].includes(tool.name) || typeof (result.data as { request?: unknown } | undefined)?.request === 'string');
     const explicit = args.detail === true || args.capacity === true;
-    const footer = accepted || ['new', 'queue'].includes(tool.name) ? []
+    const footer = accepted || ['new', 'queue'].includes(tool.name) || tool.name === 'close' && !args.confirm && explicitTaskPreview(tool.name, args) ? []
       : tool.name === 'close' && !args.confirm ? await observeHostWindows(() => capacityFooter(deps, ctx, explicit, false))
       : await capacityFooter(deps, ctx, explicit);
     // Core new/queue helpers also serve the CLI. Remove only their display footer here.
@@ -2807,6 +2861,8 @@ const lastReads = new WeakMap<McpDeps, Map<string, {at: number; result: ToolResu
 for (const tool of MCP_TOOLS) {
   const run = tool.run;
   tool.run = async (deps, args) => {
+    if (['get_report', 'pull_ready', 'list_reports', 'response_page'].includes(tool.name)) return guarded(() => run(deps, args));
+    const budgetS = deps.context(() => {}).config.mcp.responseBudgetS ?? 8;
     const key = `${tool.name}:${JSON.stringify(args)}`;
     const saved = lastReads.get(deps) ?? new Map<string, {at: number; result: ToolResult}>(); lastReads.set(deps, saved);
     return withResponseBudget(async () => {
@@ -2815,6 +2871,10 @@ for (const tool of MCP_TOOLS) {
       return result;
     }, () => {
       const ctx = deps.context(() => {});
+      if (!args.confirm && explicitTaskPreview(tool.name, args)) {
+        const ids = (args.tasks as string[] | undefined) ?? [args.task as string];
+        return fail(`${tool.name} preview could not resolve task state within ${budgetS} s: ${ids.map(id => taskFile(ctx.config, windowName(id))).join(', ')}`);
+      }
       const entries = readQueue(ctx.config);
       const queue = `Durable queue (${entries.length}; first 20):\n` + entries.slice(0, 20).map(e => `${e.task}${e.owner ? ` (${e.owner})` : ''}: ${e.status === 'queued' ? 'registered' : e.status}`).join('\n');
       const cached = saved.get(key);
@@ -2833,12 +2893,14 @@ for (const tool of MCP_TOOLS) {
       }
       const watchAt = snapshotTools.has(tool.name) ? watchSnapshotTime(ctx.config) : undefined;
       const watchAge = watchAt === undefined ? '' : [`Watch snapshot age: ${Math.max(0, (ctx.runner.now() - watchAt) / 1000).toFixed(1)} s.`, watchSnapshotWarning(watchAt, ctx.runner.now())].filter(Boolean).join(' ') + '\n';
-      const prefix = `${watchAge}${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: 8 s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
+      const readyReports = tool.name === 'events_since' ? directReportRows(ctx).filter(r => !r.hidden && !r.pulled && r.state === 'report-ready' && (!args.cohort || cohortKey(r.cohort ?? '') === cohortKey(String(args.cohort)))) : [];
+      const reports = tool.name === 'events_since' ? `Reports to pull: ${readyReports.slice(0, 10).map(r => r.task).join(', ') || 'none'} (${readyReports.length} raportów do pobrania)\n` : '';
+      const prefix = `${reports}${watchAge}${cached ? ageLine(cached.at, ctx.runner.now()) + '\n' : ''}${inbox}Partial result: ${budgetS} s response budget exhausted; ${stale ? 'cache older than 5 min; short queue/journal fallback replaces stale full table' : cached ? 'last cached response follows' : 'durable queue snapshot follows'}. Retry reads; retry a confirm only with the same preview_token.\n`;
       const wireBudget = ctx.config.mcp.maxResponseKb * 1024;
       let text = prefix + (stale || !cached ? durableStatus(ctx, scopedChat) : scopedChat ? cached.result.text : [queue, cached.result.text].join('\n'));
       while (responseWireBytes(ok(text)) > wireBudget && text.length > 1) text = text.slice(0, Math.max(1, Math.floor(text.length * 0.8)));
       return { text };
-    }, deps.budgetClock);
+    }, deps.budgetClock, budgetS * 1000);
   };
 }
 

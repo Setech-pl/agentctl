@@ -89,7 +89,8 @@ it('P47: omit unchanged footers, opt in explicitly, warn once and report thresho
   assert.ok(!queued.isError, queued.text);
   assert.doesNotMatch(queued.text, /Plans:|plan:|capacity:|Disk:/);
   const close = await f.call('close', { task: 'C-1', detail: true });
-  assert.match(close.text, /capacity:/);
+  assert.match(close.text, /^preview_token:/);
+  assert.doesNotMatch(close.text, /capacity:|Disk:/, 'explicit-ID previews defer heavy capacity collection too');
   const closed = await f.call('close', { task: 'C-1', detail: true, confirm: true });
   assert.ok(!closed.isError, closed.text); assert.match(closed.text, /capacity:/);
 });

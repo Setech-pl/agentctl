@@ -1,3 +1,5 @@
+import { directReportRows } from './direct-reports.ts';
+import { selectReady } from './pull.ts';
 import { channelMessages, wallAge } from './wall.ts';
 import { journalOutputs } from './outputs.ts';
 import { listArchivedRecords, listTaskRecords, snapshotRecords, type TaskRecord } from './taskstore.ts';
@@ -107,6 +109,7 @@ export interface EventsSummary {
   /** Reports ready and not pulled yet. */
   reportsToPull: string[];
   reportCount?: number;
+  reportsToPullTotal?: number;
 }
 
 export interface EventsReport {
@@ -173,6 +176,9 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
   const ratingKey = `${config.path}|${opts.client}`;
   const attention = open.filter(r => ['limited', 'needs-attention', 'needs-input', 'needs-trust', 'waiting'].includes(r.state)
     || (r.reportCandidate && r.report !== 'yes'));
+  // Report files decide readiness even when status rows are cached or partial (READFAST0269-COUNT); status adds remote rows.
+  const direct = selectReady(directReportRows(ctx).filter(r => !r.hidden && (!inScope || inScope(r)) && (cohort === null || (r.cohort !== null && cohortKey(r.cohort) === cohortKey(cohort)))), false);
+  const readyTasks = [...new Set([...accounting.reports.map(r => r.task), ...direct.map(r => r.task)])].sort((a, b) => a.localeCompare(b));
   const summary: EventsSummary = {
     active: accounting.active.length,
     activeTasks: accounting.active.slice(0, 6).map(r => r.task),
@@ -183,8 +189,9 @@ export async function collectEvents(ctx: Context, opts: { client: EventClient; s
     ...(attention.length > 6 ? {needYouCount: attention.length} : {}),
     queued: queue.length,
     queuedTasks: queue.slice(0, 6).map(e => e.task),
-    reportsToPull: accounting.reports.map(r => r.task).sort((a, b) => a.localeCompare(b)),
-    reportCount: accounting.reports.length,
+    reportsToPull: readyTasks,
+    reportCount: readyTasks.length,
+    reportsToPullTotal: readyTasks.length,
   };
   // Bound the complete JSON and text forms before advancing the persistent cursor.
   const report: EventsReport = { client: opts.client, since: new Date(since.ms).toISOString(), sinceLabel: since.label, ...(since.note ? { note: since.note } : {}), ...(inScope ? {otherChatEvents: 0} : {}), cohort, events, summary, away: awayView(config), markerMoved: false, has_more: false, next_cursor: '' };
@@ -341,7 +348,7 @@ const KIND_LABEL: Record<JournalEntry['kind'], string> = {
 };
 
 export function summaryLine(s: EventsSummary): string {
-  const reports = s.reportCount ?? s.reportsToPull.length;
+  const reports = s.reportCount ?? s.reportsToPullTotal ?? s.reportsToPull.length;
   const parts = [`${s.active} aktywne${taskNames(s.activeTasks ?? [])}`, ...(s.working ? [`${s.working} pracuje${taskNames(s.workingTasks ?? [])}`] : []), `${s.queued} w kolejce${taskNames(s.queuedTasks ?? [])}`, reports > 0 ? `${reports} ${plural(reports, 'raport', 'raporty', 'raportów')} do pobrania${s.reportsToPull.length ? ` (${s.reportsToPull.join(', ')}${reports > s.reportsToPull.length ? ', …' : ''})` : ''}` : 'brak raportów do pobrania'];
   if (s.unmarked) parts.push(`${s.unmarked} ${plural(s.unmarked, 'zadanie', 'zadania', 'zadań')} bez oceny`);
   if (s.needYou.length > 0) parts.push(`czeka na Ciebie${s.needYouCount ? ` (${s.needYouCount})` : ''}: ${s.needYou.join(', ')}`);

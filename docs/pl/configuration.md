@@ -305,6 +305,7 @@ Zaznaczenie pokrywa całą szerokość panelu listy, łącznie z przerwami międ
 | `gc.after_integration` | `propose` | `propose` tworzy plan GC z identyfikatorem żądania po przesunięciu lokalnego `main`/`master` i przekazuje wiadomość WALL każdemu czatowi będącemu właścicielem zadań. `off` wyłącza propozycje. |
 | `mcp.client` | — | Opcjonalny wspólny sufiks kursora; domyślnie sesje niezależne. |
 | `mcp.max_response_kb` | `8` | Budżet KiB; kontynuacje przez response_page. |
+| `mcp.response_budget_s` | `8` | Budżet MCP w sekundach (>0–50), domyślnie 8. Na mocno obciążonym hoście zalecane 25. Bezpośredni odczyt raportów omija ten wspólny budżet. |
 
 ## Zarządzanie dyskiem
 

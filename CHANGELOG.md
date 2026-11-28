@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Preserve cancellation preview count, reason and owner confirmation wording on the direct path. / Bezpośredni podgląd anulowania zachowuje liczbę zadań, powód i treść prośby o zgodę właściciela.
+
+- READFAST0269-PREVIEW: Exact-ID MCP close/cancel previews read only target state and explicit move links, bound window observation to 250 ms, return the token first and defer heavy validation to watch. / Podgląd close/cancel dla pełnych ID czyta stan wskazanych zadań i ich powiązania move, ogranicza sprawdzanie okien do 250 ms, zwraca token na początku i zostawia ciężką walidację watch.
+
+- READFAST0269-CLI: Keep CLI pull marking synchronous; only MCP may defer acknowledgement to watch. / CLI zapisuje odbiór raportu przed powrotem; tylko MCP może odroczyć potwierdzenie do watch.
+
+- READFAST0269-HARNESS: Keep long task-owned tmux sockets within the limit using a shorter internal directory and an in-sandbox cleanup alias. / Długie ścieżki socketów tmux mieszczą się w limicie dzięki krótszemu katalogowi i aliasowi sprzątania wewnątrz sandboxa.
+
+- READFAST0269 I/O regression counters include bounded report reads. / Liczniki regresji I/O uwzględniają ograniczony odczyt raportów.
+
+- READFAST0269 prepared for 0.26.5. / Poprawka READFAST0269 przygotowana do 0.26.5.
+
 - A prompt delivery failure gets one journal entry after watch restarts. Cohort completion notices include the latest task move even while the filesystem notification is pending. / Błąd dostarczenia promptu trafia do dziennika raz po restarcie watch. Powiadomienie o ukończeniu kohorty uwzględnia przeniesienie zadania także przed dotarciem zdarzenia z systemu plików.
 
 - A paused automatic GC plan survives a temporarily unavailable free-space reading. / Wstrzymany plan automatycznego GC pozostaje dostępny, gdy odczyt wolnego miejsca chwilowo nie działa.
@@ -124,6 +136,37 @@ Field fixes for launch recovery and operator reads / Poprawki wznowień i widok�
 ## [0.27.0] - 2026-11-22
 
 Owner-controlled limits and proportional chat quotas / Limity właściciela i proporcjonalne kwoty czatów. [Release notes (EN)](docs/release-notes/0.27.0.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.0.pl.md).
+
+## [0.26.5] - 2026-11-27
+
+- Exact-ID close/cancel previews remain available with blocked status collection; watch validates the full scope before applying. / Podgląd close/cancel dla pełnych ID działa przy zablokowanym zbieraniu statusu; watch sprawdza pełny zakres przed wykonaniem.
+
+- READFAST0269-COMPAT: Preserve the settled-outputs gate, fast local WALL publication and missing-file diagnostics; busy publication and Git validation go to watch. / Zachowany próg gotowości outputs, szybka publikacja WALL i komunikaty o brakującym pliku; zajęta publikacja i walidacja Git trafiają do watch.
+
+- READFAST0269-ACK: Slow acknowledgement locks defer the write without hiding a delivered report. / Wolna blokada potwierdzenia odkłada zapis bez ukrywania odczytanego raportu.
+- READFAST0269-COUNT: Events show the full ready-report count, with at most ten task names. / Zdarzenia pokazują pełną liczbę gotowych raportów i do dziesięciu nazw zadań.
+- READFAST0269: MCP reads reports directly from task files, bypassing status collection and the shared deadline; contended acknowledgements wait for watch. / MCP czyta raporty bezpośrednio z plików zadań, omija status i wspólny budżet; zajęte potwierdzenia czekają na watch.
+- Configure `mcp.response_budget_s` (default 8, maximum 50; recommend 25 under load). / Konfiguracja budżetu MCP (domyślnie 8, maksymalnie 50; zalecane 25 pod obciążeniem).
+
+## [0.26.4] - 2026-11-26
+
+- AUTOGC0266-SCALE: One automatic GC run shares one task inventory, one link/symlink index and one read of the reports, checks candidates lazily, yields to the event loop and stops at `disk.auto_gc.max_run_s` (default 300). / Jeden przebieg automatycznego GC korzysta z jednego spisu zadań, jednego indeksu linków i dowiązań oraz jednego odczytu raportów, sprawdza pozycje leniwie, oddaje pętlę zdarzeń i kończy po `max_run_s` (domyślnie 300).
+- AUTOGC0266-IGNORED: Automatic GC keeps worktrees with git-ignored files outside `disk.auto_gc.ignored_ok` (default `node_modules`, `.cache/vite`, `dist`, `coverage`, `.turbo`) and worktrees whose ignored files a report names. / Automatyczne GC zostawia worktree z plikami ignorowanymi spoza `ignored_ok` oraz takie, których ignorowane pliki wskazuje raport.
+- AUTOGC0266-QUEUE: Automatic GC keeps what queued, starting and needs-attention tasks need (`review_of`, `after`, `base: "@TASK"`, the task's own worktree and paths in the spec or prompt) and rechecks the queue under the start lock before it takes the path claim. / Automatyczne GC chroni to, czego potrzebują zadania w kolejce, w trakcie startu i wymagające uwagi, i sprawdza kolejkę ponownie pod blokadą startu.
+- AUTOGC0266-CLI: Only watch runs automatic GC; a CLI or MCP disk hold leaves a request for watch, and Ctrl-C on watch finishes the current item only. / Automatyczne GC uruchamia tylko watch; start z CLI lub MCP zostawia mu zlecenie, a Ctrl-C kończy tylko bieżącą pozycję.
+- AUTOGC0266-RELOAD: A config reload stops a run only when `disk.auto_gc` changed; path claims carry timestamps and the process start time; the journal records run duration and bytes freed (statfs). / Przeładowanie konfiguracji przerywa przebieg tylko po zmianie `disk.auto_gc`; zajęcia ścieżek mają znaczniki czasu; dziennik zapisuje czas przebiegu i odzysk według statfs.
+- CLAUDEHOOK0266: Claude Code 2.1.332 rejects prompt-type SessionStart hooks; agentctl's task hooks stay command-type (accepted by 2.1.323 and 2.1.332), a start warns about non-command SessionStart hooks in user/project settings, and the first prompt is confirmed by its transcript (identified by the attempt marker) also when no hook runs, locally and on SSH hosts. / Claude Code 2.1.332 odrzuca hooki SessionStart typu prompt; hooki zadań agentctl pozostają typu command, start ostrzega o obcych hookach SessionStart innego typu, a pierwszy prompt potwierdza transkrypt także bez hooków, lokalnie i na hostach SSH.
+
+[Release notes (EN)](docs/release-notes/0.26.4.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.26.4.pl.md).
+
+## [0.26.3] - 2026-11-26
+
+- READY0263-COMPOSER: Codex 0.167+ starts recognise the ready composer when the footer shows a service tier (`GPT-6.2-Sol medium Fast · <dir>`), also with ANSI codes, CRLF or padding in the capture. / Start Codexa 0.167+ rozpoznaje gotowe pole wpisywania, gdy stopka pokazuje poziom usługi, także z kodami ANSI, CRLF i pustymi wierszami w zrzucie.
+- READY0263-RECAPTURE: The readiness wait takes one more capture after its deadline and its timeout scales with load1/cores up to 180 s (`providers_config.<p>.ready_timeout_s`, default 60). / Oczekiwanie na gotowość wykonuje jeszcze jeden zrzut po upływie limitu, a limit rośnie z load1/rdzenie do 180 s.
+- READY0263-RETRY: A readiness timeout of a queued start waits once more in the same window; only a second timeout sets needs-attention. / Start z kolejki po przekroczeniu limitu gotowości czeka jeszcze raz w tym samym oknie; dopiero drugie przekroczenie ustawia needs-attention.
+- READY0263-QUEUED: A follow-up sent to a busy agent stays "queued – unconfirmed" after `delivery_confirm_s` until a hook or transcript confirms it, instead of needs-attention. / Wiadomość wysłana do zajętego agenta pozostaje „w kolejce agenta – niepotwierdzone” do potwierdzenia przez hook lub transkrypt, zamiast needs-attention.
+
+[Release notes (EN)](docs/release-notes/0.26.3.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.26.3.pl.md).
 
 ## [0.26.2] - 2026-11-26
 

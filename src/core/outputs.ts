@@ -345,7 +345,7 @@ export function outputsPending(config: Pick<Context['config'], 'reportSettleS'>,
 }
 
 /** Once per completed attempt, also across report edits, hooks and watcher restarts. */
-export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { readOnly?: boolean } = {}): Promise<void> {
+export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { readOnly?: boolean; parsed?: OutputData; lockTimeoutMs?: number } = {}): Promise<void> {
   if (ctx.runner.dryRun) return;
   const report = inspectReport(ctx.config, record, ctx.runner.now(), !record.attemptId);
   if (!report.ready || !report.signature || (record.attemptId && !report.sentinel && !report.structured)) return;
@@ -364,7 +364,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
       }
     }
     if (seen.includes(identity)) return;
-    const data = await readOutputs(ctx, record);
+    const data = opts.parsed ?? await readOutputs(ctx, record);
     // A closed task from before the protocol was never asked for the block: its absence is not a warning (a block it has is still journaled).
     if (!record.outputsProtocol && !data.outputs && !/^(?:```|~~~)agentctl-outputs\s*$/m.test(readReportText(ctx.config, record, record.report))) { await ctx.runner.writeFile(file, JSON.stringify([...seen, identity])); return; }
     // Journal is also the recovery ledger if a process died before writing outputs-seen.
@@ -388,7 +388,7 @@ export async function journalOutputs(ctx: Context, record: TaskRecord, opts: { r
       }
     }
     await ctx.runner.writeFile(file, JSON.stringify([...seen, identity]));
-  });
+  }, opts.lockTimeoutMs ?? 60_000);
 }
 
 export function aggregateOutputs(items: Array<{ task: string; data: OutputData; reviewOf?: string | null | undefined }>) {

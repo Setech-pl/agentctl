@@ -8,6 +8,7 @@ import { cancelFields, dropEntry, readQueue, writeCancelledRecord } from './queu
 import type { QueueEntry } from './queue.ts';
 import { matchKnownTask } from './resolve.ts';
 import { collectStatus } from './status.ts';
+import { inspectReport } from './report-state.ts';
 import type { StatusRow } from './status.ts';
 import { listTaskRecords, readTaskRecord, setHeaderFields, taskFile } from './taskstore.ts';
 import type { CancelSource, TaskRecord } from './taskstore.ts';
@@ -20,6 +21,8 @@ import { AgentctlError } from './util.ts';
  */
 
 export interface CancelOptions {
+  /** Exact-ID MCP preview avoids status collection and unrelated state files. */
+  preview?: { records: TaskRecord[]; windows: string[] | null };
   /** Why (free text, optional); kept in TASK.md. */
   reason?: string | undefined;
   /** `git worktree remove` (never --force) for the worktrees of a task that had one. */
@@ -29,6 +32,7 @@ export interface CancelOptions {
 }
 
 export interface CancelPlanItem {
+  windowAlive?: boolean | null;
   task: string;
   /** `live`: a tmux window runs; `finished`: a state file without a window; `queued`: an entry of the queue (no state file yet, or a failed start). */
   kind: 'live' | 'finished' | 'queued';
@@ -81,13 +85,13 @@ function partners(task: string, records: readonly TaskRecord[]): string[] {
 export async function planCancel(ctx: Context, inputs: string[], opts: CancelOptions = {}): Promise<CancelPlan> {
   const { config, runner, tmux } = ctx;
   if (inputs.length === 0) throw new AgentctlError('give at least one task to cancel', 'Example: agentctl cancel NC-42 --reason "wrong approach".');
-  const records = listTaskRecords(config);
+  const records = opts.preview?.records ?? listTaskRecords(config);
   const entries = readQueue(config);
   const targets = [
     ...records.map((r) => ({ task: r.task, window: r.window, alive: false })),
     ...entries.filter((e) => !records.some((r) => r.task === e.task)).map((e) => ({ task: e.task, window: e.task.toLowerCase(), alive: false })),
   ];
-  const live = new Set(runner.dryRun ? [] : await tmux.listWindows());
+  const live = opts.preview?.windows === null ? null : new Set(opts.preview?.windows ?? (runner.dryRun ? [] : await tmux.listWindows()));
 
   const chosen: { task: string; partnerOf?: string }[] = [];
   const add = (task: string, partnerOf?: string): void => {
@@ -103,7 +107,7 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
   }
 
   const selectedRecords = records.filter(r => chosen.some(c => c.task === r.task));
-  const rows = new Map((await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: selectedRecords, archived: [] }, orphans: false })).map(r => [r.task, r] as const));
+  const rows = new Map((opts.preview ? [] : await collectStatus(ctx, { progress: false, cachedOnly: true, records: { current: selectedRecords, archived: [] }, orphans: false })).map(r => [r.task, r] as const));
   const items: CancelPlanItem[] = [];
   const p = chosen.map((c) => c.task);
   for (const { task, partnerOf } of chosen) {
@@ -111,7 +115,7 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     const entry = entries.find((e) => e.task === task);
     const window = record?.window ?? task.toLowerCase();
     // A dry run asks tmux nothing: every task with a state file is taken for a running one, so the commands show.
-    const alive = runner.dryRun ? record !== undefined && !entry : live.has(window) || !!record?.host && !record.closed && !record.cancelled && ctx.hosts.connection(record.host).unreachable;
+    const alive = runner.dryRun ? record !== undefined && !entry : live === null ? !!record : live.has(window) || !!record?.host && !record.closed && !record.cancelled && ctx.hosts.connection(record.host).unreachable;
     if (record?.cancelled && !alive) {
       if (partnerOf) continue;
       throw new AgentctlError(`${task} is already cancelled`, record.cancelReason ? `Reason given: ${record.cancelReason}` : undefined);
@@ -123,10 +127,11 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     if (entry?.status === 'starting') throw new AgentctlError(`${task} is being started right now`, 'Wait for it to finish; then it is a task with a window that cancel can stop.');
     const kind: CancelPlanItem['kind'] = alive ? 'live' : record && !entry ? 'finished' : 'queued';
     const row: StatusRow | undefined = rows.get(task);
-    const hasReport = row?.report === 'yes';
+    const hasReport = opts.preview && record ? inspectReport(config, record, runner.now(), !record.attemptId && !alive).ready : row?.report === 'yes';
     const blocks = entries.filter((e) => e.task !== task && !p.includes(e.task) && e.after.includes(task)).map((e) => e.task);
     const worktrees = (record?.repos ?? []).map((r) => r.worktree);
     const notes: string[] = [];
+    if (!live) notes.push('window check deferred to watch');
     if (kind === 'live') notes.push(`${row?.state ?? 'running'}: interrupt${config.cancel.grace > 0 ? `, wait ${config.cancel.grace} s` : ''}, close the window`);
     else if (kind === 'queued') notes.push(entry?.status === 'failed' ? 'in the queue (its start failed): taken out' : 'in the queue: taken out, it never starts');
     else notes.push('no window: marked cancelled');
@@ -136,6 +141,7 @@ export async function planCancel(ctx: Context, inputs: string[], opts: CancelOpt
     items.push({
       task,
       kind,
+      ...(opts.preview ? {windowAlive: live?.has(window) ?? null} : {}),
       ...(record ? { record } : {}),
       ...(entry ? { entry } : {}),
       ...(partnerOf ? { partnerOf } : {}),

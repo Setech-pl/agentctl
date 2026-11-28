@@ -1,5 +1,6 @@
 import { reconcileHostYield } from './host-yield.ts';
 import { remoteAttachHint } from './host-runtime.ts';
+import { applyReportDeliveries } from './report-delivery.ts';
 import { attentionTick } from './attention.ts';
 import { tmuxLoss } from './tmux-loss.ts';
 import { maintainWall, OWNER_IDENTITY, postMessage } from './wall.ts';
@@ -503,6 +504,7 @@ export async function watchTick(ctx: Context, memory: WatchMemory, notifier: Not
   stage('collisions', () => collisionTick(ctx, memory.collisions, notifier, startLog));
   stage('machine load', () => recordMachineLoad(ctx));
   stage('disk alerts', async signal => diskTick(ctx, notifier, startLog, (await inventory()).all, disk, signal));
+  stage('report deliveries', () => applyReportDeliveries(ctx));
   stage('MCP notices', () => mcpWriteNotice(ctx, async text => { await notifier.notify('agentctl', text); }));
   stage('usage', async () => usageTick(ctx, notifier, startLog, (await inventory()).all));
   stage('phone', async () => { for (const line of await phoneTick(ctx)) await startLog(line); });
