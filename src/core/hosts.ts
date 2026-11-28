@@ -119,9 +119,12 @@ function parseHostPolicy(raw: Record<string, unknown>, where: string, p: Problem
   return { ...(Object.keys(limits).length ? { limits } : {}), ...(maxTotal ? { maxTotal } : {}), ...(loadThreshold ? { loadThreshold } : {}), ...(availability ? { availability } : {}) };
 }
 
+/** Configs before 0.27.3 could name an ordinary SSH host `local`; such an entry stays an SSH host, not the dispatcher policy. */
+export const isLegacyLocalHost = (local: unknown): boolean => isObject(local) && Object.hasOwn(local, 'ssh');
+
 export function parseLocalHost(raw: unknown, p: Problems): LocalHostConfig | undefined {
   const local = isObject(raw) ? raw.local : undefined;
-  if (local === undefined) return undefined;
+  if (local === undefined || isLegacyLocalHost(local)) return undefined;
   if (!isObject(local)) { p.add('config.hosts.local must be a mapping'); return undefined; }
   checkKeys(local, ['limits', 'max_total', 'load_threshold', 'availability', 'repos'], 'config.hosts.local', p);
   return { ...parseHostPolicy(local, 'config.hosts.local', p), repos: parseRepoPaths(local.repos ?? {}, 'config.hosts.local', p) };
@@ -162,7 +165,7 @@ export function parseHosts(v: unknown, p: Problems): Record<string, HostConfig> 
   }
   const hosts: Record<string, HostConfig> = {};
   for (const [name, raw] of Object.entries(v)) {
-    if (name === 'local') continue;
+    if (name === 'local' && !isLegacyLocalHost(raw)) continue;
     const where = `config.hosts.${name}`;
     if (name === 'auto') p.add('config.hosts.auto is reserved for placement');
     parseHostName(name, p);

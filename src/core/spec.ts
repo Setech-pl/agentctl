@@ -269,12 +269,17 @@ export function specHost(raw: RawSpec, config: GlobalConfig, ownerOverride?: str
   return (owner && config.placement.chats[owner.toLowerCase()]) || config.placement.cohorts[cohort] || config.placement.default;
 }
 
+/** An explicit `host: local` keeps addressing a legacy SSH host named `local` (see isLegacyLocalHost); defaults still mean the dispatcher. */
+export function legacyLocalTarget(raw: RawSpec, config: Pick<GlobalConfig, 'hosts'>): boolean {
+  return typeof raw.header.host === 'string' && raw.header.host.trim() === 'local' && Boolean(config.hosts.local);
+}
+
 /** Validate a raw spec and merge global config < project config < spec. */
 export function resolveSpec(raw: RawSpec, ctx: ResolveContext): ResolvedSpec {
   const { config } = ctx;
   const requestedHost = specHost(raw, config, ctx.owner);
   const effectiveHost = requestedHost === 'auto' ? ctx.placedHost : requestedHost;
-  const remoteName = effectiveHost && effectiveHost !== 'local' ? effectiveHost : undefined;
+  const remoteName = effectiveHost && effectiveHost !== 'local' ? effectiveHost : legacyLocalTarget(raw, config) ? 'local' : undefined;
   const loadProject = remoteName ? () => undefined : ctx.loadProject ?? loadProjectConfig;
   const p = new Problems();
   const h = raw.header;

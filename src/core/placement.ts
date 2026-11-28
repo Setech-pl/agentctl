@@ -8,7 +8,7 @@ import { checkHostLimit } from './host-limits.ts';
 import type { HostSlot } from './host-limits.ts';
 import { readHostsCache } from './hosts.ts';
 import { collectMachine } from './machine.ts';
-import { resolveSpec, specHost, splitSpecs } from './spec.ts';
+import { legacyLocalTarget, resolveSpec, specHost, splitSpecs } from './spec.ts';
 import { findRecordAnywhere } from './taskstore.ts';
 
 export interface PlacementOrder {
@@ -30,6 +30,7 @@ export function choosePlacement(config: GlobalConfig, order: PlacementOrder, liv
   const raw = splitSpecs(order.spec)[0]!;
   const requested = specHost(raw, config, order.owner);
   const auto = requested === 'auto';
+  if (legacyLocalTarget(raw, config)) return { host: 'local', reason: '[local] host SSH wskazany w zleceniu' };
   if (!auto && requested === 'local' && !config.localHost && !raw.header.reuse_worktree) {
     const available = hostAvailability(config, 'local', undefined, now);
     // High load only alerts unless the owner opts in to holding starts on it (queue.hold_on_load).
@@ -54,7 +55,7 @@ export function choosePlacement(config: GlobalConfig, order: PlacementOrder, liv
   const hardAffinity = reuse ? reuse.host ?? 'local' : order.reuse && related[0] || undefined;
   if (source.reuseWorktree && !reuse?.closed) return { hold: `[${requested}] czeka na worktree ${source.reuseWorktree}` };
   if (hardAffinity && !auto && hardAffinity !== requested) return { hold: `[${requested}] worktree zadania znajduje się na [${hardAffinity}]` };
-  const remotes = Object.keys(config.hosts).filter(name => {
+  const remotes = Object.keys(config.hosts).filter(name => name !== 'local').filter(name => {
     const h = config.hosts[name]!;
     return h.providers.includes(order.agent) && source.repos.every(r => Object.hasOwn(h.repos, (r.name ?? path.basename(r.path)))) && !source.review && !source.reviewMode && !source.mergeBaseCheck;
   });

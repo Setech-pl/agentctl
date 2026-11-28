@@ -2005,6 +2005,16 @@
       "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version"
     ]
   },
+  "REL0273-LEGACY-LOCAL": {
+    "rev": "737d7520361aaa63a33c25e58e1c927ed0a06003",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0273-LEGACY-LOCAL: a legacy SSH host named local still loads and receives explicit host: local orders",
+      "REL0273-LEGACY-LOCAL: a legacy SSH host named local still loads and receives explicit host: local orders"
+    ]
+  },
   "REVIEW0256-DOWNGRADE": {
     "rev": "v0.27.1",
     "outcome": "FAILS",
