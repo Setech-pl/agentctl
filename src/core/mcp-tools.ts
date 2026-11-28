@@ -1,3 +1,6 @@
+import { hostPlacementStats } from './host-commands.ts';
+import { assertHost, manualHostPause, hostPauseUntil, setHostPause } from './host-availability.ts';
+import { probeLocalHost } from './host-health.ts';
 import { gcLocation, pathsOverlap } from './start-paths.ts';
 import { trashOwners } from './trash.ts';
 import { chatOwner, effectiveChatCeilings, quotaWarnings } from './chat-quotas.ts';
@@ -1232,7 +1235,7 @@ function chatSetup(header: Record<string, unknown>): boolean {
 /** What a preview planned, as the accepted entries record it (P93); without the preview's plan the spec as written. */
 function acceptedOrders(ctx: Context, raws: RawSpec[], planned: AcceptedOrder[] | undefined, owner?: string): AcceptedOrder[] {
   if (planned && planned.length === raws.length && planned.every((o, i) => o.task === String(raws[i]!.header.task ?? ''))) return planned;
-  return raws.map((raw) => plannedOrder({ ...resolveSpec(raw, { config: ctx.config }), ...(owner ? {owner} : {}) }));
+  return raws.map((raw) => plannedOrder({ ...resolveSpec(raw, { config: ctx.config, owner }), ...(owner ? {owner} : {}) }));
 }
 export function plannedOrder(s: ResolvedSpec): AcceptedOrder {
   return { task: s.task, ...(s.owner ? {owner: s.owner} : {}), agent: s.agent, model: s.model, effort: s.effort, priority: s.priority, after: s.after, ...(s.afterVerdicts ? { afterVerdicts: s.afterVerdicts } : {}), ...(s.reviewOf ? { reviewOf: s.reviewOf } : {}), ...(s.cohort ? { cohort: s.cohort } : {}) };
@@ -1825,14 +1828,17 @@ MCP_TOOLS.push(
   extraRead('doctor', 'doctor', 'Diagnose the installation, permissions and disk', { project: optionalText }, async (ctx, a) => runDoctor(ctx.runner, () => ctx.config, a.project as string ?? null, undefined, undefined, undefined, undefined, { cachedOnly: true })),
   extraRead('equivalents', 'capacity', 'Read the equivalents table for active providers. Kimi effort medium is mapped to high with a warning (low/high/max supported)', {}, async (ctx) => ctx.config.equivalents),
   extraRead('config_show', 'doctor', 'Read effective configuration, queue holds and chat ceilings with secrets masked', {}, async (ctx) => ({ queue_hold: Object.fromEntries(activeProviders(ctx.config).map((id) => [id, holdText(ctx.config.usage.queueHold[id])])), ...(ctx.config.quotas ? {quota_warnings: quotaWarnings(ctx.config), effective_chat_ceilings: effectiveChatCeilings(ctx.config)} : {}), ...(redactConfig(ctx.config) as object) })),
-  extraRead('hosts', 'hosts', 'Read remote host health over SSH: per host the state (reachable / unreachable / auth-failed / host-key-*), latency, GPU (nvidia-smi, null when absent), free disk in work_dir, tmux, each provider CLI (present, version, best-effort logged in/out) and repo clones (HEAD, origin). Cached ~60s by "agentctl hosts"; refresh: true probes now. A spec with "host: <name>" starts the task remotely, with a local report mirror', { refresh: z.boolean().optional() }, async (ctx, a) => {
-    if (Object.keys(ctx.config.hosts).length === 0) return { hosts: [], note: 'no hosts: section in the config' };
+  extraRead('hosts', 'hosts', 'Read host health, placement slots, availability and perf reservations. Prefer host: auto for routine tasks. Pin pc for GPU or Windows and local for Mac-only tools such as Keychain', { refresh: z.boolean().optional() }, async (ctx, a) => {
     const fresh = a.refresh ? undefined : readHostsCache(process.env, ctx.runner.now(), 60_000);
-    if (fresh) return { cached: true, writtenAt: fresh.writtenAt, hosts: fresh.hosts };
-    const hosts = await probeHosts(ctx.runner, ctx.config.hosts, ctx.config);
-    await writeHostsCache(ctx.runner, hosts);
-    return { cached: false, hosts };
+    const hosts = fresh?.hosts ?? (a.refresh ? [
+      await probeLocalHost(ctx.runner, ctx.config),
+      ...await probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { timeoutMs: 5000 }),
+    ] : readHostsCache()?.hosts ?? []);
+    if (a.refresh) await writeHostsCache(ctx.runner, hosts);
+    return { cached: !a.refresh, writtenAt: fresh?.writtenAt, hosts, placement: await hostPlacementStats(ctx, hosts), policy: ctx.config.placement };
   }),
+  extraWrite('hosts_pause', 'hosts pause <HOST> [--until <TIME>]', 'Reserve a host for the owner', { host: z.string().min(1).max(32), until: optionalText }, async (ctx, a) => setHostPause(ctx, a.host, true, a.until)),
+  extraWrite('hosts_resume', 'hosts resume <HOST>', 'Clear the manual host reservation', { host: z.string().min(1).max(32) }, async (ctx, a) => setHostPause(ctx, a.host, false)),
   extraRead('manager_status', 'manager --url', 'Inspect the manager session', {}, async (ctx) => managerView(ctx)),
   extraRead('away_status', 'away status', 'Inspect away mode', {}, async (ctx) => awayReport(ctx.config)),
   extraRead('report', 'report <TASK>', 'Inspect report location and candidates', { task: taskArg }, async (ctx, a) => reportInfo(ctx, a.task as string)),
@@ -2089,6 +2095,12 @@ function confirmationTargets(name: string, scope: unknown): unknown {
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
 async function confirmationScope(ctx: Context, name: string, args: Record<string, unknown>): Promise<unknown> {
+  if (name === 'hosts_pause' || name === 'hosts_resume') {
+    const host = String(args.host);
+    assertHost(ctx.config, host);
+    if (name === 'hosts_pause') hostPauseUntil(args.until as string | undefined, ctx.runner.now());
+    return { host, current: manualHostPause(ctx.config, host), until: args.until ?? null };
+  }
   if (name === 'away') return {away: awayReport(ctx.config).on, on: args.on};
   if (name === 'set_limits') return { quotas: ctx.config.quotas, limits: ctx.config.limits, limitSettings: ctx.config.limitSettings, profile: ctx.config.limitRuntime.profile, queueHold: ctx.config.usage.queueHold, providerHolds: readProviderHoldState(ctx.config).holds };
   if (name === 'reserve') return { reservations: readReservations(ctx.config, ctx.runner.now()) };
@@ -2140,7 +2152,7 @@ async function confirmationScope(ctx: Context, name: string, args: Record<string
     for (const raw of rawSpecs) if (chatSetup(raw.header)) throw new AgentctlError(`${String(raw.header.task ?? 'a task')}: \"setup\" runs shell commands and is not accepted from the chat`);
     const knownAuthors = new Map(readQueue(ctx.config).map(e => [e.task, {agent: e.agent, model: e.model}]));
     const owner = orderOwner(ctx.config, typeof args.as === 'string' ? args.as : undefined);
-    const resolved = rawSpecs.map(raw => ({...resolveSpec(raw, {config: ctx.config}), ...(owner ? {owner} : {})}));
+    const resolved = rawSpecs.map(raw => ({...resolveSpec(raw, {config: ctx.config, owner}), ...(owner ? {owner} : {})}));
     for (const id of new Set(resolved.flatMap(s => s.reviewOfAll ?? (s.reviewOf ? [s.reviewOf] : [])))) {
       if (knownAuthors.has(id)) continue;
       const author = readTaskRecordById(ctx.config, id);
@@ -2590,7 +2602,7 @@ export async function publishMcpSnapshot(ctx: Context, rows?: StatusRow[], at?: 
     configHash: createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'),
     providerHolds: readProviderHoldState(ctx.config).holds,
     reservations: readReservations(ctx.config, ctx.runner.now()),
-    rows: observed, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
+    rows: observed, live, queue: JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2)), capacity, limits,
     config: JSON.parse(config.text), doctor };
   if (signal?.aborted) return;
   writeWatchSnapshot(ctx, snapshot);
@@ -2646,11 +2658,28 @@ async function snapshotRead(deps: McpDeps, ctx: Context, name: string, args: Rec
     }
     // A healthy, complete scheduling snapshot still describes the last tick when its
     // nominal interval was missed. Config, reservations and holds are checked separately.
-    const readAgeLimit = ['limits', 'queue_list'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
+    // A loaded watch cycle (tick plus interval) exceeds two intervals while the watch is healthy; status, like limits and
+    // queue_list, serves the last complete snapshot with its age instead of an 8 s fallback (REL0272-STATUS-AGE).
+    const readAgeLimit = ['limits', 'queue_list', 'status'].includes(name) ? Math.max(60_000, 2 * ctx.config.watch.interval * 1000) : 2 * ctx.config.watch.interval * 1000;
+    // Holds and reservations change between ticks (an automatic hold is set by maintenance after the tick published). With the
+    // snapshot's own rows and live windows, the parts that depend on them are derived again instead of discarding a fresh snapshot.
+    const holdsMoved = JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
+      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now));
+    const derivable = Array.isArray(snap.live) && Array.isArray(snap.rows);
     if (!retainedRows && (snap.degraded || (age >= readAgeLimit && !(name === 'capacity' || name === 'status' && explicit))
-      || JSON.stringify(snap.providerHolds ?? {}) !== JSON.stringify(readProviderHoldState(ctx.config).holds)
-      || JSON.stringify(snap.reservations ?? {}) !== JSON.stringify(readReservations(ctx.config, now))
+      || (holdsMoved && !derivable)
       || snap.configHash !== createHash('sha256').update(JSON.stringify(ctx.config)).digest('hex'))) return undefined;
+    if (holdsMoved && derivable) {
+      const limits = collectLimits(ctx.config, snap.live, now, false, snap.rows);
+      // Plan readings are usage facts of the tick, not hold state: keep the published ones instead of reopening usage logs.
+      for (const provider of limits.providers) {
+        const plan = snap.limits?.providers?.find((entry: {agent: string}) => entry.agent === provider.agent)?.plan;
+        if (plan !== undefined) provider.plan = plan;
+      }
+      snap.limits = limits;
+      const queue = await runQueueList(deps, {}, {rows: snap.rows, live: snap.live});
+      snap.queue = JSON.parse(queue.text.slice(queue.text.indexOf('\n\n') + 2));
+    }
     const note = `${ageLine(snap.at, ctx.runner.now())}; Watch snapshot age: ${(age / 1000).toFixed(1)} s.${retainedRows ? ` Watch: pominięty etap – ${snap.degraded}.` : ''}`;
     if (name === 'status' || name === 'capacity') snap.capacity.disk = await refreshDiskFreeSpace(ctx, snap.capacity.disk);
     const json = args.format === 'json' || args.detail === true;

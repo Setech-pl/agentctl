@@ -3,8 +3,8 @@ import { it } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson } from '../scripts/gate.ts';
-import { checkRuntime, verifyArchive, node22Path, ensureNode22 } from '../scripts/runtime.ts';
+import { parseArgs, planTier, affectedTests, assertClean, acquireLock, heavyCommand, packJson, defaultBase, DEFAULT_BASE_TAG } from '../scripts/gate.ts';
+import { checkRuntime, verifyArchive, node22Path, ensureNode22, node26Runtime } from '../scripts/runtime.ts';
 import { useScratch } from './helpers.ts';
 const scratch = useScratch();
 it('REL0244-LIVE-EVIDENCE: release collects every live result after earlier failures', async () => {
@@ -304,7 +304,21 @@ it('checks cached runtime version and archive checksum with fakes and no network
   assert.doesNotThrow(() => verifyArchive(data, `${hash}  node.tar.gz\n`, 'node.tar.gz'));
   assert.throws(() => verifyArchive(data, `${'0'.repeat(64)}  node.tar.gz`, 'node.tar.gz'));
   assert.throws(() => verifyArchive(data, '', 'node.tar.gz'));
-  assert.equal(node22Path('/runtime'), '/runtime/node-v22.14.0-darwin-arm64/bin/node');
+  assert.equal(node22Path('/runtime', 'darwin', 'arm64'), '/runtime/node-v22.14.0-darwin-arm64/bin/node');
+  assert.equal(node22Path('/runtime', 'linux', 'x64'), '/runtime/node-v22.14.0-linux-x64/bin/node');
+});
+it('GATE-LINUX-RUNTIMES: Linux provisions the linux Node 22 archive and uses the Node 26 that runs the gate', async () => {
+  const dir = scratch.sub('linux-runtime'), work = scratch.sub('linux-download');
+  const data = Buffer.from('linux archive'), hash = createHash('sha256').update(data).digest('hex');
+  const downloads: string[] = [];
+  const node = await ensureNode22(work, { dir, platform: 'linux', arch: 'x64', version: () => 'v22.14.0',
+    download: async (file: string) => { downloads.push(file); return file === 'SHASUMS256.txt' ? Buffer.from(`${hash}  node-v22.14.0-linux-x64.tar.gz`) : data; },
+    extract: () => { fs.mkdirSync(path.dirname(node22Path(dir, 'linux', 'x64')), { recursive: true }); fs.writeFileSync(node22Path(dir, 'linux', 'x64'), ''); } });
+  assert.equal(node, node22Path(dir, 'linux', 'x64'));
+  assert.deepEqual(downloads, ['node-v22.14.0-linux-x64.tar.gz', 'SHASUMS256.txt']);
+  await assert.rejects(ensureNode22(work, { dir: scratch.sub('win-runtime'), platform: 'win32', arch: 'x64' }), /requires one of/);
+  assert.equal(node26Runtime('linux', process.execPath, () => 'v26.13.1'), fs.realpathSync(process.execPath));
+  assert.throws(() => node26Runtime('linux', process.execPath, () => 'v24.1.0'), /expected Node 26/);
 });
 it('wraps every heavy command without shell interpolation or load waiting', () => {
   assert.deepEqual(heavyCommand('node', ['x.ts'], 'darwin'), ['nice', ['-n', '10', 'taskpolicy', '-b', 'node', 'x.ts']]);
@@ -318,12 +332,12 @@ it('provisions a missing runtime once, verifies before extraction and never dele
   const downloads: string[] = [];
   const io = { dir, platform: 'darwin', arch: 'arm64', version: () => 'v22.14.0',
     download: async (file: string) => { downloads.push(file); return file === 'SHASUMS256.txt' ? Buffer.from(`${hash}  node-v22.14.0-darwin-arm64.tar.gz`) : data; },
-    extract: (archive: string) => { assert.deepEqual(fs.readFileSync(archive), data); fs.mkdirSync(path.dirname(node22Path(dir)), { recursive: true }); fs.writeFileSync(node22Path(dir), 'cached'); },
+    extract: (archive: string) => { assert.deepEqual(fs.readFileSync(archive), data); fs.mkdirSync(path.dirname(node22Path(dir, 'darwin', 'arm64')), { recursive: true }); fs.writeFileSync(node22Path(dir, 'darwin', 'arm64'), 'cached'); },
   };
-  assert.equal(await ensureNode22(work, io), node22Path(dir));
+  assert.equal(await ensureNode22(work, io), node22Path(dir, 'darwin', 'arm64'));
   assert.equal(downloads.length, 2);
   await ensureNode22(work, { ...io, download: async () => { throw new Error('must not download cached runtime'); } });
-  assert.equal(fs.readFileSync(node22Path(dir), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
+  assert.equal(fs.readFileSync(node22Path(dir, 'darwin', 'arm64'), 'utf8'), 'cached'); assert.deepEqual(fs.readdirSync(work), []);
   await assert.rejects(ensureNode22(work, { ...io, dir: scratch.sub('bad-runtime'), download: async () => data, extract: () => assert.fail('unverified extraction') }), /SHA256/);
 });
 
@@ -339,6 +353,9 @@ it('packJson reads the npm pack array and ignores trailing notices', () => {
   const noticed = '[{"filename":"a.tgz"}]\nnpm notice\nnpm notice New major version of npm available! 11.20.0 -> 12.2.2\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2\nnpm notice\n';
   assert.deepEqual(packJson(noticed), [{ filename: 'a.tgz' }]);
   assert.throws(() => packJson('npm notice only, no json'), /no JSON array/);
+  // npm 12 keys the result by package name; its file list holds arrays and strings with brackets.
+  const npm12 = '{\n  "@setech-pl/agentctl": {\n    "id": "@setech-pl/agentctl@0.27.2",\n    "filename": "setech-pl-agentctl-0.27.2.tgz",\n    "files": [{"path": "docs/a]b{.md"}],\n    "bundled": []\n  }\n}\nnpm notice {done}\n';
+  assert.deepEqual(packJson(npm12).map(e => e.filename), ['setech-pl-agentctl-0.27.2.tgz']);
 });
 
 it('L1 prechecked contender: publication must not admit C while A is displaced', async () => {
@@ -397,4 +414,21 @@ it('release input seal rejects SHA changes and fixture edits restored to the ori
   assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'check C'), /fixtures.*changed/);
   git('commit', '--allow-empty', '-m', 'new SHA');
   assert.throws(() => assertReleaseInputs(expected, releaseInputs(root), 'final result'), /SHA changed.*final result/);
+});
+
+it('GATE-BASE: a missing default base tag falls back to the newest reachable release tag with a warning', () => {
+  const calls: string[] = [], warnings: string[] = [];
+  const run = (tags: Record<string, string>) => (...args: string[]): string => {
+    calls.push(args.join(' '));
+    if (args[0] === 'merge-base') { if (tags[DEFAULT_BASE_TAG]) return 'mb-0181'; throw new Error('not a valid object name'); }
+    if (args[0] === 'tag') return tags.v ? `${tags.v}\nv0.26.2\n` : '';
+    if (args[0] === 'rev-parse') return `sha-of-${args[2]}`;
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  assert.equal(defaultBase(run({ [DEFAULT_BASE_TAG]: 'x', v: 'v0.27.1' }), m => warnings.push(m)), 'mb-0181');
+  assert.equal(warnings.length, 0);
+  assert.equal(defaultBase(run({ v: 'v0.27.1' }), m => warnings.push(m)), 'sha-of-v0.27.1^{commit}');
+  assert.match(warnings[0] ?? '', /agentctl-0181-rc1 is missing.*v0\.27\.1/);
+  assert.ok(calls.includes('tag --merged HEAD --list v[0-9]* --sort=-v:refname'));
+  assert.throws(() => defaultBase(run({}), () => {}), /pass --base/);
 });

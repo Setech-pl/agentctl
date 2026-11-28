@@ -57,7 +57,7 @@ The harness builds a sandbox under `$AGENTCTL_LIVE_CACHE/live-<name>/` and gives
 
 - an isolated tmux server (`TMUX` unset, its own `TMUX_TMPDIR`, a `tmux.conf` with `exit-empty off` and a `default-command` that sets PATH explicitly, so a window's shell cannot find the real agents);
 - its own `AGENTCTL_HOME`, `CODEX_HOME` (no `notify` chain), `CLAUDE_CONFIG_DIR` and `HOME`;
-- a PATH with a directory of fakes (`claude`, `codex`, `pbcopy`, `pbpaste`, `terminal-notifier`, `osascript`, `notify-send`) and links to `tmux`, `git` and `node`, and no directory that holds a real `claude` or `codex`. The fake agents answer `--version` and `--help`, print an idle screen and log every start to `agent.log`.
+- a PATH with a directory of fakes (`claude`, `codex`, `pbcopy`, `pbpaste`, `terminal-notifier`, `osascript`, `notify-send`) and links to `tmux`, `git` and `node`, and no directory that holds a real `claude` or `codex`. When `/usr/bin` or `/bin` holds a real agent (a Linux package), the PATH ends with `sysbin/`, links to every system command except the agents and their aliases, instead of those directories; a real agent anywhere on the PATH is still refused. The fake agents answer `--version` and `--help`, print an idle screen and log every start to `agent.log`.
 
 Before anything is started the harness checks `command -v` of each faked command and the `#{socket_path}` of the tmux server, and refuses (`HarnessRefusal`) when one points at a real binary, at the default tmux server, or outside the sandbox. `tests/harness.test.ts` tests those refusals. Cleanup (the tmux server, background processes) runs in `finally`.
 

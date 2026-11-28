@@ -1,3 +1,5 @@
+import { hostAvailability } from './host-availability.ts';
+import { readHostsCache } from './hosts.ts';
 import { chatLoads, chatOwner, DEFAULT_OWNER, effectiveChatCeilings, parseChatQuotas, quotaBudget, quotaWarnings, renderChatLoad } from './chat-quotas.ts';
 import type { ChatLoad, ChatQuotas } from './chat-quotas.ts';
 import { holdUntil, providerHolds, providerHoldText, parseTimedHolds, setProviderHolds } from './provider-hold.ts';
@@ -230,7 +232,7 @@ export interface ProviderLoad {
 
 export interface LimitsReport {
   providers: ProviderLoad[];
-  hosts?: { host: string; providers: { agent: AgentName; limit: number | null; used: number; free: number | null; queued: number }[] }[];
+  hosts?: { host: string; availability?: string; load?: number; memoryFreeKb?: number; total?: number; maxTotal?: number; perf?: string; providers: { agent: AgentName; limit: number | null; used: number; free: number | null; queued: number }[] }[];
   countExternal: boolean;
   config: string;
   configWarning?: string;
@@ -240,17 +242,24 @@ export interface LimitsReport {
 export function collectLimits(config: GlobalConfig, live: readonly LiveWindow[], now = Date.now(), showPlans = false, rows?: StatusRow[]): LimitsReport {
   const holds = providerHolds(config, now);
   const plans = showPlans ? readPlanStates(config, openReader(config), now) : undefined;
+  const healthByHost = new Map((readHostsCache()?.hosts ?? []).map(sample => [sample.name, sample]));
+  const localAvailability = hostAvailability(config, 'local', healthByHost.get('local'), now);
   const queue = waiting(readQueue(config));
   const reservations = readReservations(config, now);
   return {
     countExternal: config.countExternal,
     config: config.path,
     ...(config.reloadWarning ? { configWarning: config.reloadWarning } : {}),
-    hosts: Object.entries(config.hosts).map(([host, h]) => ({ host, providers: h.providers.map(agent => {
+    hosts: Object.entries({ ...config.hosts, ...(config.localHost || config.placement.default === 'auto' || localAvailability ? { local: { ...config.localHost, providers: activeProviders(config) } } : {}) }).map(([host, h]) => {
+      const health = healthByHost.get(host);
+      const slots = live.filter(w => (w.host ?? 'local') === host && w.kind !== 'reserved');
+      return { host, availability: host === 'local' ? localAvailability : hostAvailability(config, host, health, now), load: health?.load, memoryFreeKb: health?.memoryFreeKb,
+        total: slots.filter(w => w.counted !== false && w.agent).length, maxTotal: h.maxTotal, perf: slots.find(w => w.perf && !w.reportReady)?.window,
+        providers: h.providers.map(agent => {
       const limit = h.limits?.[agent] ?? null;
-      const used = accountTasks([], live.filter(w => w.host === host && w.agent === agent)).slots.length;
+      const used = accountTasks([], slots.filter(w => w.agent === agent)).slots.length;
       return { agent, limit, used, free: holds[agent] ? 0 : limit === null ? null : Math.max(0, limit - used), queued: queue.filter(e => e.host === host && e.agent === agent).length };
-    }) })),
+    }) }; }),
     providers: activeProviders(config).map((agent): ProviderLoad => {
       const mine = live.filter((w) => w.agent === agent);
       const facts = accountTasks(rows?.filter(r => r.agent === agent && !r.hidden) ?? [], mine);
@@ -315,7 +324,13 @@ export function renderLimits(report: LimitsReport): string[] {
     for (const chat of p.chats ?? []) lines.push(`  ${p.agent} ${renderChatLoad(chat)}`);
     if (parts.length > 0) lines.push(`  ${p.agent}: ${parts.join(' · ')}`);
   }
-  for (const h of report.hosts ?? []) lines.push(`host ${h.host}: ${h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`).join(' · ')} (account limits/holds also apply)`);
+  for (const h of report.hosts ?? []) {
+    const parts = h.providers.map(p => `${p.agent} ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'}, queued ${p.queued}`);
+    if (h.maxTotal !== undefined) parts.push(`total ${h.total ?? 0}/${h.maxTotal}`);
+    if (h.availability) parts.push(h.availability);
+    if (h.perf) parts.push(`perf ${h.perf}`);
+    lines.push(`host ${h.host}: ${parts.join(' · ')} (account limits/holds also apply)`);
+  }
   lines.push(report.countExternal ? 'External sessions are counted (limits.count_external).' : 'Sessions started by hand are not counted: "agentctl limits reserve claude=1" holds a place, or set limits.count_external: true.');
   lines.push('HOLD = usage.queue_hold: above that plan percentage (any window) the queue starts no task of the provider; off = never held.');
   lines.push('Change: agentctl limits set claude=3 codex=5 queue_hold.codex=90   (takes effect at once, also in a running watch)');

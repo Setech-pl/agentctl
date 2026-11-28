@@ -41,10 +41,12 @@ export function assertAuthorStopped(ctx: Context, author: TaskRecord, live: stri
 /** Author starts already reserve their task ID. Check both a review's reservation and its live window. */
 export async function assertCheckoutNotBorrowed(ctx: Context, task: string): Promise<void> {
   if (ctx.runner.dryRun) return;
-  const reviews = listTaskRecords(ctx.config).filter(record => record.reviewMode && record.reviewOf === task);
+  const reviews = listTaskRecords(ctx.config).filter(record => record.reviewMode && record.reviewOf === task || record.reuseWorktree === task && !record.closed && !record.cancelled);
+  const reserved = pendingStarts(ctx.config).find(start => start.reuseWorktree === task);
+  if (reserved) throw new AgentctlError(`${task}: task ${reserved.task} is starting in the worktree`);
   if (!reviews.length) return;
   const pending = new Set(pendingStarts(ctx.config).map(start => start.window));
-  const live = await ctx.localTmux.listWindows();
+  const live = reviews.some(review => review.host) ? await ctx.tmux.listWindows() : await ctx.localTmux.listWindows();
   const borrower = reviews.find(review => pending.has(review.window) || live.includes(review.window));
   if (borrower) throw new AgentctlError(`${task}: readonly review ${borrower.task} is using the author worktree`, `Close ${borrower.task} before using the worktree.`);
 }

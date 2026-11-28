@@ -220,7 +220,7 @@ export interface RepoResolution { repo?: TaskRecord['repos'][number]; allowed: s
  */
 export function resolveOutputRepo(record: Pick<TaskRecord, 'repos'>, name: string, author?: Pick<TaskRecord, 'repos'> | undefined): RepoResolution {
   const ids = new Map<TaskRecord['repos'][number], { names: string[]; paths: string[] }>();
-  for (const r of record.repos) ids.set(r, { names: [...(r.name ? [r.name] : []), path.basename(r.path), ...(r.worktree ? [path.basename(r.worktree)] : [])], paths: [r.path, r.worktree] });
+  for (const r of record.repos) ids.set(r, { names: [...(r.name ? [r.name] : []), path.basename(r.path), ...(r.worktree ? [path.basename(r.worktree)] : [])], paths: [r.path, r.worktree, ...(r.localPath ? [r.localPath] : [])] });
   // The author's checkout and branch lead to the reviewer's repo of the same repository.
   for (const a of author?.repos ?? []) {
     const mine = record.repos.find((r) => samePath(r.path, a.path));
@@ -258,10 +258,16 @@ export async function readOutputs(ctx: Context, record: TaskRecord, options: { c
   if (!data.outputs) return data;
   const remoteCache = record.host ? path.join(ctx.config.stateDir, record.window, 'remote-outputs.json') : undefined;
   const signature = remoteCache ? reportFingerprint(record.report) : undefined;
-  if (remoteCache && (options.cachedOnly || cachedRequest() || ctx.hosts.connection(record.host!).unreachable)) {
-    try { const saved = JSON.parse(fs.readFileSync(remoteCache, 'utf8')); if (saved.signature === signature) return saved.data; } catch { /* not validated yet */ }
-    if (data.outputs.commits.length || data.outputs.integrate.length) return { ...data, outputs_valid: false, outputs_partial: true, outputs_errors: [...data.outputs_errors, `host ${record.host}: output references await validation on the host`] };
-    return data;
+  const localOnly = Boolean(remoteCache && (options.cachedOnly || cachedRequest() || ctx.hosts.connection(record.host!).unreachable));
+  if (remoteCache && localOnly) {
+    try {
+      const saved = JSON.parse(fs.readFileSync(remoteCache, 'utf8'));
+      if (saved.signature === signature && saved.data.outputs_valid) return saved.data;
+    } catch { /* not validated yet */ }
+    if (!record.repos.some(repo => repo.localPath && fs.existsSync(repo.localPath))) {
+      if (data.outputs.commits.length || data.outputs.integrate.length) return { ...data, outputs_valid: false, outputs_partial: true, outputs_errors: [...data.outputs_errors, `host ${record.host}: output references await validation on the host`] };
+      return data;
+    }
   }
 
   // One message per distinct problem, with the number of entries it covers.
@@ -277,8 +283,14 @@ export async function readOutputs(ctx: Context, record: TaskRecord, options: { c
     }
     const repo = found.repo;
     ref.repo = repo.name ?? path.basename(repo.path);
-    const git = async (args: string[]) => (record.host ? ctx.hosts.forHost(record.host) : ctx.runner).exec('git', ['-C', repo.path, ...args], { readOnly: true });
+    const local = repo.localPath && fs.existsSync(repo.localPath) ? repo.localPath : undefined;
+    const git = async (args: string[]) => (record.host ? ctx.hosts.forHost(record.host) : ctx.runner).exec('git', ['-C', repo.path, ...args], { readOnly: true, timeoutMs: 5000 });
     try {
+      if (local && record.host) {
+        const tracked = await ctx.runner.exec('git', ['-C', local, 'show-ref', '--verify', '--quiet', `refs/remotes/${record.host}/${ref.branch}`], { readOnly: true, timeoutMs: 3000 });
+        if (tracked.code === 0 && (await ctx.runner.exec('git', ['-C', local, 'rev-parse', '--verify', '--end-of-options', `${ref.sha}^{commit}`], { readOnly: true, timeoutMs: 3000 })).code === 0) continue;
+      }
+      if (localOnly) { note(`host ${record.host}: output references await validation on the host`); continue; }
       if ((await git(['show-ref', '--verify', '--quiet', `refs/heads/${ref.branch}`])).code !== 0) note(`${ref.repo}: branch ${ref.branch} does not exist`);
       if ((await git(['rev-parse', '--verify', '--end-of-options', `${ref.sha}^{commit}`])).code !== 0) note(`${ref.repo}: commit ${ref.sha} does not exist`);
     } catch (error) { if (!(error instanceof HostUnreachable)) throw error; note(`host ${record.host}: output references await validation on the host`); }
@@ -287,7 +299,7 @@ export async function readOutputs(ctx: Context, record: TaskRecord, options: { c
   if (warnings.size) data.outputs_warnings = [...warnings].map(([message, count]) => count > 1 ? `${message} (${count} entries)` : message);
   data.outputs_valid = data.outputs_errors.length === 0;
   if (!data.outputs_valid) data.outputs_partial = true;
-  if (remoteCache && !ctx.runner.dryRun && !ctx.hosts.connection(record.host!).unreachable) await ctx.runner.writeFile(remoteCache, JSON.stringify({ signature, data }));
+  if (remoteCache && !ctx.runner.dryRun && (!localOnly || data.outputs_valid)) await ctx.runner.writeFile(remoteCache, JSON.stringify({ signature, data }));
   return data;
 }
 

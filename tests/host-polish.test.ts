@@ -41,6 +41,16 @@ it('queued host move: round trip preserves ID, position, dependencies, prompt an
   await saveEntry(w.ctx, { ...e, status: 'starting' });
   await assert.rejects(moveTask(w.ctx, 'MOVE-1', { host: 'pc', yes: true }), /only queued/);
 });
+it('queued host move: the Mac pin overrides automatic placement', async () => {
+  const w = world();
+  w.config.placement.default = 'auto';
+  await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);
+  await moveTask(w.ctx, 'MOVE-1', { host: 'local', yes: true });
+  const [entry] = readQueue(w.config);
+  assert.equal(entry!.host, undefined);
+  assert.equal(entry!.placement, undefined);
+  assert.equal(splitSpecs(entry!.spec)[0]!.header.host, 'local');
+});
 it('host limits and provider hold: account and host loads agree, remote queue is held', async () => {
   const w = world(); w.raw.header.host = 'pc';
   await commitQueueAdd(w.ctx, [{raw: w.raw, spec: resolveSpec(w.raw, {config: w.config})}]);
@@ -86,4 +96,19 @@ it('queued host move: MCP token-only confirmation preserves the reviewed target 
   assert.equal(readQueue(w.config)[0]!.host, undefined);
   const done = await tool.run(deps, {confirm: true, preview_token: token});
   assert.equal(done.isError, undefined, done.text); assert.equal(readQueue(w.config)[0]!.host, 'pc');
+});
+it('REL0273-LEGACY-LOCAL: a legacy SSH host named local still loads and receives explicit host: local orders', async () => {
+  const { choosePlacement } = await import('../src/core/placement.ts');
+  const root = scratch.sub('legacy-local'), clone = path.join(root, 'app'); fs.mkdirSync(clone);
+  const config = makeConfig(root, `worktree_root: ${root}/wt\nhosts:\n  local: {ssh: owner@old, work_dir: /remote/work, repos: {app: /remote/app}, providers: [claude]}\n`);
+  assert.equal(config.hosts.local?.ssh, 'owner@old');
+  assert.equal(config.localHost, undefined);
+  const spec = (host: string) => splitSpecs(`---\ntask: LEGACY-1\nagent: claude\nmodel: sonnet\neffort: high\nreview: false\n${host}repos: [{path: app, branch: legacy-one}]\n---\nRun on the old host.`)[0]!;
+  const explicit = resolveSpec(spec('host: local\n'), { config });
+  assert.equal(explicit.host, 'local');
+  assert.equal(explicit.repos[0]!.path, '/remote/app');
+  const order = { task: 'LEGACY-1', agent: 'claude' as const, after: [], queuedAt: new Date().toISOString() };
+  assert.deepEqual(choosePlacement(config, { ...order, spec: renderRawSpec(spec('host: local\n')) }, [], Date.now()), { host: 'local', reason: '[local] host SSH wskazany w zleceniu' });
+  const local = resolveSpec(splitSpecs(`---\ntask: LEGACY-2\nagent: claude\nmodel: sonnet\neffort: high\nreview: false\nrepos: [{path: ${clone}, branch: legacy-two}]\n---\nRun here.`)[0]!, { config });
+  assert.equal(local.host, undefined);
 });

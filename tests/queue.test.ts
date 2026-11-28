@@ -17,6 +17,9 @@ import { withStartLock } from '../src/core/start-lock.ts';
 import { readTaskRecord } from '../src/core/taskstore.ts';
 import { WatchMemory, watchLogPath, watchTick } from '../src/core/watch.ts';
 import { DiskRunner, FakeTmux, makeConfig, runCli, seedTask, useScratch } from './helpers.ts';
+import { fileVersion } from '../src/core/file-version.ts';
+/** The racy window of fileVersion (src/core/file-version.ts). */
+const RACY_WINDOW_NS = 100_000_000n;
 
 const scratch = useScratch();
 
@@ -80,7 +83,7 @@ it('REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independe
   });
   t.mock.method(fs, 'statSync', (target: fs.PathLike, options: Parameters<typeof stat>[1]) => {
     const meta = stat(target, options);
-    if (target === file && meta && 'ctimeNs' in meta && typeof meta.ctimeNs === 'bigint') meta.ctimeNs |= 1n;
+    if (target === file && meta && 'ctimeNs' in meta && typeof meta.ctimeNs === 'bigint') meta.ctimeNs = (meta.ctimeNs - RACY_WINDOW_NS) | 1n;
     return meta;
   });
   const [first] = readQueue(config);
@@ -93,6 +96,25 @@ it('REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independe
   fs.renameSync(tmp, file);
   assert.equal(readQueue(config)[0]!.priority, 'high');
   assert.equal(reads, 2);
+});
+
+it('REL0272-RACY-VERSION: a same-size rewrite that reuses the inode within one clock tick is not served from the cache', async t => {
+  const {ctx, config, repo} = setup('racy-version');
+  const entry = {seq: 1, order: 1, task: 'RACY-ORDER', status: 'queued' as const, priority: 'normal' as const,
+    agent: 'claude' as const, model: 'opus', effort: 'high', after: [], queuedAt: new Date().toISOString(), spec: specOf(repo, 'RACY-ORDER')};
+  await saveEntry(ctx, entry);
+  const dir = queueDir(config);
+  const file = path.join(dir, fs.readdirSync(dir).find(name => name.endsWith('.json'))!);
+  // Linux: the atomic replace gets the freed inode back and the coarse file clock has not ticked, so both writes share every stat field.
+  const frozen = fs.statSync(file, {bigint: true});
+  frozen.ctimeNs = frozen.mtimeNs = BigInt(Date.now()) * 1_000_000n - 5_000_001n;
+  const stat = fs.statSync;
+  t.mock.method(fs, 'statSync', (target: fs.PathLike, options: Parameters<typeof stat>[1]) => target === file ? frozen : stat(target, options));
+  assert.equal(readQueue(config)[0]!.status, 'queued');
+  await saveEntry(ctx, {...entry, status: 'failed'});
+  assert.equal(readQueue(config)[0]!.status, 'failed');
+  assert.equal(fileVersion(frozen, frozen.ctimeNs + RACY_WINDOW_NS - 1n), undefined);
+  assert.equal(typeof fileVersion(frozen, frozen.ctimeNs + RACY_WINDOW_NS), 'string');
 });
 
 describe('queue: adding', () => {

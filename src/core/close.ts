@@ -1,3 +1,4 @@
+import { listTaskRecords } from './taskstore.ts';
 import { expectWindowClosure } from './start-failure.ts';
 import { syncRemoteFiles } from './host-runtime.ts';
 import { readPromptQueue, reportMessageWarning, queueFile as promptQueueFile } from './prompt-queue.ts';
@@ -32,6 +33,8 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   const { runner, tmux, config } = ctx;
   const window = windowName(taskArg);
   const record = readTaskRecord(config, window);
+  if (opts.rmWorktree && record?.reuseWorktree) throw new AgentctlError(`${taskArg}: worktree belongs to ${record.reuseWorktree}`);
+  if (opts.rmWorktree && record && listTaskRecords(config).some(task => task.reuseWorktree === record.task && !task.closed && !task.cancelled)) throw new AgentctlError(`${taskArg}: its worktree is used by another task`);
   if (opts.rmWorktree && !record) {
     throw new AgentctlError(
       `cannot remove worktrees of ${taskArg}: no TASK.md in ${config.stateDir}/${window} lists them`,
@@ -49,7 +52,7 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
     if (record?.launchAt) await expectWindowClosure(ctx, record);
     const killed = await tmux.killWindow(window);
     if (killed.code !== 0 && (await tmux.listWindows()).includes(window)) throw new AgentctlError(`cannot close ${taskArg}: ${killed.stderr}`);
-    if (killed.code === 0 && record?.host) await syncRemoteFiles(ctx, record);
+    if (killed.code === 0 && record?.host) await syncRemoteFiles(ctx, record, true);
     if (killed.code === 0) ctx.info(`${taskArg}: window ${config.session}:${window} closed`);
     else ctx.info(`${taskArg}: window disappeared while closing; marking the task closed`);
   } else if (record?.closed || !record && readTaskRecordById(config, taskArg)) {
@@ -57,6 +60,8 @@ export async function closeTask(ctx: Context, taskArg: string, opts: CloseOption
   } else {
     ctx.info(`${taskArg}: no tmux window in session "${config.session}"${record ? '; marking the task closed' : ''}`);
   }
+
+  if (record?.host && !windows.includes(window)) await syncRemoteFiles(ctx, record, true);
 
   // The window is gone: the task is closed, whether or not the worktree can be removed below. The state and the report stay.
   if (record && !record.closed) {

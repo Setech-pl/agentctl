@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { withStartLock, pendingStarts } from './start-lock.ts';
 import { findEntry, saveEntry, renderRawSpec, withAcceptLock } from './queue.ts';
 import type { QueueEntry } from './queue.ts';
-import { resolveSpec, splitSpecs } from './spec.ts';
+import { resolveSpec, specHost, splitSpecs } from './spec.ts';
 import { recordFromSpec } from './taskstore.ts';
 import { collectLimits } from './limits.ts';
 import { liveWindows } from './plan.ts';
@@ -80,7 +80,7 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
     if (readTaskRecord(config, windowName(entry.task))?.started) throw new AgentctlError(`${entry.task}: a running or previously started task cannot change host`);
     if (opts.agent) throw new AgentctlError('Change host and provider in separate moves');
     const targetHost = opts.host === 'local' ? undefined : opts.host;
-    if (targetHost === entry.host) throw new AgentctlError(`${entry.task} is already on ${targetHost ?? 'local'}`);
+    if (targetHost === entry.host && !entry.placement) throw new AgentctlError(`${entry.task} is already on ${targetHost ?? 'local'}`);
     if (targetHost && !config.hosts[targetHost]) throw new AgentctlError(`unknown host ${targetHost}`);
     if (targetHost && !config.hosts[targetHost]!.providers.includes(entry.agent)) throw new AgentctlError(`host ${targetHost} has no ${entry.agent} provider`);
     const sourceSpec = (entry as QueueEntry & { localSpec?: string }).localSpec ?? entry.spec;
@@ -88,11 +88,15 @@ export async function planMove(ctx: Context, taskArg: string, opts: MoveOptions 
     if (targetHost) {
       raw.header.host = targetHost;
       for (const repo of raw.header.repos as {worktree?: string}[]) delete repo.worktree;
-    } else delete raw.header.host;
+    } else {
+      const originalHost = raw.header.host;
+      delete raw.header.host;
+      if (originalHost === 'auto' || originalHost === 'local' || specHost(raw, config, entry.owner) !== 'local') raw.header.host = 'local';
+    }
     const spec = resolveSpec(raw, { config });
     if (!targetHost && spec.repos.some(r => !fs.existsSync(r.path))) throw new AgentctlError('Local clone missing: use a local absolute repos.path in the original spec and configure worktree_root');
     const fromSpec = resolveSpec(splitSpecs(entry.spec)[0]!, { config });
-    return { queueBefore: JSON.stringify(entry), queued: { ...entry, host: targetHost, spec: renderRawSpec(raw) }, sourceSpec, targetHost, from: recordFromSpec(fromSpec, config, ctx.runner.now()), to: { agent: entry.agent, model: entry.model, effort: entry.effort as Order['effort'] }, task: entry.task, window: windowName(entry.task), prompt: raw.prompt };
+    return { queueBefore: JSON.stringify(entry), queued: { ...entry, placement: undefined, placementReason: undefined, host: targetHost, spec: renderRawSpec(raw) }, sourceSpec, targetHost, from: recordFromSpec(fromSpec, config, ctx.runner.now()), to: { agent: entry.agent, model: entry.model, effort: entry.effort as Order['effort'] }, task: entry.task, window: windowName(entry.task), prompt: raw.prompt };
   }
   const targets = await listTargets(ctx);
   const match = matchKnownTask(config, taskArg, targets);

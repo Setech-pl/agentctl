@@ -112,6 +112,17 @@ export interface ReportCandidate {
 
 const startedOf = (record: Pick<TaskRecord, 'started' | 'attemptStarted'>): number => Date.parse(record.attemptStarted ?? record.started);
 
+/** Whether a configured report pattern (`report:` alternatives) holds a fresh file named for the task: a cheap glob, no discovery walk. */
+export function hasConfiguredCandidate(record: TaskRecord): boolean {
+  if (!record.reportAlt?.length) return false;
+  const canonical = path.normalize(record.report), started = startedOf(record), task = record.task.toLowerCase();
+  for (const pattern of record.reportAlt) for (const abs of absolutes(pattern, worktreesOf(record))) for (const file of globFiles(abs)) {
+    if (file === canonical || !path.basename(file).toLowerCase().includes(task) || !isFile(file)) continue;
+    if (mtime(file) > started) return true;
+  }
+  return false;
+}
+
 /** Fresh regular files from alternatives and nearby paths, newest first; prompt text is never evidence. */
 export function findCandidates(ctx: Context, record: TaskRecord): ReportCandidate[] {
   const worktrees = worktreesOf(record);

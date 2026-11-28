@@ -21,8 +21,8 @@ import type { TaskState } from './state.ts';
 import { AgentctlError, Problems, errorMessage, expandHome, isObject, resolvePath } from './util.ts';
 import { parseWall } from './wall-config.ts';
 import type { WallSettings } from './wall-config.ts';
-import { parseHosts } from './hosts.ts';
-import type { HostConfig } from './hosts.ts';
+import { parseHosts, parseLocalHost, parsePlacement, parsePerf } from './hosts.ts';
+import type { HostConfig, LocalHostConfig, PlacementConfig, PerfConfig } from './hosts.ts';
 
 import { PROVIDER_IDS, DEFAULT_PROVIDERS } from './providers/types.ts';
 import type { ProviderId } from './providers/types.ts';
@@ -209,6 +209,9 @@ export interface GlobalConfig extends Layer {
   wall: WallSettings;
   /** Remote task hosts over SSH (0.23): transport, health and execution. No secrets are stored here. */
   hosts: Record<string, HostConfig>;
+  localHost?: LocalHostConfig;
+  placement: PlacementConfig;
+  perf: PerfConfig;
   /** Where the config was (or would be) read from. */
   path: string;
   loaded: boolean;
@@ -219,7 +222,7 @@ export const NOTIFY_BACKENDS = ['auto', 'terminal-notifier', 'osascript'] as con
 export type NotifyBackend = (typeof NOTIFY_BACKENDS)[number];
 
 /** Write tools of the MCP server; each one must be listed in `mcp.allow` to work. */
-export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc', 'wall_post', 'wall_reply', 'wall_set_status', 'consult', 'pin', 'unpin'] as const;
+export const MCP_WRITE_TOOLS = ['send', 'answer', 'new', 'interrupt', 'close', 'move', 'queue', 'queue_rm', 'cancel', 'mark', 'set_limits', 'reserve', 'resume', 'away', 'queue_retry', 'queue_up', 'queue_pause', 'queue_resume', 'hosts_pause', 'hosts_resume', 'unblock', 'cohort_add', 'cohort_remove', 'cohort_note', 'cohort_archive', 'hide', 'unhide', 'archive', 'adopt', 'report_from', 'limits_release', 'manager_start', 'manager_stop', 'notify_test', 'gc', 'wall_post', 'wall_reply', 'wall_set_status', 'consult', 'pin', 'unpin'] as const;
 export type McpWriteTool = (typeof MCP_WRITE_TOOLS)[number];
 /** Permissions of `mcp.allow` that are not a tool of their own: `send_enter` lets `send` with `enter_only` press Enter for the text that a send left in an input field (it does not allow pasting). */
 export const MCP_EXTRA_PERMISSIONS = ['send_enter'] as const;
@@ -412,7 +415,7 @@ export const DEFAULT_AGENT_SETTINGS = Object.fromEntries(DEFAULT_PROVIDERS.map(i
 
 /** The keys accepted in every layer: the global config, `.agentctl.yaml` and (with a few of its own) a spec. docs/configuration.md describes each one. */
 export const LAYER_KEYS = ['worktree_root', 'worktrees', 'links', 'env', 'report', 'setup', 'close', 'defaults', 'guide', 'review'];
-export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'start_lock_stale_s', 'launch', 'wall', 'hosts', 'quotas'];
+export const GLOBAL_KEYS = [...LAYER_KEYS, 'overload', 'limited', 'cache', 'state_dir', 'session', 'ui', 'tmux', 'limits', 'agents', 'equivalents', 'mirror_dir', 'watch', 'notify', 'board', 'mcp', 'queue', 'collisions', 'cancel', 'usage', 'away', 'manager', 'capacity', 'disk', 'git', 'gc', 'cohort', 'delivery_confirm_s', 'preview', 'providers', 'providers_config', 'start_failure', 'start_lock_stale_s', 'launch', 'wall', 'hosts', 'placement', 'perf', 'quotas'];
 export const LIMITS_KEYS = [...AGENT_NAMES, 'count_external', 'count_report_ready', 'heavy', 'change_policy', 'profiles', 'schedule', 'active_profile', 'timed_overrides'];
 export const DEFAULTS_KEYS = ['agent', 'model', 'effort', 'remote_control'];
 export const LINK_KEYS = ['from', 'to'];
@@ -1432,6 +1435,9 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
   const deliveryConfirmS = raw.delivery_confirm_s ?? 60;
   if (typeof deliveryConfirmS !== 'number' || !Number.isFinite(deliveryConfirmS) || deliveryConfirmS <= 0) p.add('config.delivery_confirm_s must be a positive number');
   const hosts = parseHosts(raw.hosts, p);
+  const localHost = parseLocalHost(raw.hosts, p);
+  const placement = parsePlacement(raw.placement, p);
+  const perf = parsePerf(raw.perf, p);
   const quotas = parseChatQuotas(raw.quotas, p);
   const limitSettings = parseLimitSettings(raw.limits, providers, limits, quotas, p);
   const positiveSeconds = (value: unknown, key: string, fallback: number): number => {
@@ -1458,7 +1464,7 @@ export function loadGlobalConfig(dir: string = configDir(), now = Date.now(), te
     const configuredUsage = usageMap[`${id}_dir`] !== undefined || ['warn', 'critical', 'queue_hold'].some(k => { const values = usageMap[k]; return isObject(values) && values[id] !== undefined; });
     if (agentMap[id] !== undefined || (isObject(raw.limits) && raw.limits[id] !== undefined) || configuredUsage) warnings.push(`${id} is not in providers; its agent/limit/usage settings are inactive`);
   }
-  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS, setupTimeoutS, wall, hosts, path: file, loaded: exists };
+  const config: GlobalConfig = { ...layer, providers, launch, ...(providersConfig ? { providersConfig } : {}), ...(startFailure ? { startFailure } : {}), cache: resolvePath(cache), stateDir: resolvePath(stateDir), session, ...(ui ? { ui } : {}), ...(tmux ? { tmux } : {}), deliveryConfirmS: deliveryConfirmS as number, limits, limitSettings, limitRuntime: { timed: {} }, ...(quotas ? { quotas } : {}), countExternal, countReportReady, preview, agents, equivalents, watch, notify, away, manager, board, mcp, queue, reportSettleS, cleanWorktreeCache, cohort, overload, limited, collisions, cancel, usage, guideLang, capacity, disk, git, gc, startLockStaleS, setupTimeoutS, wall, hosts, ...(localHost ? { localHost } : {}), placement, perf, path: file, loaded: exists };
   if (mirror) config.mirrorDir = resolvePath(mirror);
   if (warnings.length) config.warnings = warnings;
   return effectiveLimitConfig(config, now);

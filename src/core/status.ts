@@ -121,6 +121,7 @@ export interface StatusRow {
   /** `pin: true` in the spec: the task is never moved to the other provider. */
   pin: boolean;
   integration?: boolean;
+  placementReason?: string;
   limitEvidence?: {text: string; reset?: number};
   /** The task has no tmux window any more (or was moved to the other provider): it is done, whatever it left behind. Shown under "Finished" on the board. */
   finished: boolean;
@@ -420,6 +421,7 @@ export async function collectStatus(ctx: Context, opts: CollectOptions = {}): Pr
       ...((state === 'needs-input' || state === 'needs-trust') && alive ? { menuOptions: menuOptionLines(screenText) } : {}),
       pin: record.pin === true,
       integration: record.integration === true,
+      ...(record.placementReason ? { placementReason: record.placementReason } : {}),
       ...(quota ? {usage_hint: quota, usage_reset_at: quotaReset(quota, runner.now()) ? new Date(quotaReset(quota, runner.now())!).toISOString() : null, limitEvidence: {text: quota, reset: quotaReset(quota, runner.now())}} : {}),
       finished: (!alive && !lossHint) || state === 'superseded',
       hidden: hiddenBy !== null,

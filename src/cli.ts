@@ -1,3 +1,5 @@
+import { addHost, doctorHost, hostPlacementStats } from './core/host-commands.ts';
+import { setHostPause } from './core/host-availability.ts';
 import { linkBaseWarnings } from './core/links.ts';
 import { peakLines } from './core/peak.ts';
 import { holdUntil, providerHoldLines } from './core/provider-hold.ts';
@@ -7,7 +9,7 @@ import { dryCloseTimingPreview, dryQueueTimingPreview, measureReadTimings, rende
 import { queueViews } from './core/queue.ts';
 import { attachHint, tmuxCommand } from './core/tmux-socket.ts';
 import { collectMachine, machineLine } from './core/machine.ts';
-import { probeHosts, renderHostsHealth } from './core/host-health.ts';
+import { probeHosts, probeLocalHost, renderHostsHealth } from './core/host-health.ts';
 import { readHostsCache, writeHostsCache } from './core/hosts.ts';
 import { exportDataset, validateDatasetOptions } from './core/dataset.ts';
 import type { DatasetOptions } from './core/dataset.ts';
@@ -453,22 +455,23 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       deps.stdout(text);
     }));
 
-  program.command('hosts').description('Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: <name>" starts its worktree, setup and agent there.')
+  const hostsCommand = program.command('hosts').description('Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: <name>" starts its worktree, setup and agent there.')
     .option('--json', 'machine-readable health records')
     .option('--refresh', 'probe every host now, even when the cache is fresh')
     .option('--clip', 'copy the summary to the clipboard')
     .action(guarded(async (opts: { json?: boolean; refresh?: boolean; clip?: boolean }) => {
       if (opts.clip && opts.json) throw new AgentctlError('--json and --clip exclude each other');
       const ctx = contextFor(false, { migrate: false });
-      if (Object.keys(ctx.config.hosts).length === 0) {
+      if (Object.keys(ctx.config.hosts).length === 0 && !ctx.config.localHost) {
         if (opts.json) return line(JSON.stringify({ hosts: [] }, null, 2));
         return line(`No hosts configured: add a hosts: section to ${ctx.config.path} (the README "Hosts" section shows the setup).`);
       }
       const fresh = opts.refresh ? undefined : readHostsCache(deps.env ?? process.env, Date.now(), 60_000);
-      const health = fresh?.hosts ?? await probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { env: deps.env ?? process.env });
+      const health = fresh?.hosts ?? (await Promise.all([probeLocalHost(ctx.runner, ctx.config), probeHosts(ctx.runner, ctx.config.hosts, ctx.config, { env: deps.env ?? process.env })])).flat();
       if (!fresh) await writeHostsCache(ctx.runner, health, deps.env ?? process.env);
-      if (opts.json) return line(JSON.stringify({ cached: Boolean(fresh), hosts: health }, null, 2));
-      const text = renderHostsHealth(health).join('\n') + '\n';
+      const placement = await hostPlacementStats(ctx, health);
+      if (opts.json) return line(JSON.stringify({ cached: Boolean(fresh), hosts: health, placement }, null, 2));
+      const text = [...renderHostsHealth(health), ...placement.map(h => `[${h.name}] ${h.availability} · active ${h.running}/${h.max_total ?? '∞'}${h.perf ? ` · perf ${h.perf}` : ''}`)].join('\n') + '\n';
       if (opts.clip) {
         const copy = await writeClipboard(ctx.runner, text);
         if (copy.ok) return line(`Copied hosts to the clipboard (${copy.tool}).`);
@@ -476,6 +479,18 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
       }
       deps.stdout(text);
     }));
+
+  hostsCommand.command('add').description('Register a remote worker in config.yaml').argument('<host>', 'name for the worker').requiredOption('--ssh <user@host>', 'SSH user and host').option('--port <port>', 'SSH port', '22')
+    .action(guarded(async (host: string, opts: {ssh: string; port: string}) => line(await addHost(contextFor(false, { migrate: false }), host, opts.ssh, Number(opts.port)))));
+  hostsCommand.command('doctor').description('Check tools, disks and logins on a worker and print setup commands').argument('<host>', 'name of the worker')
+    .action(guarded(async (host: string) => line((await doctorHost(contextFor(false, { migrate: false }), host)).join('\n'))));
+  for (const action of ['pause', 'resume'] as const) {
+    const command = hostsCommand.command(action)
+      .description(action === 'pause' ? 'Reserve a host for the owner' : 'Clear a manual owner reservation')
+      .argument('<host>', 'configured host or local');
+    if (action === 'pause') command.option('--until <time>', 'HH:MM, ISO date or duration (e.g. 3h)');
+    command.action(guarded(async (host: string, opts: {until?: string}) => line(await setHostPause(contextFor(false, { migrate: false }), host, action === 'pause', opts.until))));
+  }
 
   program
     .command('consult')
@@ -507,11 +522,11 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
     .action(
       guarded(async (file: string | undefined, opts: { clip?: boolean; yes?: boolean; dryRun?: boolean; reuse?: boolean; agent?: AgentName | false; switch?: boolean; waitTrust?: boolean; cohort?: string; json?: boolean }) => {
         const ctx = contextFor(Boolean(opts.dryRun), { silent: Boolean(opts.json) });
-        if (!opts.dryRun && !(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
         const source = opts.clip ? 'clipboard' : (file ?? 'stdin');
         const raws = splitSpecs(await readSpecSource(file, opts.clip), source);
         applyCohortFlag(raws, opts.cohort);
         const specs = raws.map((raw) => resolveSpec(raw, { config: ctx.config }));
+        if (!opts.dryRun && specs.some(spec => !spec.host && !spec.placement) && !(await confirmDiskStart(ctx, Boolean(opts.yes)))) return;
         for (const spec of specs) if (!spec.host) {
           const baseWarnings = await linkBaseWarnings(ctx.runner, spec.links, spec.repos);
           if (opts.clip) spec.linkWarnings = [...(spec.linkWarnings ?? []), ...baseWarnings];
@@ -544,7 +559,15 @@ export async function main(argv: string[], deps: CliDeps = defaultDeps()): Promi
         let results: NewResult[] = [];
         const deferred: string[] = [];
         try {
-          results = await newTasks(ctx, specs, options);
+          const dispatched = opts.dryRun ? [] : specs.filter(s => s.placement || s.perf);
+          if (dispatched.length) {
+            const plan = await planQueueAdd(ctx, dispatched.map(spec => raws[spec.index - 1]!), { agent: options.agent });
+            const added = await commitQueueAdd(ctx, plan.items, { agent: options.agent, reuse: options.reuse, noAgent: options.noAgent });
+            deferred.push(...added.map(e => e.task));
+            if (!opts.json) for (const task of added) line(`${task.task}: queued for watch placement`);
+          }
+          const immediate = specs.filter(spec => !dispatched.includes(spec));
+          if (immediate.length) results = await newTasks(ctx, immediate, options);
         } catch (error) {
           if (error instanceof ReviewBlocked) {
             const spec = specs.find(candidate => candidate.task === error.task);

@@ -6,7 +6,7 @@ import { describe, it } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import YAML from 'yaml';
-import { Harness, defaultCacheRoot } from '../scripts/live-harness.ts';
+import { Harness, commandV, defaultCacheRoot } from '../scripts/live-harness.ts';
 import { shellQuote } from '../src/core/util.ts';
 import { REPO_ROOT } from './helpers.ts';
 
@@ -23,8 +23,13 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
     const cache = defaultCacheRoot();
     const h = new Harness({ name: 'p19-stdio', cacheRoot: cache, config: 'capacity: {snapshot: false, codex_refresh: false}\nmcp: {allow: [new]}\nwatch: {interval: 1}\n' }, REPO_ROOT);
     // tests/isolation.ts replaced tmux on the PATH of this process with a stub; the harness links the real tools into its fake bin directory.
+    // Only the real tmux goes in front: on Linux it lives in /usr/bin next to a system node (and possibly a real agent).
+    const realTmux = commandV('tmux', ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'].join(':'));
+    assert.ok(realTmux, 'tmux is installed');
+    const tools = fs.mkdtempSync(path.join(process.env.TMPDIR ?? REPO_ROOT, 'p19-tools-'));
+    fs.symlinkSync(realTmux, path.join(tools, 'tmux'));
     const isolatedPath = process.env.PATH;
-    process.env.PATH = `${['/opt/homebrew/bin', '/usr/local/bin'].join(':')}:${isolatedPath}`;
+    process.env.PATH = `${tools}:${isolatedPath}`;
     try { h.start(); } finally { process.env.PATH = isolatedPath; }
     const clients: Client[] = [];
     try {

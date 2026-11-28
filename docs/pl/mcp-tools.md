@@ -80,7 +80,9 @@ Argumenty z ? są opcjonalne. Pola dostawców obejmują opcjonalnych; uruchomion
 | `doctor` | odczyt | `as?`, `project?` | Diagnoza instalacji, uprawnień i dysku; budżetowany odczyt z cache. |
 | `equivalents` | odczyt | `as?` | Tabela mapowań model/effort aktywnych dostawców. |
 | `config_show` | odczyt | `as?` | Efektywny config z maskowaniem sekretów; queue_hold jako pierwszy klucz. |
-| `hosts` | odczyt | `as?`, `refresh?` | Zdrowie hostów SSH: połączenie, GPU, dysk, tmux, CLI i klony; host: w spec uruchamia zadanie zdalnie z lokalną kopią raportu. |
+| `hosts` | odczyt | `as?`, `refresh?` | Stan hostów, wybór miejsca, dostępność właściciela i rezerwacje perf. |
+| `hosts_pause` | zapis | `as?`, `host?`, `until?`, `confirm?`, `preview_token?` | Zarezerwuj host dla właściciela, opcjonalnie do określonej godziny. |
+| `hosts_resume` | zapis | `as?`, `host?`, `confirm?`, `preview_token?` | Zwolnij ręczną rezerwację hosta. |
 | `manager_status` | odczyt | `as?` | Stan lokalnej sesji manager. |
 | `away_status` | odczyt | `as?` | Stan away i telefonu. |
 | `report` | odczyt | `as?`, `task` | Kanoniczna ścieżka raportu i kandydaci. |
@@ -126,4 +128,4 @@ send_enter: dodatkowe uprawnienie send enter_only; nie przyznaje zwykłego send.
 
 ## Snapshot ticka
 
-`status`, `queue_list`, `capacity`, `limits`, `config_show` i `doctor` czytają atomowy snapshot ticka, gdy jest młodszy niż dwa interwały watch i pasuje konfiguracja. Tekst podaje wiek, JSON pole `snapshot_age_s`. Brak/stary snapshot uruchamia oznaczony odczyt ograniczony budżetem. Doctor ze snapshotu pomija sondowanie wersji/dostawców; do tej diagnostyki służy CLI doctor.
+`status`, `queue_list`, `capacity`, `limits`, `config_show` i `doctor` czytają atomowy snapshot ticka, gdy pasuje konfiguracja i jest młodszy niż 60 s (`status`, `queue_list`, `limits`; obciążony cykl watch może przekroczyć dwa interwały) lub dwa interwały watch (`config_show`, `doctor`). Blokada dostawcy lub rezerwacja ustawiona po ticku jest uwzględniana w limitach i kolejce ze snapshotu. Tekst podaje wiek, JSON pole `snapshot_age_s`. Brak/stary snapshot uruchamia oznaczony odczyt ograniczony budżetem. Doctor ze snapshotu pomija sondowanie wersji/dostawców; do tej diagnostyki służy CLI doctor.

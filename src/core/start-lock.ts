@@ -8,7 +8,7 @@ import { FileLockTimeout, withFileLock } from './file-lock.ts';
 import { recordJournal } from './journal.ts';
 import { withCommandStage } from './command-stage.ts';
 
-export interface StartReservation { owner?: string; host?: string; id: string; task: string; window: string; agent: AgentName; pid: number; at: string }
+export interface StartReservation { owner?: string; host?: string; perf?: boolean; reuseWorktree?: string; id: string; task: string; window: string; agent: AgentName; pid: number; at: string }
 const file = (config: Pick<GlobalConfig, 'stateDir'>) => path.join(config.stateDir, 'start-reservations.json');
 export function pendingStarts(config: Pick<GlobalConfig, 'stateDir'>): StartReservation[] {
   try {
@@ -53,7 +53,7 @@ export async function commitStart<T>(ctx: Context, action: () => Promise<T>, tas
 }
 
 /** Caller holds start.lock: this durable write reserves capacity before checkout or the first TASK.md. */
-export async function reserveStarts(ctx: Context, tasks: { task: string; window: string; agent: AgentName; host?: string; owner?: string }[]): Promise<string[]> {
+export async function reserveStarts(ctx: Context, tasks: { task: string; window: string; agent: AgentName; host?: string; owner?: string; perf?: boolean; reuseWorktree?: string }[]): Promise<string[]> {
   if (ctx.runner.dryRun) return [];
   const reservations = tasks.map(task => ({ ...task, id: randomUUID(), pid: process.pid, at: new Date(ctx.runner.now()).toISOString() }));
   await ctx.runner.writeFile(file(ctx.config), JSON.stringify([...pendingStarts(ctx.config), ...reservations]));

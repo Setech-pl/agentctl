@@ -52,6 +52,16 @@ for (const phase of ['write', 'fsync', 'rename'] as const) it(`K1 ${phase}: fail
   const runner = new SandboxRunner(); await runner.writeFile(file, fs.readFileSync(file, 'utf8')); const old = fs.readFileSync(file, 'utf8'); f.tmux.add('state', '❯ \n');
   let fail = true;
   if (phase === 'write') { const opened = new Set<number>(), open = fs.openSync; t.mock.method(fs, 'openSync', function(file: fs.PathLike, ...args: unknown[]) { const fd = Reflect.apply(open, fs, [file, ...args]); if (String(file).includes('.TASK.md.')) opened.add(fd); return fd; }); const original = fs.writeFileSync; t.mock.method(fs, 'writeFileSync', function(file: fs.PathLike | number, ...args: unknown[]) { if (typeof file === 'number' && opened.has(file) && fail) { fail = false; fs.writeSync(file, 'PARTIAL'); throw enospc(); } return Reflect.apply(original, fs, [file, ...args]); }); }
+  // RealRunner writes go through FileHandle (fsync off the event loop): the same fault on the asynchronous path.
+  const popen = fs.promises.open;
+  t.mock.method(fs.promises, 'open', async function(target: fs.PathLike, ...args: unknown[]) {
+    const handle = await Reflect.apply(popen, fs.promises, [target, ...args]) as fs.promises.FileHandle;
+    if (!String(target).includes('.TASK.md.')) return handle;
+    if (phase === 'write') { const write = handle.writeFile.bind(handle); handle.writeFile = (async (...b: Parameters<typeof write>) => { if (fail) { fail = false; await handle.write('{'); throw enospc(); } return write(...b); }) as typeof handle.writeFile; }
+    if (phase === 'fsync') { const sync = handle.sync.bind(handle); handle.sync = async () => { if (fail) { fail = false; throw enospc(); } return sync(); }; }
+    return handle;
+  });
+  if (phase === 'rename') { const prename = fs.promises.rename; t.mock.method(fs.promises, 'rename', async function(from: fs.PathLike, to: fs.PathLike) { if (to === file && fail) { fail = false; throw enospc(); } return Reflect.apply(prename, fs.promises, [from, to]); }); }
   if (phase === 'fsync') { const original = fs.fsyncSync; t.mock.method(fs, 'fsyncSync', function(fd: number) { if (fail) { fail = false; throw enospc(); } return original(fd); }); }
   if (phase === 'rename') { const original = fs.renameSync; t.mock.method(fs, 'renameSync', function(from: fs.PathLike, to: fs.PathLike) { if (to === file && fail) { fail = false; throw enospc(); } return original(from, to); }); }
   await assert.rejects(setHeaderFields(runner, file, { report_candidate: null, report_complete_hash: 'NEW' }), /disk full/);

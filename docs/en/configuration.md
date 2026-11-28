@@ -13,7 +13,16 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | Key | Type / default / layers | Meaning |
 |---|---|---|
 | `hosts` | mapping · `{}` · g | Named SSH hosts: ssh, port, identity_file, work_dir, repos, providers, limits, env. [Full host configuration](hosts.md). |
+| `perf` | mapping · 30m, 2048 MiB · g | Exclusive host wait and artifact size limit. |
+| `placement` | mapping · local · g | Automatic host placement, preference, failover and chat/cohort overrides. |
 | `host` | name · none · s | Execute this task on a configured host; keep the local report mirror and account plus host limits. |
+| `on_pass` | cohort or pattern · unset · s | Wait for the matching integration PASS. |
+| `at` | HH:MM · unset · s | Next daily local-time boundary for the order. |
+| `start_after` | ISO timestamp · unset · s | Earliest eligible perf start. |
+| `results` | relative path · unset · s | Perf result directory to copy back to the Mac. |
+| `artifacts` | list · [] · s | Perf inputs from Mac build directories. |
+| `reuse_worktree` | task ID · unset · s | Reuse a closed task’s registered worktree on its own host. |
+| `base_task` | task ID · unset · s | Use another task’s output or branch as the worktree base. |
 
 ## Layers and instance
 
@@ -79,6 +88,7 @@ Types/defaults below are cross-checked with [config.ts](../../src/core/config.ts
 | `repos[].worktree` | path · `<worktree_root>/<repo>-<task>` · s | Where the new worktree goes. Must differ from `path`. |
 | `repos[].setup` | list of strings · none · s | Shell commands for this repository's own worktree (see `setup`). The chat cannot send it. |
 | `repos[].base` | git ref · none · s | Start point of the worktree. |
+| `repos[].base_task` | task ID · unset · s | Resolve one repository’s base from the named task. |
 | `repos[].branch` | string · none · s | Branch to create (or reuse). Without it the worktree is detached. |
 | `review_of` | task ID or list · none · s | The task(s) under review. For every listed task the reviewer must use another agent or another model than its author; the preview warns when the reviewer shares the author's provider. The first ID is the primary reviewed task. |
 | `review.mode` | `readonly-on-author` · own checkout · s | Use a stopped local author's worktree, with separate report and evidence under `cache`. Requires exactly one `review_of`. |

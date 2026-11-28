@@ -533,3 +533,80 @@ it('REL0243-LINKS: remote project defaults reject closed tasks and honor links: 
   await assert.rejects(newTasks(clean.ctx, [clean.spec('R-1', 'links: []')], {waitTrust: false}), /waits for folder trust/);
   assert.ok(!clean.commands.some(c => c[0] === 'ln'));
 });
+
+it('NODES0262-PLACEMENT: production shape routes an automatic order to the WSL worker and a pinned order to the dispatcher', async () => {
+  const w = world();
+  const now = w.runner.now();
+  if (w.config.placement) {
+    w.config.placement.prefer = ['pc', 'local'];
+    w.config.placement.failoverAfterMs = 600_000;
+  }
+  w.config.hosts.pc!.loadThreshold = 20;
+  const macRepo = path.join(w.remoteHome, 'mac-app');
+  fs.mkdirSync(macRepo, { recursive: true });
+  w.config.localHost = { repos: {app: macRepo} };
+  const cli = { id: 'claude' as const, command: 'claude', present: true, loggedIn: 'in' as const };
+  const pc = { name: 'pc', state: 'reachable' as const, probedAt: new Date(now).toISOString(), load: 2, cpus: 10, memoryFreeKb: 4 * 1024 ** 2,
+    clis: [cli], tmux: {present: true}, disk: {workDir: w.work, freeKb: 80 * 1024 ** 2, totalKb: 256 * 1024 ** 2}, repos: [{name: 'app', path: w.clone, present: true}] };
+  const local = { name: 'local', state: 'reachable' as const, probedAt: pc.probedAt, load: 3, cpus: 8, clis: [cli] };
+  await writeHostsCache(w.runner, [pc, local]);
+  const raws = splitSpecs(`---
+task: AUTO-PC
+host: auto
+agent: claude
+repos: [{path: app, branch: remote-feature}]
+---
+Build on the best worker.
+---
+task: PIN-MAC
+host: local
+agent: claude
+repos: [{path: app, worktree: "${path.join(w.remoteHome, 'mac-wt')}"}]
+---
+Use the Mac.
+`);
+  const entries = await commitQueueAdd(w.ctx, (await planQueueAdd(w.ctx, raws)).items);
+  assert.equal(describeQueue(w.config, entries, [], [], now)[0]!.entry.host, 'pc');
+  assert.equal(describeQueue(w.config, entries, [], [], now)[1]!.entry.host, undefined);
+
+  await writeHostsCache(w.runner, [{...pc, load: 21}, local]);
+  assert.match(describeQueue(w.config, entries, [], [], now)[0]!.condition.text, /\[local\]/);
+  await writeHostsCache(w.runner, [{...pc, disk: {...pc.disk, freeKb: 1}}, local]);
+  assert.match(describeQueue(w.config, entries, [], [], now)[0]!.condition.text, /\[local\]/);
+  await writeHostsCache(w.runner, [{...pc, state: 'unreachable'}, local]);
+  assert.match(describeQueue(w.config, entries, [], [], now)[0]!.condition.text, /pc.*local.*failover/);
+  const after = now + w.config.placement.failoverAfterMs + 1;
+  await writeHostsCache(w.runner, [{...pc, state: 'unreachable', probedAt: new Date(after).toISOString()}, {...local, probedAt: new Date(after).toISOString()}]);
+  assert.match(describeQueue(w.config, entries, [], [], after)[0]!.entry.placementReason ?? '', /\[local\]/);
+
+  const { setHostPause } = await import('../src/core/host-availability.ts');
+  await writeHostsCache(w.runner, [pc, local]);
+  await setHostPause(w.ctx, 'pc', true, '3h');
+  assert.match(describeQueue(w.config, entries, [], [], now)[0]!.condition.text, /\[local\]/);
+  await setHostPause(w.ctx, 'pc', false);
+  w.config.hosts.pc!.maxTotal = 1;
+  assert.match(describeQueue(w.config, entries, [{host: 'pc', agent: 'codex'}], [], now)[0]!.condition.text, /\[local\]/);
+  w.config.limits.claude = 1;
+  assert.match(describeQueue(w.config, entries, [{host: 'pc', agent: 'claude'}], [], now)[0]!.condition.text, /claude 1\/1/);
+  await setHostPause(w.ctx, 'local', true);
+  w.config.limits.claude = 3;
+  const memory = new QueueMemory();
+  const started = await queueTick(w.ctx, memory, { notify: async () => {} });
+  assert.deepEqual(started, ['AUTO-PC'], JSON.stringify(describeQueue(w.config, readQueue(w.config), [], [], w.runner.now()).map(v => v.condition)));
+  await memory.idle();
+  const record = readTaskRecord(w.config, 'auto-pc');
+  assert.equal(record?.host, 'pc');
+  assert.match(record?.placementReason ?? '', /\[pc\]/);
+  assert.equal(readQueue(w.config).some(e => e.task === 'PIN-MAC'), true);
+});
+
+it('NODES0262-BASE: a Mac-only base is fetched into the worker before its worktree is created', async () => {
+  const w = world();
+  const raw = splitSpecs('---\ntask: R-1\nhost: pc\nagent: claude\nrepos: [{path: app, base: mac-only, branch: remote-feature}]\n---\nPrepare.')[0]!;
+  w.config.hosts.pc!.macSsh = 'owner@fake-mac:2223';
+  await newTasks(w.ctx, [resolveSpec(raw, {config: w.config})], {noAgent: true});
+  const fetched = w.commands.findIndex(argv => argv.some(arg => arg.includes('owner@fake-mac:2223')));
+  const checkout = w.commands.findIndex(argv => argv.includes('worktree') && argv.includes('add'));
+  assert.ok(fetched >= 0 && checkout > fetched);
+  assert.ok(w.commands[checkout]!.includes('refs/remotes/agentctl-mac/mac-only'));
+});

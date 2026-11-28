@@ -1,4 +1,5 @@
 import { composerFixture } from './composer-fixture.ts';
+import os from 'node:os';
 import { acknowledgingRespond } from './helpers.ts';
 import { completedRecordFromSpec as recordFromSpec } from './helpers.ts';
 import assert from 'node:assert/strict';
@@ -466,7 +467,8 @@ describe('pull --ready', () => {
     void config;
   });
 
-  it('pull --ready through the CLI; --all alone and a task together with --ready are errors', async () => {
+  it('pull --ready through the CLI; --all alone and a task together with --ready are errors', async (t) => {
+    t.mock.method(os, 'platform', () => 'darwin'); // the clipboard fixture fakes the macOS tools (pbcopy/pbpaste)
     const { config, m, specs } = fleet('pull5');
     writeReport(specs[0]!, 'cli');
     m.windows.set('nc-1', IDLE);
@@ -560,7 +562,8 @@ describe('close with several tasks', () => {
 });
 
 describe('status --clip', () => {
-  it('copies a compact Markdown table: task, agent/model/effort, state, time, report, pulled?', async () => {
+  it('copies a compact Markdown table: task, agent/model/effort, state, time, report, pulled?', async (t) => {
+    t.mock.method(os, 'platform', () => 'darwin'); // the clipboard fixture fakes the macOS tools (pbcopy/pbpaste)
     const root = scratch.sub('statusclip');
     const config = makeConfig(root);
     const m = new Machine();

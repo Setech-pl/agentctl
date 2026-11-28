@@ -14,10 +14,12 @@ export const CLI_MCP: Record<string, string[]> = {
   events: ['events_since'], usage: ['usage'], resume: ['resume'], mark: ['mark'], log: ['log'], stats: ['stats'], gc: ['gc_preview', 'gc'], pin: ['pin'], unpin: ['unpin'], archive: ['archive'], hide: ['hide'], unhide: ['unhide'], pull: ['get_report', 'pull_ready'], close: ['close'], cancel: ['cancel'],
   report: ['report', 'report_from'], away: ['away_status', 'away'], 'away status': ['away_status'], 'away on': ['away'], 'away off': ['away'], manager: ['manager_start', 'manager_status'], 'manager stop': ['manager_stop'], 'notify-test': ['notify_test'], adopt: ['adopt'], interrupt: ['interrupt'], move: ['move'], peek: ['peek'], doctor: ['doctor'],
   wall: ['wall_read'], 'wall channels': ['wall_read'], 'wall read': ['wall_read'], 'wall post': ['wall_post'], 'wall reply': ['wall_reply'], 'wall status': ['wall_set_status'],
-  hosts: ['hosts'],
+  hosts: ['hosts'], 'hosts pause': ['hosts_pause'], 'hosts resume': ['hosts_resume'],
 };
 export const CLI_MCP_EXCEPTIONS: Record<string, string> = {
   dataset: 'Local dataset command group; CLI only.',
+  'hosts add': 'Owner terminal writes the SSH endpoint to the dispatcher configuration.',
+  'hosts doctor': 'Owner terminal diagnoses SSH and prints machine setup commands.',
   'dataset export': 'Owner-only local benchmark export; CLI only, no MCP tool.',
   up: 'Interactive terminal orchestration: opens watch/board and optionally manager; use the CLI.',
   canary: 'Owner runs a local shadow replay over an explicitly named state directory.',

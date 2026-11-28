@@ -5,7 +5,10 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 export const runtimesDir = () => process.env.AGENTCTL_RUNTIMES_DIR ?? path.join(os.userInfo().homedir, 'Projects/cache-dev/runtimes');
-export const node22Path = (dir = runtimesDir()) => path.join(dir, 'node-v22.14.0-darwin-arm64/bin/node');
+/** The pinned Node 22 build for a platform: the nodejs.org archive name without its extension. */
+export const node22Dist = (platform: string = process.platform, arch: string = process.arch): string => `node-v22.14.0-${platform}-${arch}`;
+const NODE22_TARGETS = new Set(['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64']);
+export const node22Path = (dir = runtimesDir(), platform: string = process.platform, arch: string = process.arch) => path.join(dir, `${node22Dist(platform, arch)}/bin/node`);
 export function checkRuntime(node: string, expected: string, version = (file: string) => execFileSync(file, ['--version'], { encoding: 'utf8' }).trim()): string {
   const actual = version(node);
   if (expected.endsWith('.')) {
@@ -27,11 +30,12 @@ export interface RuntimeIO {
 }
 export async function ensureNode22(work: string, io: RuntimeIO = {}): Promise<string> {
   const dir = io.dir ?? runtimesDir();
-  const node = node22Path(dir);
+  const platform = io.platform ?? process.platform, arch = io.arch ?? process.arch;
+  const node = node22Path(dir, platform, arch);
   if (fs.existsSync(node)) { checkRuntime(node, '22.14.0', io.version); return node; }
-  if ((io.platform ?? process.platform) !== 'darwin' || (io.arch ?? process.arch) !== 'arm64') throw new Error('Node 22 runtime requires darwin-arm64');
+  if (!NODE22_TARGETS.has(`${platform}-${arch}`)) throw new Error(`Node 22 runtime requires one of ${[...NODE22_TARGETS].join(', ')} (this is ${platform}-${arch})`);
   fs.mkdirSync(dir, { recursive: true });
-  const name = 'node-v22.14.0-darwin-arm64.tar.gz';
+  const name = `${node22Dist(platform, arch)}.tar.gz`;
   const download = io.download ?? (async (file: string) => {
     const response = await fetch(`https://nodejs.org/dist/v22.14.0/${file}`);
     if (!response.ok) throw new Error(`Node download ${file}: HTTP ${response.status}`);
@@ -54,6 +58,14 @@ export function homebrewNode26(): string {
   checkRuntime(node, '26.');
   return node;
 }
+/** Node 26 for the gate: Homebrew's on macOS; elsewhere (Linux has no Homebrew node) the Node 26 that runs the gate. */
+export function node26Runtime(platform: string = process.platform, execPath: string = process.execPath, version?: (file: string) => string): string {
+  if (platform === 'darwin') return homebrewNode26();
+  const node = fs.realpathSync(execPath);
+  checkRuntime(node, '26.', version);
+  return node;
+}
+export const node26Label = (platform: string = process.platform): string => platform === 'darwin' ? 'Homebrew Node 26' : 'Node 26 running the gate';
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.dirname, 'runtime.ts')) {
   ensureNode22(process.argv[2]!).catch(error => { console.error(error); process.exitCode = 1; });

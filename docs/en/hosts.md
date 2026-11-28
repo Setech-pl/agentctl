@@ -162,3 +162,80 @@ All 0.22.5–0.22.8 behavior also applies remotely: pin/unpin and GC `--keep TAS
 Queue previews use a host health sample no older than 60 seconds for that host's `work_dir`; missing/stale/unknown samples hold starts. Before remote worktree/setup mutation, direct and queued starts query fresh host filesystem counters (the closest existing ancestor if work_dir is new). The dispatcher never stats a remote path locally. Provider peak schedules and global holds apply before remote setup; existing tasks and explicit owner resume retain their documented behavior. Scrolled permission menus retain answer tokens when question/selected option semantics stay the same. Snapshot status/capacity reads retain host labels and cached host disk samples, without SSH or inventory walks.
 
 Remote project defaults follow the same closed-task checks and `links: []` opt-out as local tasks; `{worktree:repo}` can select a repository supplied by the spec.
+
+## Two machines: Mac + PC/WSL
+
+Run one dispatcher on the Mac. Keep watch, the board, WALL and every ordering chat's MCP connection there. The PC runs its own tmux session, provider CLIs and worktrees in Ubuntu WSL. On the Mac:
+
+```sh
+cd ~
+agentctl hosts add pc --ssh krzet@192.168.2.64 --port 2222
+agentctl hosts doctor pc
+```
+
+In Ubuntu, install and start OpenSSH, install tmux, Git, Node and rsync, create the work directory, and clone the configured repositories. Sign in to both CLIs in WSL. On Windows, run the portproxy and firewall commands printed by doctor for NAT networking. Refresh the proxy after WSL gets a new address. Doctor checks the SSH key, non-interactive PATH, tools and login state, the WSL root and work volume, PowerShell, Windows Node, Chrome/Edge, and Windows C: space. For reverse fetch, enable macOS Remote Login and verify BatchMode SSH from WSL to the Mac as the worker account. Use rsync 3 on both machines.
+
+```yaml
+placement:
+  default: auto
+  prefer: [pc, local]
+  failover_after: 10m
+  chats: {"chat:mac-tools": local}
+  cohorts: {keychain: local}
+hosts:
+  local:
+    repos: {hems: ~/Projects/hems}
+    max_total: 2
+  pc:
+    ssh: krzet@192.168.2.64
+    port: 2222
+    work_dir: ~/agentctl-work
+    repos: {hems: ~/src/hems}
+    providers: [claude, codex]
+    limits: {claude: 1, codex: 1}
+    max_total: 2
+    load_threshold: 25
+    sync: fetch-back
+    mac_ssh: owner@macbook.local
+    trust_work_dir: true
+    availability:
+      windows: ["mon 01:00-08:00", "tue 01:00-08:00", "wed 01:00-08:00", "thu 01:00-08:00", "fri 01:00-08:00", "sat 01:00-08:00", "sun 01:00-08:00"]
+      processes: [ComfyUI, ExampleGame.exe]
+      gpu_busy_pct: 70
+      yield: stop-new
+perf: {wait_max: 30m, max_artifact_mb: 2048}
+```
+
+- Order with `host: auto`. With no host in the spec, the chat override takes priority, then the cohort override, then `placement.default` (initially `local`). Pin `host: pc` for Windows or GPU work and `host: local` for Keychain or Mac-only tools. Auto placement checks the account slot, host caps, repo clone, provider login, health sampled within 60 seconds, work volume, load and availability. It gives related worktrees priority and uses running task count followed by `prefer` for ties. An offline eligible PC holds local fallback for `failover_after`. An already-started task keeps its host.
+- A `hosts.local` entry with `ssh` is a legacy SSH host named `local`, not the dispatcher policy: an explicit `host: local` goes to that SSH host, while `placement.default: local` and specs without `host` stay on the dispatcher. Rename it (for example `old-pc`) to use `hosts.local` for the dispatcher's own limits.
+- `review_of`, `setup.from_task`, `base_task` and `after` give related tasks host affinity. `reuse_worktree: TASK` requires the original task to be closed and uses that exact host and checkout. Dependencies are installed on the destination host. Local-only review modes retain their existing local requirements.
+- `watch` fetches the task branch back into the Mac clone when the worker reports and at close. A checked-out or divergent branch keeps its local ref and the PC head remains at `refs/remotes/pc/<branch>`. The journal records the conflict. Configure `fetch_remote: pc` to use an existing Git remote in the Mac clone. `mac_ssh` lets WSL fetch Mac-only bases and branches from completed `base_task` outputs. `sync: off` disables both directions.
+- `agentctl hosts pause pc --until 3h` reserves the PC until expiry. Accepts HH:MM, ISO timestamps and durations. `agentctl hosts resume pc` clears a manual reservation. Board `H` followed by the host number toggles a reservation. For MCP add `hosts_pause` and `hosts_resume` to `mcp.allow` and use their preview/confirm flow. Use `hosts.local.availability` to reserve the Mac. Schedules use the dispatcher's local time and can cross midnight. Process names match Windows process names on WSL and command names on the Mac. `stop-new` lets current turns finish. `pause-all` suspends process trees rooted at managed panes and resumes them when availability returns.
+- Set `trust_work_dir: true` after approving the work directory for Codex launches. Claude's interactive trust decision stays with the owner. The `needs-trust` event contains the SSH/tmux attach command.
+
+### Performance runs on Windows
+
+The following one-shot order runs after the next 03:00 dispatcher time and an integration PASS for the named cohort or task pattern. Use `start_after` with an ISO timestamp for a dated run. A due perf order reserves the worker while existing tasks finish. After `perf.wait_max` it stays held until `agentctl queue retry PERF-HEMS`. Keep the result verdict in the agent's report.
+
+```sh
+cd ~
+agentctl queue ~/specs/PERF-HEMS.md
+```
+
+```yaml
+---
+task: PERF-HEMS
+agent: codex
+class: perf
+host: pc
+repos: []
+at: "03:00"
+on_pass: HEMS-INTEGRATE-*
+artifacts: [{from_task: HEMS-BUILD, path: dist, dest: dist}]
+results: results
+---
+Run the HEMS Windows benchmark using ~/src/hems/scripts/perf/win/measure.ps1 against the staged dist/.
+Write measurements under results/ and record the performance verdict in the canonical report.
+```
+
+The perf agent starts in a dedicated WSL workspace with the staged build. You can use an absolute Mac build directory in `artifacts[].path`. Transfers use rsync checksum mode and reject symlinks, dependency trees and Git metadata. The byte limit applies to inputs and results. Results land in `PERF-HEMS.results/` next to the report. The worker removes staged builds after report transfer.

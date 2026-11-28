@@ -1,3 +1,6 @@
+import { waitingPerfReservation } from './queue.ts';
+import { hostAvailability } from './host-availability.ts';
+import { readHostsCache } from './hosts.ts';
 import { chatQuotaWait } from './chat-quotas.ts';
 import { checkHostLimit } from './host-limits.ts';
 import { installRemoteHooks } from './host-task.ts';
@@ -36,6 +39,7 @@ import { AgentctlError, plural } from './util.ts';
  */
 
 export interface ResumeCandidate {
+  perf?: boolean;
   owner?: string;
   host?: string;
   task: string;
@@ -60,7 +64,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     if (row.state === 'superseded' || row.state === 'orphan') continue;
     const record = opts.records ? opts.records.get(row.windowName) : readTaskRecord(ctx.config, row.windowName);
     if (!record || record.agent === 'unknown' || opts.automaticOnly && legacyLaunch(record)) continue;
-    const worktree = record.repos[0]?.worktree;
+    const worktree = record.remoteCwd ?? record.repos[0]?.worktree;
     if (!worktree) continue;
     if (record.host) {
       if (!record.remoteDir || !record.remoteReport || ctx.hosts.connection(record.host).unreachable) continue;
@@ -71,7 +75,7 @@ export async function findResumable(ctx: Context, opts: { all?: boolean; rows?: 
     const sessions = readTaskSessions(ctx.config, record.window);
     const sessionId = (sessions[record.agent] ?? []).at(-1)?.id;
     const originalPrompt = !sessionId && !row.tmuxLost && (Boolean(row.launchExit) || record.promptDelivery === 'launching' || Boolean(record.launchAt && record.pendingPrompt && record.promptKind !== 'followup'));
-    out.push({ owner: record.owner, host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), ...(originalPrompt ? {originalPrompt} : {}), ...(legacyLaunch(record) ? {explicitOnly: true} : {}), hasReport });
+    out.push({ ...(record.perf ? { perf: true } : {}), owner: record.owner, host: record.host, task: row.task, window: record.window, agent: record.agent, model: record.model, effort: record.effort, worktree, ...(sessionId ? { sessionId } : {}), ...(originalPrompt ? {originalPrompt} : {}), ...(legacyLaunch(record) ? {explicitOnly: true} : {}), hasReport });
   }
   return out;
 }
@@ -103,12 +107,15 @@ export async function planResume(ctx: Context, typed: string[], opts: { all?: bo
   for (const c of chosen) {
     if (!isActive(config, c.agent)) { skipped.push({ task: c.task, reason: `provider ${c.agent} is not enabled` }); continue; }
     if (occupied.some(w => w.window === c.window)) { skipped.push({ task: c.task, reason: 'task is already starting or running' }); continue; }
-    const problem = checkHostLimit(config, c, occupied) ?? checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session) ?? chatQuotaWait(config, c, occupied);
+    const name = c.host ?? 'local';
+    const available = hostAvailability(config, name, readHostsCache()?.hosts.find(h => h.name === name), ctx.runner.now());
+    const perf = c.host && !c.perf ? waitingPerfReservation(config, c.host, ctx.runner.now()) : undefined;
+    const problem = available ?? (perf ? `host ${name} limit reached: exclusive perf reservation (${perf})` : undefined) ?? checkHostLimit(config, c, occupied) ?? checkWindowLimit(c.agent, config.limits[c.agent], occupied, config.session) ?? chatQuotaWait(config, c, occupied);
     if (problem) {
       skipped.push({ task: c.task, reason: problem });
       continue;
     }
-    occupied.push({ window: c.window, agent: c.agent, host: c.host, owner: c.owner });
+    occupied.push({ window: c.window, agent: c.agent, host: c.host, owner: c.owner, perf: c.perf });
     items.push(c);
   }
   const summary = [

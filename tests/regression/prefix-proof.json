@@ -1177,6 +1177,26 @@
       "MCP-WRITE-PREVIEW: every registered write previews without changing state or sending keys"
     ]
   },
+  "NODES0262-BASE": {
+    "rev": "v0.27.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NODES0262-BASE: a Mac-only base is fetched into the worker before its worktree is created",
+      "NODES0262-BASE: a Mac-only base is fetched into the worker before its worktree is created"
+    ]
+  },
+  "NODES0262-PLACEMENT": {
+    "rev": "v0.27.2",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "NODES0262-PLACEMENT: production shape routes an automatic order to the WSL worker and a pinned order to the dispatcher",
+      "NODES0262-PLACEMENT: production shape routes an automatic order to the WSL worker and a pinned order to the dispatcher"
+    ]
+  },
   "NOTIFY0251-DURABLE": {
     "rev": "v0.25.0",
     "outcome": "FAILS",
@@ -1796,6 +1816,16 @@
       "REL0272-ADMISSION-CHAIN: accepted writes lead queue admission without holding status"
     ]
   },
+  "REL0272-ASYNC-FSYNC": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync on the event loop",
+      "REL0272-ASYNC-FSYNC: state writes and log appends of the runner never fsync on the event loop"
+    ]
+  },
   "REL0272-CANCEL-SNAPSHOT": {
     "rev": "560b422462e02f28812e9251981ddddef4893d24",
     "outcome": "FAILS",
@@ -1804,6 +1834,16 @@
     "failing": [
       "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks",
       "REL0272-CANCEL-SNAPSHOT: watch sees its accepted cancellation before native file callbacks"
+    ]
+  },
+  "REL0272-CANDIDATE-WATCH": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task",
+      "REL0272-CANDIDATE-WATCH: watch finds a configured report candidate of a needs-input task"
     ]
   },
   "REL0272-COLD-SNAPSHOT": {
@@ -1924,6 +1964,16 @@
     "failing": [
       "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons",
       "REL0272-HOLD-WRITES: a held queue publishes one journal append and keeps all four reasons"
+    ]
+  },
+  "REL0272-HOST-PERSIST": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-HOST-PERSIST: an unchanged host state is not rewritten on every window inventory",
+      "REL0272-HOST-PERSIST: an unchanged host state is not rewritten on every window inventory"
     ]
   },
   "REL0272-INDEX-ROOT-WRITES": {
@@ -2057,6 +2107,16 @@
       "REL0272-QUEUE-IO: repeat reads reuse unchanged queue specs and see independent replacements"
     ]
   },
+  "REL0272-RACY-VERSION": {
+    "rev": "6e98ca541a83cbc0d1a7c8d4778d2b58e014f02a",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-RACY-VERSION: a same-size rewrite that reuses the inode within one clock tick is not served from the cache",
+      "REL0272-RACY-VERSION: a same-size rewrite that reuses the inode within one clock tick is not served from the cache"
+    ]
+  },
   "REL0272-RESUME-LOCK": {
     "rev": "64fdb988f5ece0aa7a97abd348151ad9039dac2a",
     "outcome": "FAILS",
@@ -2075,6 +2135,26 @@
     "failing": [
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results",
       "REL0272-SMOKE-EVIDENCE: failed package smoke does not hide prodshape results"
+    ]
+  },
+  "REL0272-SNAPSHOT-HOLD": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot",
+      "REL0272-SNAPSHOT-HOLD: a hold set after the tick published keeps limits and queue_list on the fresh snapshot"
+    ]
+  },
+  "REL0272-STATUS-AGE": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-STATUS-AGE: status serves a healthy 25 s old snapshot (loaded tick plus interval) instead of the fallback",
+      "REL0272-STATUS-AGE: status serves a healthy 25 s old snapshot (loaded tick plus interval) instead of the fallback"
     ]
   },
   "REL0272-TICK-LEGACY": {
@@ -2125,6 +2205,26 @@
     "failing": [
       "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory",
       "REL0272-TICK-SCANS: launch health and unsampled plans do not reopen the task inventory"
+    ]
+  },
+  "REL0272-TMUX-ABSENT": {
+    "rev": "df4175630a4f20388406b8342656e242d929476c",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version",
+      "REL0272-TMUX-ABSENT: a gone agentctl session is an empty pane inventory on every tmux version"
+    ]
+  },
+  "REL0273-LEGACY-LOCAL": {
+    "rev": "737d7520361aaa63a33c25e58e1c927ed0a06003",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "REL0273-LEGACY-LOCAL: a legacy SSH host named local still loads and receives explicit host: local orders",
+      "REL0273-LEGACY-LOCAL: a legacy SSH host named local still loads and receives explicit host: local orders"
     ]
   },
   "REVIEW0256-DOWNGRADE": {

@@ -1,3 +1,5 @@
+import { hostManuallyPaused, setHostPause } from './host-availability.ts';
+import { hostPlacementStats } from './host-commands.ts';
 import { remoteAttachHint } from './host-runtime.ts';
 import { formatLocalTime } from './util.ts';
 import { peakState } from './peak.ts';
@@ -263,6 +265,7 @@ export type BoardEffect =
   | { type: 'queue-up'; task: string }
   | { type: 'queue-rm'; task: string }
   | { type: 'cancel'; task: string; reason?: string }
+  | { type: 'host-toggle'; host: string }
   | { type: 'queue-pause'; paused: boolean }
   /** `R`: resume every task listed under "Do wznowienia" (agentctl resume). */
   | { type: 'resume' }
@@ -755,7 +758,11 @@ export function handleKey(state: BoardState, input: string, key: KeyPress, previ
 }
 
 function viewKey(state: BoardState, mode: Extract<BoardMode, { kind: 'view' }>, input: string, key: KeyPress): KeyResult {
-  const opener = mode.what === 'limits' ? 'L' : 'G';
+  const opener = mode.what === 'limits' ? 'L' : mode.what === 'hosts' ? 'H' : mode.what === 'capacity' ? 'C' : 'G';
+  if (mode.what === 'hosts' && /^[1-9]$/.test(input)) {
+    const host = ['local', ...(state.hosts ?? []).filter(h => h.name !== 'local').map(h => h.name)][Number(input) - 1];
+    if (host) return { state: toList(state), effects: [{ type: 'host-toggle', host }] };
+  }
   if (key.escape || input === 'q' || input === opener || (key.ctrl && input === 'c')) return { state: toList(state), effects: [] };
   const step = key.upArrow || input === 'k' ? -1 : key.downArrow || input === 'j' ? 1 : 0;
   const panel = mode.limits;
@@ -1056,6 +1063,8 @@ export async function runBoardEffect(runner: Runner, config: GlobalConfig, effec
         const { state } = await setAway(ctx, effect.on, 'board');
         return { level: 'info', text: `away ${state.on ? 'on' : 'off'}${state.on && !config.notify.ntfy?.topic ? ' - but no phone is set up yet (agentctl ntfy-setup)' : ''}` };
       }
+      case 'host-toggle':
+        return { level: 'info', text: await setHostPause(ctx, effect.host, !hostManuallyPaused(ctx.config, effect.host, ctx.runner.now())) };
       case 'queue-pause':
         await setPaused(ctx, effect.paused);
         return { level: 'info', text: effect.paused ? 'Queue paused: nothing new starts (p resumes).' : 'Queue resumed.' };
@@ -1170,7 +1179,7 @@ export function rowCells(row: StatusRow, selected: boolean, cols: BoardColumns, 
   const quiet = !ready && (row.finished || row.hidden);
   const cells: BoardCell[] = [
     { key: 'marker', text: row.collide.length > 0 ? '⚠' : selected ? '▸' : row.hidden ? '·' : '', width: cols.marker, bold: true, ...(row.collide.length > 0 ? { color: 'yellow' } : {}) },
-    { key: 'task', text: `${row.host ? `[${row.host}] ` : ''}${row.pin ? '📌 ' : ''}${row.task}${row.owner ? ` · ${row.owner}` : ''}`, width: cols.task, bold: ready, ...(ready ? { color: 'green' } : {}) },
+    { key: 'task', text: `${row.host || row.placementReason ? `[${row.host ?? 'local'}] ` : ''}${row.pin ? '📌 ' : ''}${row.task}${row.owner ? ` · ${row.owner}` : ''}`, width: cols.task, bold: ready, ...(ready ? { color: 'green' } : {}) },
     { key: 'who', text: `${providerLabel(row.agent)} ${(PROVIDERS[row.agent as keyof typeof PROVIDERS]?.models.label ?? modelLabel)(row.model, row.effort, row.tokens?.observed?.model, versions)}`, width: cols.who },
     { key: 'state', text: `${icon} ${row.state}${row.question?.includes("zwinięte") ? " (zw.)" : ""}`, width: cols.state, color: STATE_COLOR[row.state] },
     { key: 'time', text: row.duration, width: cols.time },
@@ -1230,15 +1239,17 @@ export async function loadViewLines(ctx: Context, what: ViewKind): Promise<strin
     return renderLimits(collectLimits(ctx.config, await liveWindows(ctx, rows), ctx.runner.now(), true, rows));
   }
   if (what === 'hosts') {
-    const cache = Object.keys(ctx.config.hosts).length === 0 ? undefined : readHostsCache();
-    const health = Object.keys(ctx.config.hosts).map(name => ctx.hosts.connection(name).unreachable ? {name, state: 'unreachable' as const, probedAt: '', detail: ctx.hosts.connection(name).detail} : cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
+    const cache = readHostsCache();
+    const health = ['local', ...Object.keys(ctx.config.hosts)].map(name => name !== 'local' && ctx.hosts.connection(name).unreachable ? {name, state: 'unreachable' as const, probedAt: '', detail: ctx.hosts.connection(name).detail} : cache?.hosts.find(h => h.name === name) ?? { name, state: 'unreachable' as const, probedAt: '', detail: 'not probed yet; run agentctl hosts --refresh' });
     const rows = await collectStatus(ctx, { cachedOnly: true, progress: false, shallowClosed: true });
     const loads = collectLimits(ctx.config, await liveWindows(ctx, rows));
-    const lines = hostsViewLines(health, cache?.writtenAt);
-    for (const host of Object.keys(ctx.config.hosts)) {
-      lines.push(`Host ${host} tasks:`);
+    const lines = ['1–9: przełącz ręczną rezerwację hosta', ...hostsViewLines(health, cache?.writtenAt)];
+    const stats = await hostPlacementStats(ctx, health);
+    for (const [index, stat] of stats.entries()) {
+      const host = stat.name;
+      lines.push(`${index + 1}. [${host}] ${stat.availability} · ${stat.running}/${stat.max_total ?? '∞'}${stat.perf ? ` · perf ${stat.perf}` : ''}${stat.waiting_perf.length ? ` · perf oczekuje: ${stat.waiting_perf.join(', ')}` : ''}`);
       for (const p of loads.hosts?.find(h => h.host === host)?.providers ?? []) lines.push(`  ${p.agent}: ${p.used}/${p.limit ?? 'unbounded'}, free ${p.free ?? 'unbounded'} (account limits/holds also apply)`);
-      for (const row of rows.filter(r => r.host === host)) lines.push(`  [${host}] ${row.task}: ${row.state}`, `    ${remoteAttachHint(ctx.config, {host, window: row.windowName})}`);
+      for (const row of rows.filter(r => (r.host ?? 'local') === host)) lines.push(`  [${host}] ${row.task}: ${row.state}`, ...(row.host ? [`    ${remoteAttachHint(ctx.config, {host, window: row.windowName})}`] : []));
       for (const e of readQueue(ctx.config).filter(e => e.host === host)) lines.push(`  [${host}] ${e.task}: ${e.status}`);
     }
     return lines;

@@ -10,7 +10,7 @@ import type { TaskRecord } from '../src/core/taskstore.ts';
 import { sharedReader } from '../src/core/usage.ts';
 import { boardRefreshMs, BOARD_IDLE_REFRESH_MS, BOARD_REFRESH_MS, handleKey, initialBoardState, loadBoard, ProgressCache, TickGate } from '../src/core/board.ts';
 import { installFsCounter } from './fs-counter.ts';
-import { FakeTmux, makeConfig, makeContext, seedTask, useScratch } from './helpers.ts';
+import { FakeTmux, makeConfig, makeContext, seedTask, useScratch, pastRacyWindow } from './helpers.ts';
 
 const scratch = useScratch();
 
@@ -47,6 +47,7 @@ describe('p32: record scan cache', () => {
     seedTask(config, 'RC-1');
     seedTask(config, 'RC-2');
     archiveTask(config, 'RC-3');
+    await pastRacyWindow();
     const counter = installFsCounter(root);
     try {
       const first = await snapshotRecords(config);
@@ -66,12 +67,14 @@ describe('p32: record scan cache', () => {
     const config = makeConfig(root);
     seedTask(config, 'RC-1');
     seedTask(config, 'RC-2');
+    await pastRacyWindow();
     const counter = installFsCounter(root);
     try {
       await snapshotRecords(config);
       assert.equal(counter.snap().taskMdReads, 2);
       const file = path.join(taskDir(config, 'rc-1'), 'TASK.md');
       fs.appendFileSync(file, '\nmore prompt text\n');
+      await pastRacyWindow();
       counter.reset();
       await snapshotRecords(config);
       assert.equal(counter.snap().taskMdReads, 1, 'only the changed TASK.md is read');
@@ -87,6 +90,7 @@ describe('p32: record scan cache', () => {
     const root = scratch.sub('rc3');
     const config = makeConfig(root);
     seedTask(config, 'RC-1');
+    await pastRacyWindow();
     const counter = installFsCounter(root);
     try {
       const first = await snapshotRecords(config);
@@ -120,13 +124,14 @@ const REPORT_WITH_OUTPUTS = [
 ].join('\n');
 
 describe('p32: cheap rows for closed tasks', () => {
-  it('a report body is read and hashed once per report version (dev/ino/mtime/size)', () => {
+  it('a report body is read and hashed once per report version (dev/ino/mtime/size)', async () => {
     const root = scratch.sub('cr1');
     const config = makeConfig(root);
     seedTask(config, 'CR-1');
     const record = readTaskRecord(config, 'cr-1')!;
     fs.mkdirSync(path.dirname(record.report), { recursive: true });
     fs.writeFileSync(record.report, REPORT_WITH_OUTPUTS);
+    await pastRacyWindow();
     const counter = installFsCounter(root);
     try {
       const first = inspectReport(config, record, Date.now(), true);
@@ -293,6 +298,7 @@ function fixture(name: string, count: number): ReturnType<typeof makeConfig> {
 describe('p32: regression on 230 archived tasks', () => {
   it('the second tick parses no TASK.md and reads no report body (timing is perf opt-in)', async () => {
     const config = fixture('p32-fixture-230', 230);
+    await pastRacyWindow();
     const root = path.dirname(config.stateDir);
     const { ctx } = makeContext(config, { respond: new FakeTmux().respond });
     const cache = new ProgressCache();

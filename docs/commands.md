@@ -13,6 +13,10 @@ Task IDs are case-insensitive and a unique prefix is enough for `attach`, `peek`
 | [`guide`](#agentctl-guide) | Read the dispatcher guide and optional project overlay. |
 | [`capacity`](#agentctl-capacity) | Current plan windows, pace, slots, queue, equivalents and seven-day model statistics; no provider selection. |
 | [`hosts`](#agentctl-hosts) | Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: \<name>" starts its worktree, setup and agent there. |
+| [`hosts add`](#agentctl-hosts-add) | Register a remote worker in config.yaml |
+| [`hosts doctor`](#agentctl-hosts-doctor) | Check tools, disks and logins on a worker and print setup commands |
+| [`hosts pause`](#agentctl-hosts-pause) | Reserve a host for the owner |
+| [`hosts resume`](#agentctl-hosts-resume) | Clear a manual owner reservation |
 | [`consult`](#agentctl-consult) | Preview a high-cost Delphi consultation; --confirm registers it for watch. |
 | [`new`](#agentctl-new) | Start the tasks in a spec file: worktree, setup commands, symlinks, TASK.md, tmux window, agent, prompt. |
 | [`queue`](#agentctl-queue) | Put the tasks of a spec file in the queue: they start by themselves (while "agentctl watch" runs) when a window of their provider is free. Shows a summary and asks y/N first. |
@@ -159,8 +163,10 @@ agentctl capacity --clip
 
 Remote hosts over SSH (config section "hosts"): reachability, latency, GPU, disk in work_dir, tmux, provider CLIs (+ version, best-effort logged-in) and repo clones. Probes in parallel with a per-host timeout and caches the result for the board; a spec with "host: \<name>" starts its worktree, setup and agent there.
 
+Subcommands: `hosts add`, `hosts doctor`, `hosts pause`, `hosts resume`.
+
 ```
-agentctl hosts [options]
+agentctl hosts [options] [command]
 ```
 
 | Option | Meaning | Notes |
@@ -174,6 +180,87 @@ Examples:
 ```sh
 agentctl hosts                          # reachability, GPU, disk, tmux, provider CLIs, repos
 agentctl hosts --refresh --json          # probe every host now, machine-readable
+```
+
+## agentctl hosts add
+
+Register a remote worker in config.yaml
+
+```
+agentctl hosts add [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` | name for the worker |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--ssh <user@host>` | SSH user and host | required |
+| `--port <port>` | SSH port | default `22` |
+
+Examples:
+
+```sh
+agentctl hosts add pc --ssh owner@pc.local --port 2222
+```
+
+## agentctl hosts doctor
+
+Check tools, disks and logins on a worker and print setup commands
+
+```
+agentctl hosts doctor [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` | name of the worker |
+
+Examples:
+
+```sh
+agentctl hosts doctor pc
+```
+
+## agentctl hosts pause
+
+Reserve a host for the owner
+
+```
+agentctl hosts pause [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` | configured host or local |
+
+| Option | Meaning | Notes |
+|---|---|---|
+| `--until <time>` | HH:MM, ISO date or duration (e.g. 3h) |  |
+
+Examples:
+
+```sh
+agentctl hosts pause pc --until 3h
+```
+
+## agentctl hosts resume
+
+Clear a manual owner reservation
+
+```
+agentctl hosts resume [options] <host>
+```
+
+| Argument | Meaning |
+|---|---|
+| `<host>` | configured host or local |
+
+Examples:
+
+```sh
+agentctl hosts resume local
 ```
 
 ## agentctl consult

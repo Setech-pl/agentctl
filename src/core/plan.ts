@@ -57,8 +57,8 @@ export interface PlanOptions {
 const label = (o: Order): string => `${o.agent} ${formatModelEffort(o)}`;
 
 /** Windows currently in the session, each tagged with the agent that agentctl started in it, then the places held by reservations and external sessions. */
-export async function liveWindows(ctx: Context, knownRows?: StatusRow[], ignoreReservation?: string): Promise<LiveWindow[]> {
-  const names = knownRows ? [...new Set(knownRows.filter(r => r.window === 'alive').map(r => r.windowName))] : (await ctx.tmux.windows()).filter(w => w.exitCode === undefined).map(w => w.plain);
+export async function liveWindows(ctx: Context, knownRows?: StatusRow[], ignoreReservation?: string, cachedHosts = false): Promise<LiveWindow[]> {
+  const names = knownRows ? [...new Set(knownRows.filter(r => r.window === 'alive').map(r => r.windowName))] : (cachedHosts ? [...await ctx.localTmux.windows(), ...await ctx.hosts.windows(true)] : await ctx.tmux.windows()).filter(w => w.exitCode === undefined).map(w => w.plain);
   if (!knownRows && ctx.hosts.hasTrackedHosts()) {
     for (const record of listTaskRecords(ctx.config)) {
       if (record.host && !record.closed && !record.cancelled && ctx.hosts.connection(record.host).unreachable && !names.includes(record.window)) names.push(record.window);
@@ -77,10 +77,10 @@ export async function liveWindows(ctx: Context, knownRows?: StatusRow[], ignoreR
     const record = recordByWindow.get(window);
     if (record?.closed || record?.cancelled) return [];
     const reportReady = rows.some(r => r.windowName === window && r.state === 'report-ready');
-    return [agent ? { window, agent, host: record?.host, ...(record?.owner ? {owner: record.owner} : {}), ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window }];
+    return [agent ? { window, agent, host: record?.host, perf: Boolean(record?.perf), ...(record?.owner ? {owner: record.owner} : {}), ...(neverReady(window) ? { counted: false } : reportReady ? { reportReady: true, counted: configCountsReady(ctx) } : {}) } : { window }];
   });
   // Places held by the user (`limits reserve`) and sessions outside agentctl count against the limit like its own windows.
-  return [...windows, ...pendingStarts(ctx.config).filter(r => r.id !== ignoreReservation && !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, host: r.host, ...(r.owner ? {owner: r.owner} : {}), kind: 'starting' as const })), ...(await slotHolders(ctx))];
+  return [...windows, ...pendingStarts(ctx.config).filter(r => r.id !== ignoreReservation && !names.includes(r.window)).map(r => ({ window: r.window, agent: r.agent, host: r.host, perf: r.perf, ...(r.owner ? {owner: r.owner} : {}), kind: 'starting' as const })), ...(await slotHolders(ctx))];
 }
 
 function configCountsReady(ctx: Context): boolean { return ctx.config.countReportReady; }
@@ -99,7 +99,7 @@ function switchTo(spec: ResolvedSpec, to: Order, by: 'flag' | 'limit'): Resolved
 export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanOptions = {}): Promise<ResolvedSpec[]> {
   const { config } = ctx;
   const p = new Problems();
-  const live = ctx.runner.dryRun || opts.previewOnly ? [] : await liveWindows(ctx, undefined, opts.queueReservation);
+  const live = ctx.runner.dryRun || opts.previewOnly ? [] : await liveWindows(ctx, undefined, opts.queueReservation, true);
   // `after` belongs to the queue: `new` starts a task now, so what it waits for must be done already.
   if (!opts.previewOnly && !opts.skipAfter && !ctx.runner.dryRun && specs.some((s) => s.after.length > 0)) {
     const rows = opts.afterRows ?? await collectStatus(ctx, { progress: false, cachedOnly: true, archived: true });
@@ -115,8 +115,8 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
   const result: ResolvedSpec[] = [];
 
   for (let spec of specs) {
-    if (!spec.reviewMode && spec.mergeBaseCheck !== 'candidate' && !spec.host && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
-    if (spec.review && !spec.reviewOf && !spec.host && !opts.previewOnly) {
+    if (!spec.reviewMode && spec.mergeBaseCheck !== 'candidate' && !spec.host && !spec.placement && !opts.previewOnly && !opts.deferBases) spec = await resolveTaskBases(ctx, spec);
+    if (spec.review && !spec.reviewOf && !spec.host && !spec.placement && !opts.previewOnly) {
       const repos = [];
       for (const repo of spec.repos) {
         if (!repo.branch) throw new AgentctlError(`${spec.task}: review: auto requires an explicit author repos[].branch`);
@@ -212,10 +212,10 @@ export async function planBatch(ctx: Context, specs: ResolvedSpec[], opts: PlanO
       const hostProblem = checkHostLimit(config, spec, occupied());
       if (hostProblem) p.add(`${at} ${hostProblem}`);
     }
-    planned.push({ window: spec.window, agent: spec.agent, host: spec.host, owner: spec.owner });
+    planned.push({ window: spec.window, agent: spec.agent, host: spec.host, owner: spec.owner, perf: Boolean(spec.perf) });
 
     // 4. worktrees
-    for (const repo of opts.previewOnly || spec.host || spec.reviewMode ? [] : spec.repos) {
+    for (const repo of opts.previewOnly || spec.host || spec.placement || spec.reviewMode || spec.reuseWorktree ? [] : spec.repos) {
       // A dry run may be rehearsed on a machine without the repositories, so only real runs require them.
       if (!ctx.runner.dryRun && !fs.existsSync(repo.path)) p.add(`${at} repository ${repo.path} does not exist`);
       if (!missingWorktreeVolume([repo]) && fs.existsSync(repo.worktree) && !opts.reuse) {

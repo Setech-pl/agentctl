@@ -1,3 +1,4 @@
+import type { PerfSpec } from './perf-spec.ts';
 import { chatOwner } from './chat-quotas.ts';
 import { fileVersion } from './file-version.ts';
 import { withFileLockSync, withStateWriteLock, taskLock } from './file-lock.ts';
@@ -19,10 +20,14 @@ export type RecordEffort = Effort | 'unknown';
 
 /** What agentctl remembers about a task: the YAML header of `<state_dir>/<task>/TASK.md`. */
 export interface TaskRecord {
+  perf?: PerfSpec;
+  placementReason?: string;
+  reuseWorktree?: string;
   owner?: string;
   host?: string;
   remoteReport?: string;
   remoteDir?: string;
+  remoteCwd?: string;
   weight?: 'normal' | 'heavy';
   autoReview?: AutoReviewSource;
   task: string;
@@ -148,6 +153,9 @@ export function taskFile(config: GlobalConfig, window: string): string {
 export function recordFromSpec(spec: ResolvedSpec, config: GlobalConfig, startedMs: number): TaskRecord {
   const record: TaskRecord = {
     host: spec.host,
+    ...(spec.perf ? {perf: spec.perf} : {}),
+    ...(spec.placementReason ? {placementReason: spec.placementReason} : {}),
+    ...(spec.reuseWorktree ? {reuseWorktree: spec.reuseWorktree} : {}),
     weight: spec.weight,
     task: spec.task,
     window: spec.window,
@@ -200,8 +208,12 @@ export function renderTaskMd(record: TaskRecord, prompt: string): string {
     env: record.env,
   };
   if (record.host) header.host = record.host;
+  if (record.perf) header.perf = record.perf;
+  if (record.placementReason) header.placement_reason = record.placementReason;
+  if (record.reuseWorktree) header.reuse_worktree = record.reuseWorktree;
   if (record.remoteReport) header.remote_report = record.remoteReport;
   if (record.remoteDir) header.remote_dir = record.remoteDir;
+  if (record.remoteCwd) header.remote_cwd = record.remoteCwd;
   if (record.weight) header.weight = record.weight;
   if (record.reviewOf) header.review_of = record.reviewOf;
   if (record.reviewMode) header.review_mode = record.reviewMode;
@@ -344,6 +356,10 @@ function parseTaskRecordUncached(text: string): TaskRecord | undefined {
     agent: agent as RecordAgent,
     model: typeof data.model === 'string' ? data.model : 'default',
     effort: effort === 'unknown' || (EFFORTS as readonly unknown[]).includes(effort) ? (effort as RecordEffort) : 'high',
+    ...(data.perf && typeof data.perf === 'object' ? { perf: data.perf as PerfSpec } : {}),
+    ...(typeof data.placement_reason === 'string' ? { placementReason: data.placement_reason } : {}),
+    ...(typeof data.reuse_worktree === 'string' ? { reuseWorktree: data.reuse_worktree } : {}),
+    ...(typeof data.remote_cwd === 'string' ? { remoteCwd: data.remote_cwd } : {}),
     repos: Array.isArray(data.repos) ? (data.repos as ResolvedRepo[]) : [],
     links: Array.isArray(data.links) ? (data.links as Link[]) : [],
     env: isObject(data.env) ? (data.env as Record<string, string>) : {},
@@ -597,8 +613,8 @@ export class TaskRecordIndex {
       this.reconcileAt = now + 60_000;
       this.records.clear();
       for (const record of all) this.records.set(record.window, record);
-    } else if (version !== this.rootVersion) {
-      // A new or moved state directory is visible even before the recursive watcher delivers its callback.
+    } else if (version === undefined || version !== this.rootVersion) {
+      // A new or moved state directory is visible even before the recursive watcher delivers its callback; an unknown (racy) version is a change.
       const names = new Set(await readTaskDirectory(root));
       if (this.generation !== generation) return [];
       for (const window of this.records.keys()) if (!names.has(window)) this.records.delete(window);
