@@ -1058,9 +1058,9 @@
     "failed": 2,
     "passed": 1,
     "failing": [
-      "P64 the \"↳\" echo of the exact pending prompt classifies as queued in the agent; another text does not",
+      "P64 the \"\u21b3\" echo of the exact pending prompt classifies as queued in the agent; another text does not",
       "P64 a visible Codex-queued message stays pending past delivery_confirm_s; the transcript confirms when the turn takes it",
-      "P64 the \"↳\" echo of the exact pending prompt classifies as queued in the agent; another text does not",
+      "P64 the \"\u21b3\" echo of the exact pending prompt classifies as queued in the agent; another text does not",
       "P64 a visible Codex-queued message stays pending past delivery_confirm_s; the transcript confirms when the turn takes it"
     ]
   },
@@ -1128,7 +1128,7 @@
     "failed": 8,
     "passed": 2,
     "failing": [
-      "the POP-E1 shape: first line NO-GO, outputs PASS — the first line wins and both are shown",
+      "the POP-E1 shape: first line NO-GO, outputs PASS \u2014 the first line wins and both are shown",
       "every accepted first-line form is recognised (labelled or bare, any case)",
       "a consistent review (GO + outputs PASS) shows the first line and flags nothing",
       "status, get_report and pull_ready of the POP-E1 shape take the first line",
@@ -1294,7 +1294,7 @@
     "passed": 0,
     "failing": [
       "P92: Kimi start screen with a rotating footer tip takes the first prompt: one paste, one Enter, verified by the wire turn.prompt",
-      "P92: Kimi folding the paste into \"[paste #1 …]\" before Enter keeps the delivery: the newer image of our own paste replaces the first",
+      "P92: Kimi folding the paste into \"[paste #1 \u2026]\" before Enter keeps the delivery: the newer image of our own paste replaces the first",
       "P92: a Kimi screen that keeps changing gets no Enter in that pass; the next watch pass presses it once the screen holds still",
       "P92: a Kimi start screen still being drawn gets no paste; the next pass pastes into the settled composer",
       "P92: Kimi start screen with a rotating footer tip takes the first prompt: one paste, one Enter, verified by the wire turn.prompt"
@@ -1345,9 +1345,9 @@
     "failed": 11,
     "passed": 1,
     "failing": [
-      "glm: theme picker → needs-input with a clear line, notified, window kept; the owner finishes it, trust and the prompt follow by themselves",
-      "claude: theme picker → needs-input with a clear line, notified, window kept; the owner finishes it, trust and the prompt follow by themselves",
-      "the theme list line \"❯ ✔ Dark mode\" is not the ready prompt; the trust and numbered menus never were",
+      "glm: theme picker \u2192 needs-input with a clear line, notified, window kept; the owner finishes it, trust and the prompt follow by themselves",
+      "claude: theme picker \u2192 needs-input with a clear line, notified, window kept; the owner finishes it, trust and the prompt follow by themselves",
+      "the theme list line \"\u276f \u2714 Dark mode\" is not the ready prompt; the trust and numbered menus never were",
       "a start at the picker returns \"dialog\" from waitForReady at once, and not after ready_timeout",
       "P95: first-run onboarding of a fresh Claude config (glm wrapper) is a wait for the owner, not a failed start"
     ]
@@ -1448,20 +1448,6 @@
       "READFAST0269-ACK: a slow lock syscall defers acknowledgement without replacing the report with an error"
     ]
   },
-  "READFAST0269-CLI": {
-    "rev": "v0.26.4",
-    "outcome": "PASSES",
-    "failed": 0,
-    "passed": 1,
-    "failing": []
-  },
-  "READFAST0269-COMPAT": {
-    "rev": "v0.26.4",
-    "outcome": "PASSES",
-    "failed": 0,
-    "passed": 3,
-    "failing": []
-  },
   "READFAST0269-COUNT": {
     "rev": "v0.26.4",
     "outcome": "FAILS",
@@ -1501,11 +1487,11 @@
     "failed": 3,
     "passed": 0,
     "failing": [
-      "READY0263-QUEUED: the agent stays busy past delivery_confirm_s without hook/transcript → confirming, queued in agent",
-      "READY0263-QUEUED: a busy delivery an older release left in \"Prompt delivery not confirmed\" goes back to queued – unconfirmed",
-      "READY0263-QUEUED: a follow-up sent to a busy agent is \"queued – unconfirmed\" past delivery_confirm_s, never needs-attention",
-      "READY0263-QUEUED: the agent stays busy past delivery_confirm_s without hook/transcript → confirming, queued in agent",
-      "READY0263-QUEUED: a busy delivery an older release left in \"Prompt delivery not confirmed\" goes back to queued – unconfirmed"
+      "READY0263-QUEUED: the agent stays busy past delivery_confirm_s without hook/transcript \u2192 confirming, queued in agent",
+      "READY0263-QUEUED: a busy delivery an older release left in \"Prompt delivery not confirmed\" goes back to queued \u2013 unconfirmed",
+      "READY0263-QUEUED: a follow-up sent to a busy agent is \"queued \u2013 unconfirmed\" past delivery_confirm_s, never needs-attention",
+      "READY0263-QUEUED: the agent stays busy past delivery_confirm_s without hook/transcript \u2192 confirming, queued in agent",
+      "READY0263-QUEUED: a busy delivery an older release left in \"Prompt delivery not confirmed\" goes back to queued \u2013 unconfirmed"
     ]
   },
   "READY0263-RECAPTURE": {
@@ -1514,11 +1500,11 @@
     "failed": 2,
     "passed": 0,
     "failing": [
-      "READY0263-RECAPTURE: the fourth capture (after the deadline) is ready → ready, not a failure",
+      "READY0263-RECAPTURE: the fourth capture (after the deadline) is ready \u2192 ready, not a failure",
       "READY0263-RECAPTURE: a prompt drawn in the last interval is seen by one more capture before the wait gives up",
-      "READY0263-RECAPTURE: the ready timeout scales with load1/cores (load 54 on 18 cores → 180 s)",
+      "READY0263-RECAPTURE: the ready timeout scales with load1/cores (load 54 on 18 cores \u2192 180 s)",
       "READY0263-RECAPTURE: the ready timeout scales with the machine load",
-      "READY0263-RECAPTURE: the fourth capture (after the deadline) is ready → ready, not a failure"
+      "READY0263-RECAPTURE: the fourth capture (after the deadline) is ready \u2192 ready, not a failure"
     ]
   },
   "READY0263-RETRY": {
@@ -1527,11 +1513,11 @@
     "failed": 3,
     "passed": 0,
     "failing": [
-      "READY0263-RETRY: the agent becomes ready after the first 60 s window → the prompt is delivered, no needs-attention",
+      "READY0263-RETRY: the agent becomes ready after the first 60 s window \u2192 the prompt is delivered, no needs-attention",
       "READY0263-RETRY: a second timeout is a failed start: needs-attention with the screen, nothing pasted",
       "READY0263-RETRY: a task left in needs-attention by \"did not become ready\" is re-armed once its window shows the ready frame",
       "READY0263-RETRY: a readiness timeout of a queued start is transient: one more wait in the same window",
-      "READY0263-RETRY: the agent becomes ready after the first 60 s window → the prompt is delivered, no needs-attention"
+      "READY0263-RETRY: the agent becomes ready after the first 60 s window \u2192 the prompt is delivered, no needs-attention"
     ]
   },
   "REL0243-DISK": {
