@@ -26,6 +26,10 @@ describe('P19 over stdio: the MCP server is never held by a setup', () => {
     try { h.start(); } finally { process.env.PATH = isolatedPath; }
     const clients: Client[] = [];
     try {
+      // Gate clean uses the legacy alias; it must still connect to a shortened socket directory.
+      const cleanupSocket = path.join(h.root, 'tmx', `tmux-${process.getuid?.() ?? 0}`, 'default');
+      const cleanupProbe = spawnSync('tmux', ['-S', cleanupSocket, 'display-message', '-p', '#{socket_path}'], {env: h.env, encoding: 'utf8'});
+      assert.equal(cleanupProbe.status, 0, cleanupProbe.stderr);
       const git = (cwd: string, args: string[]) => { const r = spawnSync('git', ['-C', cwd, ...args], { env: h.env, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); };
       const repos = ['alpha', 'beta'].map((n) => {
         const dir = path.join(h.root, n);

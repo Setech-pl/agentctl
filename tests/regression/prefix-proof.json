@@ -1465,6 +1465,16 @@
       "READFAST0269-COUNT: events count every ready task while listing only ten names"
     ]
   },
+  "READFAST0269-HARNESS": {
+    "rev": "v0.26.4",
+    "outcome": "FAILS",
+    "failed": 1,
+    "passed": 0,
+    "failing": [
+      "READFAST0269-HARNESS: a two-byte socket overrun uses a short directory inside the task cache",
+      "READFAST0269-HARNESS: a two-byte socket overrun uses a short directory inside the task cache"
+    ]
+  },
   "READY0263-COMPOSER": {
     "rev": "v0.26.2",
     "outcome": "FAILS",
