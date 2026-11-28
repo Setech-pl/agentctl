@@ -62,8 +62,19 @@ await withHarness({ name: 'economy', cacheRoot: cache, config: 'mcp: {max_respon
     const summary = await call(clients[1]!, 'pull_ready', { all: true });
     // Status is an intentionally consistent watch snapshot and can predate this receipt.
     // Assert the write in its authoritative task records, independently of snapshot freshness.
+    // 0.26.5: a header write slower than the 100 ms acknowledgement window (fsync on WSL, a loaded Mac) is deferred to
+    // watch as a durable receipt. Replay pending receipts through a real watch, then assert the authoritative records.
+    const receiptDir = path.join(h.agentctlHome, 'report-delivery-requests');
+    const pending = () => { try { return fs.readdirSync(receiptDir).filter(f => f.endsWith('.json')).length; } catch { return 0; } };
+    check('W4: summary receipt marks no report pulled before watch', Array.from({ length: 6 }, (_, i) => readTaskRecord(config, `nc-${i + 1}`)).every(r => r && !r.pulled));
+    if (pending()) {
+      const replay = h.spawnAgentctl(['watch'], path.join(h.root, 'watch-replay.log'));
+      const until = Date.now() + 30000;
+      while (pending() && Date.now() < until) await delay(200);
+      replay.kill('SIGTERM'); await new Promise(r => replay.once('close', r));
+    }
     const receipts = Array.from({ length: 6 }, (_, i) => readTaskRecord(config, `nc-${i + 1}`));
-    check('W4: summary receipt leaves all six reports unread', receipts.every(r => r && !r.pulled && r.summaryDelivered));
+    check('W4: summary receipt leaves all six reports unread', pending() === 0 && receipts.every(r => r && !r.pulled && r.summaryDelivered));
     const full = await call(clients[0]!, 'pull_ready', { mode: 'full', all: true });
     check('six full reports exceed 120KB; summaries under 16KB', Buffer.byteLength(full) > 120000 && Buffer.byteLength(summary) < 16000);
     check('summary includes path bytes verdict SHA branch and six decisions', /bytes:/.test(summary) && /path:/.test(summary) && /Werdykt: PASS/.test(summary) && /abc1234/.test(summary) && summary.includes('Result 6'));

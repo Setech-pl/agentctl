@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Live release checks follow the 0.27.4 config-rejection wording and replay deferred report acknowledgements through watch before asserting them. / Testy live wydania sprawdzają nowy komunikat o odrzuconej konfiguracji i przed asercją odtwarzają przez watch odroczone potwierdzenia raportów.
+
 - Report reads measure the 100 ms local WALL publication window on the MCP request clock; tests freeze that clock instead of depending on fsync latency (WSL) or suite load. / Odczyt raportu mierzy 100 ms okno lokalnej publikacji WALL zegarem żądania MCP; testy zamrażają ten zegar zamiast zależeć od opóźnienia fsync (WSL) lub obciążenia.
 
 - REL0274-EVENTS-IO: Events count ready reports from the already indexed task headers instead of reopening every TASK.md. / Zdarzenia liczą gotowe raporty z już zindeksowanych nagłówków zadań zamiast ponownie otwierać każdy TASK.md.

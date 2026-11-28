@@ -88,13 +88,13 @@ async function limitsAndEvents(): Promise<void> {
     // a broken config: the watcher keeps the old settings and says so
     fs.writeFileSync(path.join(h.agentctlHome, 'config.yaml.keep'), fs.readFileSync(path.join(h.agentctlHome, 'config.yaml'), 'utf8'));
     fs.appendFileSync(path.join(h.agentctlHome, 'config.yaml'), 'queue: [broken\n');
-    const warned = await until('warning', () => /previous settings stay in force/.test(fs.readFileSync(path.join(h.root, 'cache', 'agentctl-watch.log'), 'utf8')), 15_000);
+    const warned = await until('warning', () => /config invalid since \S+ – using version from \S+: Cannot parse/.test(fs.readFileSync(path.join(h.root, 'cache', 'agentctl-watch.log'), 'utf8')), 15_000);
     check('a broken config is not applied: warning in the log, the watcher lives on', warned && watch.exitCode === null);
     const configRejected = await until('config state', () => {
       try { return JSON.parse(fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8')).ok === false; } catch { return false; }
     }, 5000);
     const doctor = h.agentctl(['doctor']);
-    check('doctor reports the config problem', configRejected && doctor.code !== 0 && /✗ config\s+Cannot parse/.test(doctor.stdout), JSON.stringify({ configRejected, code: doctor.code, stdout: doctor.stdout, stderr: doctor.stderr, receipt: fs.existsSync(path.join(h.agentctlHome, 'config-state.json')) ? fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8') : null }));
+    check('doctor reports the config problem', configRejected && doctor.code !== 0 && /✗ config\s+config invalid since \S+ – using version from \S+: Cannot parse/.test(doctor.stdout), JSON.stringify({ configRejected, code: doctor.code, stdout: doctor.stdout, stderr: doctor.stderr, receipt: fs.existsSync(path.join(h.agentctlHome, 'config-state.json')) ? fs.readFileSync(path.join(h.agentctlHome, 'config-state.json'), 'utf8') : null }));
     fs.copyFileSync(path.join(h.agentctlHome, 'config.yaml.keep'), path.join(h.agentctlHome, 'config.yaml'));
     // events
     const ev = h.agentctl(['events', '--json', '--keep']);
