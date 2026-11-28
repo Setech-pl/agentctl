@@ -34,7 +34,7 @@ npm run build
 ./bin/agentctl-update --ref v0.23.1 --dry-run
 ~~~
 
-[Release safety, shadow canary and upgrade rollback](docs/en/release-safety.md) · [0.27.3 release notes](docs/release-notes/0.27.3.en.md) · [0.27.2](docs/release-notes/0.27.2.en.md).
+[Release safety, shadow canary and upgrade rollback](docs/en/release-safety.md) · [0.27.4 release notes](docs/release-notes/0.27.4.en.md) · [0.27.3](docs/release-notes/0.27.3.en.md).
 
 For dev, `./bin/agentctl-dev-update v0.23.1` rebuilds `~/Projects/agentctl-wt/devtest` using `~/.agentctl-dev`. It accepts a tag, branch or SHA, `--status`, `--rollback`, `--no-restart` and `--skip-ci`.
 

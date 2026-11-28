@@ -4,29 +4,6 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-- Preserve cancellation preview count, reason and owner confirmation wording on the direct path. / Bezpośredni podgląd anulowania zachowuje liczbę zadań, powód i treść prośby o zgodę właściciela.
-
-- READFAST0269-PREVIEW: Exact-ID MCP close/cancel previews read only target state and explicit move links, bound window observation to 250 ms, return the token first and defer heavy validation to watch. / Podgląd close/cancel dla pełnych ID czyta stan wskazanych zadań i ich powiązania move, ogranicza sprawdzanie okien do 250 ms, zwraca token na początku i zostawia ciężką walidację watch.
-
-- READFAST0269-CLI: Keep CLI pull marking synchronous; only MCP may defer acknowledgement to watch. / CLI zapisuje odbiór raportu przed powrotem; tylko MCP może odroczyć potwierdzenie do watch.
-
-- READFAST0269-HARNESS: Keep long task-owned tmux sockets within the limit using a shorter internal directory and an in-sandbox cleanup alias. / Długie ścieżki socketów tmux mieszczą się w limicie dzięki krótszemu katalogowi i aliasowi sprzątania wewnątrz sandboxa.
-
-- READFAST0269 I/O regression counters include bounded report reads. / Liczniki regresji I/O uwzględniają ograniczony odczyt raportów.
-
-- READFAST0269 prepared for 0.26.5. / Poprawka READFAST0269 przygotowana do 0.26.5.
-
-- A prompt delivery failure gets one journal entry after watch restarts. Cohort completion notices include the latest task move even while the filesystem notification is pending. / Błąd dostarczenia promptu trafia do dziennika raz po restarcie watch. Powiadomienie o ukończeniu kohorty uwzględnia przeniesienie zadania także przed dotarciem zdarzenia z systemu plików.
-
-- A paused automatic GC plan survives a temporarily unavailable free-space reading. / Wstrzymany plan automatycznego GC pozostaje dostępny, gdy odczyt wolnego miejsca chwilowo nie działa.
-
-- Board, limits and doctor show when the config was rejected and which version remains loaded. MCP tool responses flag an older server than watch. / Tablica, limity i doctor pokazują czas odrzucenia konfiguracji i wersję używaną dalej. Odpowiedzi MCP sygnalizują serwer starszy od watch.
-- Events list the unpulled report names within the response budget. Watch refreshes sizes in bounded batches and replays observed transitions after a skipped journal stage or restart. / Zdarzenia podają nazwy nieodebranych raportów w granicach limitu odpowiedzi. Watch odświeża pomiary partiami i odtwarza wykryte zmiany po pominięciu etapu dziennika lub restarcie.
-
-- Automatic GC resumes dry-run inventory after a deadline, repeats unchanged WALL plans after `report_every` (12h by default), and shows cached sizes for skipped categories and pinned tasks. / Automatyczne GC wznawia plan po limicie czasu, powtarza niezmienione plany po `report_every` (domyślnie 12h) oraz pokazuje pomiary pominiętych kategorii i przypiętych zadań.
-
-- Board Down reaches the pulled-report groups, End or G jumps to the final selectable row, and D opens the GC preview. / Na tablicy strzałka w dół dochodzi do grup odebranych raportów, End lub G skacze do ostatniego wiersza, a D otwiera podgląd GC.
-
 - Watch treats a vanished agentctl tmux session as empty on tmux 3.4 ("can't find window", "no current target") instead of failing status collection every tick; also for remote host GC. / Watch traktuje zniknięcie sesji tmux agentctl w tmux 3.4 ("can't find window", "no current target") jako pustą listę zamiast błędu odczytu stanu w każdym przebiegu; dotyczy też GC hostów zdalnych.
 - Watch again flags a configured report candidate (a `report:` pattern match) for open tasks such as needs-input, without a discovery walk for every row. / Watch ponownie oznacza kandydata raportu ze wzorca `report:` dla otwartych zadań, np. needs-input, bez przeszukiwania katalogów dla każdego wiersza.
 - MCP status serves a complete watch snapshot up to 60 s old (like limits and queue_list), with its age, instead of the slow fallback when a loaded watch cycle exceeds two intervals. / MCP status zwraca pełny snapshot watch do 60 s (jak limits i queue_list) wraz z jego wiekiem zamiast wolnego odczytu zastępczego, gdy obciążony cykl watch przekracza dwa interwały.
@@ -114,6 +91,22 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - SNAP0247 was prepared for 0.23.3. / Poprawka SNAP0247 została przygotowana do wydania 0.23.3.
 - DISK0248 was prepared for 0.24.0. / Zmiany DISK0248 zostały przygotowane do wydania 0.24.0.
+
+## [0.27.4] - 2026-11-28
+
+Field fixes for automatic GC, board, watch journal and events, merged with 0.27.3 and the 0.26.5 read/close fast path / Poprawki z pracy z automatycznym GC, tablicą, dziennikiem watch i zdarzeniami, połączone z 0.27.3 i szybką ścieżką odczytu i zamykania z 0.26.5. [Release notes (EN)](docs/release-notes/0.27.4.en.md) · [Informacje o wydaniu (PL)](docs/release-notes/0.27.4.pl.md).
+
+- READFAST0269-PREVIEW: Exact-ID MCP close/cancel previews read only target state and explicit move links, bound window observation to 250 ms, return the token first and defer heavy validation to watch. / Podgląd close/cancel dla pełnych ID czyta stan wskazanych zadań i ich powiązania move, ogranicza sprawdzanie okien do 250 ms, zwraca token na początku i zostawia ciężką walidację watch.
+- READFAST0269-CLI: Keep CLI pull marking synchronous; only MCP may defer acknowledgement to watch. / CLI zapisuje odbiór raportu przed powrotem; tylko MCP może odroczyć potwierdzenie do watch.
+- READFAST0269-HARNESS: Keep long task-owned tmux sockets within the limit using a shorter internal directory and an in-sandbox cleanup alias. / Długie ścieżki socketów tmux mieszczą się w limicie dzięki krótszemu katalogowi i aliasowi sprzątania wewnątrz sandboxa.
+- A prompt delivery failure gets one journal entry after watch restarts. Cohort completion notices include the latest task move even while the filesystem notification is pending. / Błąd dostarczenia promptu trafia do dziennika raz po restarcie watch. Powiadomienie o ukończeniu kohorty uwzględnia przeniesienie zadania także przed dotarciem zdarzenia z systemu plików.
+- A paused automatic GC plan survives a temporarily unavailable free-space reading. / Wstrzymany plan automatycznego GC pozostaje dostępny, gdy odczyt wolnego miejsca chwilowo nie działa.
+- Board, limits and doctor show when the config was rejected and which version remains loaded. MCP tool responses flag an older server than watch. / Tablica, limity i doctor pokazują czas odrzucenia konfiguracji i wersję używaną dalej. Odpowiedzi MCP sygnalizują serwer starszy od watch.
+- Events list the unpulled report names within the response budget. Watch refreshes sizes in bounded batches and replays observed transitions after a skipped journal stage or restart. / Zdarzenia podają nazwy nieodebranych raportów w granicach limitu odpowiedzi. Watch odświeża pomiary partiami i odtwarza wykryte zmiany po pominięciu etapu dziennika lub restarcie.
+- Automatic GC resumes dry-run inventory after a deadline, repeats unchanged WALL plans after `report_every` (12h by default), and shows cached sizes for skipped categories and pinned tasks. / Automatyczne GC wznawia plan po limicie czasu, powtarza niezmienione plany po `report_every` (domyślnie 12h) oraz pokazuje pomiary pominiętych kategorii i przypiętych zadań.
+- Board Down reaches the pulled-report groups, End or G jumps to the final selectable row, and D opens the GC preview. / Na tablicy strzałka w dół dochodzi do grup odebranych raportów, End lub G skacze do ostatniego wiersza, a D otwiera podgląd GC.
+- Events count ready reports from task files and status together and name every unpulled report within the response budget (the 0.26.5 cap of ten names no longer applies). / Zdarzenia liczą gotowe raporty z plików zadań i ze stanu razem i podają nazwy wszystkich nieodebranych raportów w granicach limitu odpowiedzi (limit dziesięciu nazw z 0.26.5 już nie obowiązuje).
+- Includes 0.27.3, 0.26.5 and the 0.26.3/0.26.4 fixes. / Zawiera 0.27.3, 0.26.5 oraz poprawki 0.26.3/0.26.4.
 
 ## [0.27.3] - 2026-11-28
 

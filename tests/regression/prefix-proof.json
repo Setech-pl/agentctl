@@ -637,7 +637,7 @@
     ]
   },
   "FIELD0268-AUTOGC": {
-    "rev": "v0.26.4",
+    "rev": "v0.27.3",
     "outcome": "FAILS",
     "failed": 2,
     "passed": 0,
@@ -649,7 +649,7 @@
     ]
   },
   "FIELD0268-BOARD": {
-    "rev": "v0.26.4",
+    "rev": "v0.27.3",
     "outcome": "FAILS",
     "failed": 1,
     "passed": 0,
@@ -670,7 +670,7 @@
     ]
   },
   "FIELD0268-CONFIG": {
-    "rev": "v0.26.4",
+    "rev": "v0.27.3",
     "outcome": "FAILS",
     "failed": 2,
     "passed": 0,
@@ -682,7 +682,7 @@
     ]
   },
   "FIELD0268-DISK": {
-    "rev": "v0.26.4",
+    "rev": "v0.27.3",
     "outcome": "FAILS",
     "failed": 1,
     "passed": 0,
@@ -702,7 +702,7 @@
     ]
   },
   "FIELD0268-JOURNAL": {
-    "rev": "v0.26.4",
+    "rev": "v0.27.3",
     "outcome": "FAILS",
     "failed": 1,
     "passed": 0,
@@ -722,7 +722,7 @@
     ]
   },
   "FIELD0268-REPORTS": {
-    "rev": "v0.26.4",
+    "rev": "v0.27.3",
     "outcome": "FAILS",
     "failed": 1,
     "passed": 0,
