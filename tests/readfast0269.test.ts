@@ -61,7 +61,7 @@ for (const tool of ['close', 'cancel']) for (const selection of [{task: 'FAST'},
     const reads: string[] = [], read = fs.readFileSync;
     t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof fs.readFileSync>) => { reads.push(String(args[0])); return read(...args); });
     let result: ToolResult | undefined;
-    const pending = f.call(tool, selection).then(r => { result = r; });
+    const pending = f.call(tool, {...selection, ...(tool === 'close' ? {detail: true, capacity: true} : {})}).then(r => { result = r; });
     await drain(); f.advance(250); await drain();
     const direct = result;
     f.release(); await pending;

@@ -2029,8 +2029,11 @@ function confirmationTargets(name: string, scope: unknown): unknown {
     }
     return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, project(v)]));
   };
-  const projected = project(scope) as {directTaskPreview?: boolean; tasks?: Record<string, unknown>[]};
-  if (projected?.directTaskPreview) return {...projected, tasks: projected.tasks?.map(({line: _line, hasReport: _report, ...identity}) => identity)};
+  const projected = project(scope) as {directTaskPreview?: boolean; tasks?: Record<string, unknown>[]; summary?: string[]};
+  if (projected?.directTaskPreview) {
+    const {summary: _summary, ...identity} = projected;
+    return {...identity, tasks: projected.tasks?.map(({line: _line, hasReport: _report, ...identity}) => identity)};
+  }
   return projected;
 }
 
@@ -2076,9 +2079,9 @@ async function directTaskScope(ctx: Context, name: string, args: Record<string, 
   }, () => null, opts.clock, 250);
   if (name === 'close') return {directTaskPreview: true,
     tasks: await planClose(ctx, [...records.keys()], {rmWorktree: Boolean(args.remove_worktree), ...(!opts.apply ? {previewWindows: windows} : {})}), records: [...records.values()]};
-  const plan = await planCancel(ctx, ids, {reason: args.reason as string | undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp',
+  const plan = await planCancel(ctx, ids, {reason: (args.reason as string | undefined)?.trim() || undefined, rmWorktree: Boolean(args.remove_worktree), source: 'mcp',
     ...(!opts.apply ? {preview: {records: [...records.values()], windows: windows!}} : {})});
-  return {directTaskPreview: true, tasks: plan.items.map(({task, kind, record, entry, blocks, line, hasReport, windowAlive}) =>
+  return {directTaskPreview: true, summary: plan.summary, tasks: plan.items.map(({task, kind, record, entry, blocks, line, hasReport, windowAlive}) =>
     ({task, kind: !opts.apply && windows === null && record ? null : kind, record, entry, blocks, line, hasReport, windowAlive: opts.apply ? kind === 'live' : windowAlive}))};
 }
 /** Exact arguments and observed task/queue/window identities bind confirmation to this session. No scope can silently grow. */
@@ -2325,7 +2328,7 @@ for (const tool of MCP_TOOLS) {
     if (!confirm) {
       let result: ToolResult;
       if (tool.name === 'new' || tool.name === 'queue') result = await writeTool(deps, tool.name, {task: (scope as {specs: ResolvedSpec[]}).specs.map(s => s.task).join(', ')}, async () => ({ text: `${cheapSpecSummary(ctx, (scope as { specs: ResolvedSpec[] }).specs, tool.name === 'queue').join('\n')}\n${tool.name === 'queue' ? readMcpRequests(ctx.config).filter(r => r.tool === 'queue_rm' && ['pending', 'applying'].includes(r.status) && (scope as {specs: ResolvedSpec[]}).specs.some(s => s.task === r.task)).map(r => `${r.task}: oczekuje queue_rm (request ${r.id}); use replace: true`).join('\n') : ''}\n${effective.replace ? 'replace: true – remove and re-add in one watch step.' : ''}\nBase/overlap, worktrees, capacity and disk checked by watch at accept; errors appear as events.\nBaza/nakładanie, worktree, limity i dysk: watch sprawdzi po przyjęciu; błędy w events_since.\n${tool.name === 'new' ? (watchAlive(ctx.config, ctx.runner.now()) ? 'Start: asynchronous – confirm registers the start; watch validates and opens the window.' : 'WARNING: the watcher is not running (or the queue is disabled); confirm will be refused. Start agentctl watch --tmux.') : ''}\nNot ${tool.name === 'new' ? 'started' : 'queued'} yet. Show this to the user and ask; if they agree, call ${tool.name} again with the same spec and confirm: true.`, executed: false, announce: '' }));
-      else if (tool.name === 'cancel' && (scope as {directTaskPreview?: boolean}).directTaskPreview) result = await writeTool(deps, 'cancel', {}, async () => ({text: `Cancel:\n${(scope as {tasks: {line: string}[]}).tasks.map(t => t.line).join('\n')}\nNot cancelled yet. Watch rechecks the full move chain, queue dependencies and windows at apply time.`, executed: false, announce: ''}));
+      else if (tool.name === 'cancel' && (scope as {directTaskPreview?: boolean}).directTaskPreview) result = await writeTool(deps, 'cancel', {}, async () => ({text: `${(scope as {summary: string[]}).summary.join('\n')}\n\nNot cancelled yet. Show this to the user and ask; if they agree, call cancel again with the same arguments and confirm: true.\nWatch rechecks the full move chain, queue dependencies and windows at apply time.`, executed: false, announce: ''}));
       else if (['cancel', 'resume', 'move', 'set_limits', 'reserve'].includes(tool.name)) result = await observeHostWindows(() => original(deps, args));
       else if (tool.name === 'send') result = await observeHostWindows(() => writeTool(deps, 'send', { task: String(input.task) }, async () => ({
         text: await previewSend(ctx, input as unknown as SendMcpArgs, scope as Awaited<ReturnType<typeof sendScope>>),

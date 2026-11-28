@@ -10,6 +10,7 @@ Regenerate this file with `npm run regression -- --catalog`.
 
 | Bug | Symptom | Scenario | Fixed in | Pre-fix proof |
 | --- | --- | --- | --- | --- |
+| READFAST0269-PREVIEW-COMPAT | Unreleased direct cancellation preview omitted the existing task count, reason and owner confirmation wording. | `tests/cancel-mcp.test.ts` (`the first call only describes; confirm: true cancels`) | 0.26.5 | not proven: Caught before the addendum release: v0.26.4 passes; unreleased 363b8ef fails (addendum-compat-before.log, addendum-compat-release.log). |
 | READFAST0269-PREVIEW | Exact-ID close/cancel previews wait for status, window enumeration or capacity and lose their confirmation token to the MCP deadline. | `tests/readfast0269.test.ts` (`^READFAST0269-PREVIEW:`) | 0.26.5 | fails on v0.26.4 (7 failing of 7) |
 | READFAST0269-CLI | Unreleased deferred MCP acknowledgements also deferred CLI pull marking after a slow filesystem call, allowing an immediate duplicate pull. | `tests/readfast0269.test.ts` (`^READFAST0269-CLI:`) | 0.26.5 | not proven: Introduced before the 0.26.5 tag: v0.26.4 passes; unreleased de499d1 fails with an injected slow lock syscall (cli-before.log, cli-release.log). |
 | READFAST0269-HARNESS | A 69-byte Mac task cache made hashed stdio/release tmux sockets 102 bytes long, so the safety guard refused every long sandbox name. | `tests/harness.test.ts` (`^READFAST0269-HARNESS:`) | 0.26.5 | fails on v0.26.4 (1 failing of 1) |

@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'READFAST0269-PREVIEW-COMPAT', fixedIn: '0.26.5', symptom: 'Unreleased direct cancellation preview omitted the existing task count, reason and owner confirmation wording.', noProof: 'Caught before the addendum release: v0.26.4 passes; unreleased 363b8ef fails (addendum-compat-before.log, addendum-compat-release.log).', scenarios: [s('cancel-mcp.test.ts', 'the first call only describes; confirm: true cancels')] },
   { id: 'READFAST0269-PREVIEW', fixedIn: '0.26.5', symptom: 'Exact-ID close/cancel previews wait for status, window enumeration or capacity and lose their confirmation token to the MCP deadline.', scenarios: [s('readfast0269.test.ts', '^READFAST0269-PREVIEW:')] },
   { id: 'READFAST0269-CLI', fixedIn: '0.26.5', symptom: 'Unreleased deferred MCP acknowledgements also deferred CLI pull marking after a slow filesystem call, allowing an immediate duplicate pull.', noProof: 'Introduced before the 0.26.5 tag: v0.26.4 passes; unreleased de499d1 fails with an injected slow lock syscall (cli-before.log, cli-release.log).', scenarios: [s('readfast0269.test.ts', '^READFAST0269-CLI:')] },
   { id: 'READFAST0269-HARNESS', fixedIn: '0.26.5', symptom: 'A 69-byte Mac task cache made hashed stdio/release tmux sockets 102 bytes long, so the safety guard refused every long sandbox name.', scenarios: [s('harness.test.ts', '^READFAST0269-HARNESS:')] },

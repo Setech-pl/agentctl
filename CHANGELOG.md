@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- Preserve cancellation preview count, reason and owner confirmation wording on the direct path. / Bezpośredni podgląd anulowania zachowuje liczbę zadań, powód i treść prośby o zgodę właściciela.
+
 - READFAST0269-PREVIEW: Exact-ID MCP close/cancel previews read only target state and explicit move links, bound window observation to 250 ms, return the token first and defer heavy validation to watch. / Podgląd close/cancel dla pełnych ID czyta stan wskazanych zadań i ich powiązania move, ogranicza sprawdzanie okien do 250 ms, zwraca token na początku i zostawia ciężką walidację watch.
 
 - READFAST0269-CLI: Keep CLI pull marking synchronous; only MCP may defer acknowledgement to watch. / CLI zapisuje odbiór raportu przed powrotem; tylko MCP może odroczyć potwierdzenie do watch.
