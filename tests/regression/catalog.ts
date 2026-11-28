@@ -26,6 +26,7 @@ export interface BugEntry {
 const s = (file: string, name?: string): Scenario => ({ file, ...(name ? { name } : {}) });
 
 export const BUGS: BugEntry[] = [
+  { id: 'READFAST0269-CLI', fixedIn: '0.26.5', symptom: 'Unreleased deferred MCP acknowledgements also deferred CLI pull marking after a slow filesystem call, allowing an immediate duplicate pull.', noProof: 'Introduced before the 0.26.5 tag: v0.26.4 passes; unreleased de499d1 fails with an injected slow lock syscall (cli-before.log, cli-release.log).', scenarios: [s('readfast0269.test.ts', '^READFAST0269-CLI:')] },
   { id: 'READFAST0269-HARNESS', fixedIn: '0.26.5', symptom: 'A 69-byte Mac task cache made hashed stdio/release tmux sockets 102 bytes long, so the safety guard refused every long sandbox name.', scenarios: [s('harness.test.ts', '^READFAST0269-HARNESS:')] },
   { id: 'READFAST0269-COMPAT', fixedIn: '0.26.5', symptom: 'Unreleased direct report reads bypassed outputs settling, stopped fast WALL publication, and changed missing-report diagnostic wording.', noProof: 'Introduced before the 0.26.5 tag: v0.26.4 passes all three contracts; all three fail on unreleased 2d7b1cd (compat-before.log).', scenarios: [s('fix3.test.ts', '^F2-B4-READ:'), s('wall2-posts.test.ts', '^get_report publishes'), s('production-0174.test.ts', '^P5 displaced')] },
   { id: 'READFAST0269-ACK', fixedIn: '0.26.5', symptom: 'A slow acknowledgement lock syscall can replace a successfully read report with a deadline error.', scenarios: [s('readfast0269.test.ts', '^READFAST0269-ACK:')] },

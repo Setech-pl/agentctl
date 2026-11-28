@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+- READFAST0269-CLI: Keep CLI pull marking synchronous; only MCP may defer acknowledgement to watch. / CLI zapisuje odbiór raportu przed powrotem; tylko MCP może odroczyć potwierdzenie do watch.
+
 - READFAST0269-HARNESS: Keep long task-owned tmux sockets within the limit using a shorter internal directory and an in-sandbox cleanup alias. / Długie ścieżki socketów tmux mieszczą się w limicie dzięki krótszemu katalogowi i aliasowi sprzątania wewnątrz sandboxa.
 
 - READFAST0269 I/O regression counters include bounded report reads. / Liczniki regresji I/O uwzględniają ograniczony odczyt raportów.

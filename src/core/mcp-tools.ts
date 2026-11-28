@@ -277,7 +277,7 @@ async function pullSummaries(ctx: Context, rows: StatusRow[], ack = false): Prom
     if (responseWireBytes(ok(response())) > ctx.config.mcp.maxResponseKb * 1024 - 512 && taken.length > 1) { parts.pop(); taken.pop(); break; }
   }
   for (const row of taken) await deliverReportFields(ctx, findRecord(ctx, row.task), row.reportSignature!, { summary_delivered: new Date(ctx.runner.now()).toISOString() });
-  if (ack) await markPulled(ctx, taken);
+  if (ack) await markPulled(ctx, taken, true);
   return { ...ok(response()), delivered: taken.length };
 }
 
@@ -893,7 +893,7 @@ async function runPullReady(deps: McpDeps, args: { cohort?: string | undefined; 
   if (chosen.length === 0) return ok(noReadyMessage(rows));
   const { text, pulled } = joinReports(chosen, ctx);
   const head = `${pulled.length} new report${pulled.length === 1 ? '' : 's'}; marked as pulled after complete delivery: ${pulled.map(p => p.task).join(', ')}`;
-  return { text: `${head}\n\n${text}\nnext_cursor: ${selection.id}:${offset + chosen.length}; has_more: ${offset + chosen.length < selection.rows.length}`, onDelivered: () => markPulled(ctx, chosen) };
+  return { text: `${head}\n\n${text}\nnext_cursor: ${selection.id}:${offset + chosen.length}; has_more: ${offset + chosen.length < selection.rows.length}`, onDelivered: () => markPulled(ctx, chosen, true) };
 
 }
 

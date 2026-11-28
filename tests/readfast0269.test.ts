@@ -11,6 +11,25 @@ import { taskFile, readTaskRecord } from '../src/core/taskstore.ts';
 import { tryFileLock, taskLock } from '../src/core/file-lock.ts';
 import { DiskRunner, FakeTmux, makeConfig, seedTask, useScratch } from './helpers.ts';
 const scratch = useScratch();
+it('READFAST0269-CLI: CLI pull waits for its acknowledgement after a slow filesystem syscall', async t => {
+  const f = fixture('cli-ack');
+  f.release();
+  const { markPulled } = await import('../src/core/pull.ts');
+  const { reportFingerprint } = await import('../src/core/report-state.ts');
+  const lock = taskLock(taskFile(f.config, 'fast'));
+  const open = fs.openSync;
+  let delayed = false;
+  t.mock.method(fs, 'openSync', (...args: Parameters<typeof fs.openSync>) => {
+    if (!delayed && args[0] === lock) {
+      delayed = true;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+    }
+    return open(...args);
+  });
+  await markPulled(f.ctx, [{task: 'FAST', windowName: 'fast', reportPath: f.record.report, reportSignature: reportFingerprint(f.record.report)} as import('../src/core/status.ts').StatusRow]);
+  assert.ok(delayed);
+  assert.ok(readTaskRecord(f.config, 'fast')?.pulled, 'CLI must persist the acknowledgement before returning');
+});
 const drain = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setImmediate(resolve)); };
 function fixture(name: string, yaml = '', extra: Partial<TaskRecord> = {}) {
   const config = makeConfig(scratch.sub(name), `capacity: {snapshot: false, codex_refresh: false}\n${yaml}`);

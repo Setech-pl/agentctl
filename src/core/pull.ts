@@ -137,12 +137,16 @@ export function joinReports(rows: StatusRow[], ctx?: Context): { text: string; p
 }
 
 /** Write the pull time into TASK.md of each task: `pull --ready` does not hand the report over again. */
-export async function markPulled(ctx: Context, rows: StatusRow[]): Promise<void> {
+export async function markPulled(ctx: Context, rows: StatusRow[], defer = false): Promise<void> {
   for (const row of rows) if (row.reportSignature && reportFingerprint(row.reportPath) !== row.reportSignature) throw new AgentctlError(`${row.task}: report changed during delivery; it remains unread`);
   const when = new Date(ctx.runner.now()).toISOString();
   for (const row of rows) {
     const record = readTaskRecord(ctx.config, row.windowName);
-    if (record) await deliverReportFields(ctx, record, row.reportSignature ?? reportFingerprint(row.reportPath), {pulled: new Date(Math.max(Date.parse(when), Math.ceil(fs.statSync(row.reportPath).mtimeMs))).toISOString()});
+    if (record) {
+      const pulled = new Date(Math.max(Date.parse(when), Math.ceil(fs.statSync(row.reportPath).mtimeMs))).toISOString();
+      if (defer) await deliverReportFields(ctx, record, row.reportSignature ?? reportFingerprint(row.reportPath), {pulled});
+      else await setHeaderField(ctx.runner, taskFile(ctx.config, record.window), 'pulled', pulled);
+    }
   }
 }
 
